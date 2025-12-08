@@ -9,7 +9,7 @@ import plotly.graph_objs as go
 import plotly.io as pio
 from plotly.subplots import make_subplots
 
-from pcell.config import load_config
+from pcell.config import AppConfig
 from pcell.curation import interactive_select_units, load_traces
 from pcell.filters import butter_lowpass_xr
 
@@ -32,13 +32,6 @@ def _load_template(name: str) -> str:
     default="C",
     show_default=True,
     help="Name of the traces zarr group to load (e.g. 'C' or 'C_lp').",
-)
-@click.option(
-    "--var-name",
-    type=str,
-    default="C",
-    show_default=True,
-    help="Variable name inside the Dataset (if any) to use for traces.",
 )
 @click.option(
     "--fps",
@@ -64,7 +57,6 @@ def _load_template(name: str) -> str:
 def curate_traces(
     minian_path: Path,
     trace_name: str,
-    var_name: str,
     fps: float,
     out_file: Path,
     max_units: int | None,
@@ -74,7 +66,7 @@ def curate_traces(
     minian_path = minian_path.resolve()
     click.echo(f"Loading traces for curation from: {minian_path}")
 
-    C = load_traces(minian_path, trace_name=trace_name, var_name=var_name)
+    C = load_traces(minian_path, trace_name=trace_name)
     click.echo(
         f"Traces loaded: shape={tuple(C.shape)}, dims={C.dims}. " "Launching interactive viewer..."
     )
@@ -105,13 +97,6 @@ def curate_traces(
     default="C",
     show_default=True,
     help="Name of the traces zarr group to load (e.g. 'C' or 'C_lp').",
-)
-@click.option(
-    "--var-name",
-    type=str,
-    default="C",
-    show_default=True,
-    help="Variable name inside the Dataset (if any) to use for traces.",
 )
 @click.option(
     "--fps",
@@ -145,7 +130,6 @@ def curate(
     mode: str,
     minian_path: Path | None,
     trace_name: str,
-    var_name: str,
     fps: float,
     max_units: int | None,
     output_prefix: str | None,
@@ -160,10 +144,9 @@ def curate(
 
     # Optional YAML config overrides basic data/LFP settings
     if config is not None:
-        cfg = load_config(config)
+        cfg = AppConfig.from_yaml(config)
         minian_path = cfg.curation.data.minian_path
         trace_name = cfg.curation.data.trace_name
-        var_name = cfg.curation.data.var_name
         fps = cfg.curation.data.fps
         if cfg.curation.max_units is not None:
             max_units = min(max_units, cfg.curation.max_units)
@@ -181,7 +164,7 @@ def curate(
     minian_path = minian_path.resolve()
     click.echo(f"Loading traces from: {minian_path}")
 
-    C = load_traces(minian_path, trace_name=trace_name, var_name=var_name)
+    C = load_traces(minian_path, trace_name=trace_name)
 
     # Optional low-pass filter
     if cfg is not None and cfg.curation.lpf.enabled:

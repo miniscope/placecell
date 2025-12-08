@@ -7,11 +7,11 @@ Configuration models for pcell, loaded from YAML.
 
 from pathlib import Path
 
-import yaml
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import Field
+from mio.models import MiniscopeConfig
+from mio.models.mixins import ConfigYAMLMixin
 
-
-class LpfConfig(BaseModel):
+class LpfConfig(MiniscopeConfig, ConfigYAMLMixin):
     """Low-pass filter configuration."""
 
     enabled: bool = Field(
@@ -29,7 +29,7 @@ class LpfConfig(BaseModel):
     )
 
 
-class DataConfig(BaseModel):
+class DataConfig(MiniscopeConfig, ConfigYAMLMixin):
     """Source data configuration (Minian output)."""
 
     minian_path: Path = Field(
@@ -40,17 +40,13 @@ class DataConfig(BaseModel):
         "C",
         description="Base name of the zarr group (e.g. 'C' or 'C_lp').",
     )
-    var_name: str = Field(
-        "C",
-        description="Variable name inside the Dataset, if any.",
-    )
     fps: float = Field(
         20.0,
         description="Sampling rate in frames per second.",
     )
 
 
-class CurationConfig(BaseModel):
+class CurationConfig(MiniscopeConfig, ConfigYAMLMixin):
     """Curation / visualization configuration."""
 
     data: DataConfig
@@ -66,7 +62,7 @@ class CurationConfig(BaseModel):
     )
 
 
-class AnalysisConfig(BaseModel):
+class AnalysisConfig(MiniscopeConfig, ConfigYAMLMixin):
     """Analysis / place-field configuration."""
 
     label: str = Field(
@@ -82,10 +78,6 @@ class AnalysisConfig(BaseModel):
         50.0,
         description="Minimum running speed to keep spikes (pixels/s or cm/s).",
     )
-    cm_per_pixel: float | None = Field(
-        None,
-        description="Pixels-to-cm conversion; when set, thresholds are interpreted in cm/s.",
-    )
     s_threshold: float = Field(
         0.0,
         description="Minimum spike amplitude s to visualize in place browser.",
@@ -98,22 +90,10 @@ class AnalysisConfig(BaseModel):
     )
 
 
-class AppConfig(BaseModel):
+class AppConfig(MiniscopeConfig, ConfigYAMLMixin):
     """Top-level application configuration."""
 
     curation: CurationConfig
     analysis: AnalysisConfig | None = None
 
 
-def load_config(path: Path) -> AppConfig:
-    """Load an AppConfig from a YAML file."""
-
-    path = path.expanduser().resolve()
-    with path.open("r", encoding="utf-8") as f:
-        raw = yaml.safe_load(f) or {}
-
-    try:
-        cfg = AppConfig.model_validate(raw)
-    except ValidationError as exc:  # pragma: no cover - runtime validation
-        raise ValueError(f"Invalid config file {path}:\n{exc}") from exc
-    return cfg

@@ -11,7 +11,7 @@ import pandas as pd
 import xarray as xr
 
 from pcell.analysis import build_spike_place_dataframe
-from pcell.config import load_config
+from pcell.config import AppConfig
 
 
 class PlaceBrowserData(NamedTuple):
@@ -182,7 +182,7 @@ def prepare_place_browser_data(
         try:
             # Try to load YrA first (most raw - spatial components on raw video)
             try:
-                YrA = load_traces(minian_path, trace_name="YrA", var_name="YrA")
+                YrA = load_traces(minian_path, trace_name="YrA")
                 has_yrA = True
                 click.echo("Loaded YrA traces (raw fluorescence)")
             except Exception:
@@ -190,10 +190,10 @@ def prepare_place_browser_data(
                 has_yrA = False
 
             # Load raw C
-            C_raw = load_traces(minian_path, trace_name=trace_name, var_name="C")
+            C_raw = load_traces(minian_path, trace_name=trace_name)
             # Try to load filtered C, fall back to applying filter if not found
             try:
-                C_lp = load_traces(minian_path, trace_name=trace_name_lp, var_name="C")
+                C_lp = load_traces(minian_path, trace_name=trace_name_lp)
             except Exception:
                 from pcell.filters import butter_lowpass_xr
 
@@ -466,7 +466,7 @@ def analyze(config: Path) -> None:
 
     import subprocess
 
-    cfg = load_config(config)
+    cfg = AppConfig.from_yaml(config)
     if cfg.analysis is None:
         raise click.ClickException("Config file must include an 'analysis' section.")
 
@@ -498,7 +498,7 @@ def analyze(config: Path) -> None:
         bodypart="LED",
         behavior_fps=cfg.analysis.behavior_fps,
         speed_threshold=cfg.analysis.speed_threshold,
-        cm_per_pixel=cfg.analysis.cm_per_pixel,
+        cm_per_pixel=None,
         speed_window_frames=cfg.analysis.speed_window_frames,
         out_file=Path(f"export/spike_place_{label}.csv"),
     )
@@ -522,5 +522,5 @@ def analyze(config: Path) -> None:
         neural_fps=cfg.curation.data.fps,
         output_prefix=f"{label}_place_browser",
         deconv_zarr=Path(f"export/{label}_oasis_deconv.zarr"),
-        cm_per_pixel=cfg.analysis.cm_per_pixel,
+        cm_per_pixel=None,
     )

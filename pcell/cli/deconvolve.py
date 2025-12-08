@@ -8,7 +8,7 @@ import numpy as np
 import xarray as xr
 from tqdm import tqdm
 
-from pcell.config import load_config
+from pcell.config import AppConfig
 from pcell.curation import load_traces
 
 
@@ -33,13 +33,6 @@ def _parse_g(ctx, param, value: Tuple[float, float]) -> Tuple[float, float]:
     default="C",
     show_default=True,
     help="Name of the traces zarr group to load (e.g. 'C' or 'C_lp').",
-)
-@click.option(
-    "--var-name",
-    type=str,
-    default="C",
-    show_default=True,
-    help="Variable name inside the Dataset (if any) to use for traces.",
 )
 @click.option(
     "--fps",
@@ -116,7 +109,6 @@ def _parse_g(ctx, param, value: Tuple[float, float]) -> Tuple[float, float]:
 def deconvolve(
     minian_path: Path | None,
     trace_name: str,
-    var_name: str,
     fps: float,
     g: Tuple[float, float] | None,
     s_min: float,
@@ -144,10 +136,9 @@ def deconvolve(
 
     # Optional YAML config
     if config is not None:
-        cfg = load_config(config)
+        cfg = AppConfig.from_yaml(config)
         minian_path = cfg.curation.data.minian_path
         trace_name = cfg.curation.data.trace_name
-        var_name = cfg.curation.data.var_name
         fps = cfg.curation.data.fps
         if cfg.curation.max_units is not None:
             max_units = (
@@ -171,7 +162,7 @@ def deconvolve(
 
     # Use the same loader as visualization, to handle Dataset/DataArray nicely.
     click.echo(f"Loading traces from: {minian_path / (trace_name + '.zarr')}")
-    C_da = load_traces(minian_path, trace_name=trace_name, var_name=var_name)
+    C_da = load_traces(minian_path, trace_name=trace_name)
 
     all_unit_ids = list(map(int, C_da["unit_id"].values))
 

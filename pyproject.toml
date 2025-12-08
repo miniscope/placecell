@@ -2,6 +2,9 @@
 name = "pcell"
 version = "0.1.0"
 description = "Package for analyzing place cells"
+license = {text = "AGPL-3.0"}
+readme = "README.md"
+
 requires-python = ">=3.11"
 dependencies = [
     "numpy>=1.24.0",
@@ -15,8 +18,44 @@ dependencies = [
     "pyyaml>=6.0.0",
     "oasis-deconv>=0.1.0",
     "tqdm>=4.65.0",
+    "mio>=0.8.1",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "black>=24.1.1",
+    "ruff>=0.2.0",
+    "pre-commit>=3.7.1",
+]
+tests = [
+    "pytest>=8.2.2",
+    "pytest-cov>=7.0.0",
+    "pytest-timeout>=2.3.1",
+]
+docs = [
+    "sphinx>=6.2.1",
+    "sphinx-click>=6.0.0",
+    "furo>2023.07.26",
+    "myst-parser>3.0.0",
+    "autodoc-pydantic>=2.0.1",
+]
+all = [
+    "pcell[dev,tests,docs]",
+]
+
+[project.scripts]
+pcell = "pcell.cli:pcell"
+
+[tool.pdm.scripts]
+test = "pytest"
+lint.composite = [
+    "ruff check",
+    "black pcell --diff"
+]
+format.composite = [
+    "black pcell",
+    "ruff check --fix",
+]
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -24,6 +63,48 @@ build-backend = "hatchling.build"
 [tool.hatchling.build]
 packages = ["pcell"]
 
-[project.scripts]
-pcell = "pcell.cli:pcell"
+[tool.ruff]
+target-version = "py311"
+include = ["pcell/**/*.py", "pyproject.toml"]
+exclude = ["docs", "tests", "pcell/assets"]
+line-length = 100
 
+[tool.ruff.lint]
+select = [
+    # pycodestyle
+    "E",
+    # Pyflakes
+    "F",
+    # pyupgrade
+    "UP",
+    # flake8-bugbear
+    "B",
+    # flake8-simplify
+    "SIM",
+    # isort
+    "I",
+    # annotations
+    "ANN",
+    # no debugger
+    "T10",
+    # pydocstyle
+    "D100", "D101", "D102", "D103", "D104", "D106", "D107",
+    "D207", "D208",
+    "D210", "D211",
+    "D419",
+    # snake case function name
+    "N802"
+]
+ignore = [
+    "ANN101", "ANN102", "ANN401", "ANN204",
+    "B905",
+    "UP006", "UP035",
+    "UP007", "UP038",
+    "D107",
+]
+fixable = ["ALL"]
+
+[tool.black]
+target-version = ['py311', 'py312']
+include = "pcell/.*\\.py$"
+line-length = 100

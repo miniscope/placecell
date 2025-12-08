@@ -11,7 +11,6 @@ import xarray as xr
 def load_traces(
     minian_path: Path,
     trace_name: str = "C",
-    var_name: str = "C",
 ) -> xr.DataArray:
     """Load traces from a Minian-style zarr store as a DataArray.
 
@@ -21,19 +20,18 @@ def load_traces(
         Directory containing ``<trace_name>.zarr``.
     trace_name:
         Base name of the zarr group (e.g. ``"C"`` or ``"C_lp"``).
-    var_name:
-        If the zarr contains a Dataset, the variable to extract (default: ``"C"``).
+        Also used as the variable name if the zarr contains a Dataset.
     """
 
     zarr_path = minian_path / f"{trace_name}.zarr"
     ds_or_da = xr.open_zarr(zarr_path)
 
     if isinstance(ds_or_da, xr.Dataset):
-        if var_name not in ds_or_da:
+        if trace_name not in ds_or_da:
             raise KeyError(
-                f"Variable {var_name!r} not found in dataset; available: {list(ds_or_da.data_vars)}"
+                f"Variable {trace_name!r} not found in dataset; available: {list(ds_or_da.data_vars)}"
             )
-        C = ds_or_da[var_name]
+        C = ds_or_da[trace_name]
     else:
         C = ds_or_da
 
