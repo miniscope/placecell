@@ -17,18 +17,34 @@ def _load_behavior_xy(csv_path: Path, bodypart: str) -> pd.DataFrame:
         Body part name to extract (e.g. 'LED').
     """
 
+    # Read CSV with multi-index header (scorer, bodypart, coord)
     df = pd.read_csv(csv_path, header=[0, 1, 2])
-    scorer = df.columns[1][0]
+
+    scorer = None
+    for col in df.columns[1:]:
+        if col[1] == bodypart and col[2] == "x":
+            scorer = col[0]
+            break
+
+    if scorer is None:
+        available_bodyparts = {col[1] for col in df.columns[1:]}
+        raise ValueError(
+            f"Bodypart '{bodypart}' not found in CSV. "
+            f"Available bodyparts: {sorted(available_bodyparts)}"
+        )
+
     x = df[(scorer, bodypart, "x")]
     y = df[(scorer, bodypart, "y")]
-    out = pd.DataFrame({"frame_index": df.index, "x": x, "y": y})
+    frame_index = df.iloc[:, 0]
+
+    out = pd.DataFrame({"frame_index": frame_index, "x": x, "y": y})
     return out
 
 
 def compute_behavior_speed(
     positions: pd.DataFrame,
     timestamps: pd.DataFrame,
-    window_frames: int = 5,
+    window_frames: int = 10,
 ) -> pd.DataFrame:
     """Compute speed from behavior positions and timestamps using a window.
 
@@ -38,13 +54,12 @@ def compute_behavior_speed(
     Parameters
     ----------
     positions:
-        DataFrame with columns ``frame_index``, ``x``, ``y`` in pixels.
+        DataFrame with columns `frame_index`, `x`, `y` in pixels.
     timestamps:
-        DataFrame with columns ``frame_index``, ``unix_time`` in seconds.
+        DataFrame with columns `frame_index`, `unix_time` in seconds.
     window_frames:
         Number of frames to use for speed calculation. Speed is computed
         as distance traveled over this window divided by time elapsed.
-        Default is 5 frames (0.25s at 20 fps).
 
     Returns
     -------
@@ -53,8 +68,6 @@ def compute_behavior_speed(
 
     df = positions.merge(timestamps, on="frame_index", how="inner").sort_values("frame_index")
 
-    # Calculate distance and time over the window
-    # For each frame, look ahead by window_frames
     x_vals = df["x"].values
     y_vals = df["y"].values
     t_vals = df["unix_time"].values
@@ -88,40 +101,57 @@ def build_spike_place_dataframe(
     neural_timestamp_path: Path,
     behavior_position_path: Path,
     behavior_timestamp_path: Path,
-    *,
     bodypart: str,
-    speed_threshold: float = 50.0,
-    use_neural_last_timestamp: bool = True,
-    speed_window_frames: int = 5,
     behavior_fps: float,
+    speed_threshold: float = 50.0,
+    speed_window_frames: int = 5,
+    use_neural_last_timestamp: bool = True,
 ) -> pd.DataFrame:
     """Match spikes to behavior positions for place-cell analysis.
 
-    This:
-    - Reads ``spike_index.csv`` (unit_id, frame, s)
-    - Reads neural frame timestamps (``timestamp.csv``)
-    - Reads behavior positions + timestamps
+    This function:
+    - Reads spike index CSV (columns: unit_id, frame, s)
+    - Reads neural frame timestamps CSV (columns: frame, timestamp_first, timestamp_last)
+    - Reads behavior position CSV (DeepLabCut format with multi-index header)
+    - Reads behavior timestamp CSV (columns: frame_index, unix_time)
     - For each spike, finds the closest behavior frame in time
     - Filters out matches where timestamp difference exceeds threshold (0.5 / behavior_fps)
-    - Filters out samples where running speed is below ``speed_threshold``
+    - Filters out samples where running speed is below `speed_threshold`
 
     Parameters
     ----------
+    spike_index_path:
+        Path to spike index CSV file (columns: unit_id, frame, s).
+    neural_timestamp_path:
+        Path to neural timestamp CSV file (columns: frame, timestamp_first, timestamp_last).
+    behavior_position_path:
+        Path to behavior position CSV file (DeepLabCut format with multi-index header).
+    behavior_timestamp_path:
+        Path to behavior timestamp CSV file (columns: frame_index, unix_time).
+    bodypart:
+        Body part name to use for position tracking (e.g. 'LED').
     behavior_fps:
         Frames per second for behavior data. Required. Used to set timestamp
         difference threshold (0.5 / behavior_fps) for matching spikes to behavior frames.
+    speed_threshold:
+        Minimum running speed to keep spikes (pixels/s).
+    speed_window_frames:
+        Number of frames to use for speed calculation window.
+    use_neural_last_timestamp:
+        Whether to use the last neural timestamp for each frame.
 
     Returns
     -------
-    DataFrame with at least:
-      - unit_id
-      - frame (neural)
-      - s
-      - neural_time
-      - beh_frame_index
-      - beh_time
-      - x, y
-      - speed
+    DataFrame with columns:
+      - unit_id: Unit identifier
+      - frame: Neural frame number
+      - s: Spike amplitude
+      - neural_time: Neural timestamp (seconds)
+      - beh_frame_index: Behavior frame index
+      - beh_time: Behavior timestamp (seconds, unix time)
+      - x: X position (pixels)
+      - y: Y position (pixels)
+      - speed: Running speed (pixels/s)
     """
 
     spike_df = pd.read_csv(spike_index_path)
@@ -141,7 +171,6 @@ def build_spike_place_dataframe(
         window_frames=speed_window_frames,
     )
 
-    # Rename columns for clarity
     beh = beh.rename(
         columns={
             "frame_index": "beh_frame_index",

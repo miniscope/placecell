@@ -140,9 +140,7 @@ def deconvolve(
         trace_name = cfg.neural.trace_name
         fps = cfg.neural.data.fps
         if cfg.neural.max_units is not None:
-            max_units = (
-                min(max_units, cfg.neural.max_units) if max_units else cfg.neural.max_units
-            )
+            max_units = min(max_units, cfg.neural.max_units) if max_units else cfg.neural.max_units
     else:
         cfg = None
 

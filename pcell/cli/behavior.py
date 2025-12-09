@@ -4,7 +4,7 @@ from pathlib import Path
 
 import click
 
-from pcell.config import BehaviorConfig, AppConfig
+from pcell.config import AppConfig, BehaviorConfig
 from pcell.visualization import plot_trajectory
 
 try:

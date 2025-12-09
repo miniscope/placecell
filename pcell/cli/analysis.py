@@ -10,6 +10,11 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+try:
+    import matplotlib.pyplot as plt
+except ImportError:
+    plt = None
+
 from pcell.analysis import build_spike_place_dataframe
 from pcell.cli.utils import load_template
 from pcell.config import AppConfig
@@ -332,8 +337,16 @@ def generate_place_browser_html(
     s_threshold: float,
     speed_threshold: float,
     output_prefix: str,
+    max_proj_footprints_imgs: dict[int, str] | None = None,
 ) -> Path:
-    """Generate place browser HTML from prepared data."""
+    """Generate place browser HTML from prepared data.
+
+    Parameters
+    ----------
+    max_proj_footprints_imgs:
+        Dictionary mapping unit_id to base64-encoded image data URL for max projection
+        and footprints plot. If None or empty, the image section will be omitted.
+    """
 
     unit_ids_json = json.dumps(data.unit_ids)
     x_full_json = json.dumps(data.x_full)
@@ -346,9 +359,6 @@ def generate_place_browser_html(
     counts_below_json = json.dumps(data.counts_below)
     trace_t_json = json.dumps(data.trace_t)
     trace_ys_raw_json = json.dumps(data.trace_ys_raw)
-    trace_ys_lp_json = json.dumps(data.trace_ys_lp)
-    trace_ys_yrA_json = json.dumps(data.trace_ys_yrA)
-    trace_ys_S_json = json.dumps(data.trace_ys_S)
     spike_ts_trace_above_json = json.dumps(data.spike_ts_trace_above)
     spike_y_trace_above_json = json.dumps(data.spike_y_trace_above)
     spike_ts_trace_below_json = json.dumps(data.spike_ts_trace_below)
@@ -372,15 +382,14 @@ def generate_place_browser_html(
         counts_below_json=counts_below_json,
         trace_t_json=trace_t_json,
         trace_ys_raw_json=trace_ys_raw_json,
-        trace_ys_lp_json=trace_ys_lp_json,
-        trace_ys_yrA_json=trace_ys_yrA_json,
-        trace_ys_S_json=trace_ys_S_json,
-        has_yrA=json.dumps(data.has_yrA),
-        has_S=json.dumps(data.has_S),
         spike_ts_trace_above_json=spike_ts_trace_above_json,
         spike_y_trace_above_json=spike_y_trace_above_json,
         spike_ts_trace_below_json=spike_ts_trace_below_json,
         spike_y_trace_below_json=spike_y_trace_below_json,
+        max_proj_footprints_imgs_json=json.dumps(max_proj_footprints_imgs or {}),
+        has_max_proj_footprints=json.dumps(
+            max_proj_footprints_imgs is not None and len(max_proj_footprints_imgs) > 0
+        ),
     )
 
     out_html = Path("export") / f"{output_prefix}.html"
@@ -408,6 +417,7 @@ def _run_browse_place(
     neural_fps: float,
     output_prefix: str,
     deconv_zarr: Path | None,
+    curated_units: list[int] | None = None,
 ) -> None:
     """Internal function: Browser for place fields.
 
@@ -432,11 +442,40 @@ def _run_browse_place(
         deconv_zarr=deconv_zarr,
     )
 
+    # Generate max projection and footprints images for each unit as base64
+    max_proj_footprints_imgs = {}
+    if neural_path is not None:
+        try:
+            import base64
+            import io
+
+            from pcell.visualization import plot_max_projection_with_unit_footprint
+
+            # Generate image for each unit in the data
+            for unit_id in data.unit_ids:
+                try:
+                    fig = plot_max_projection_with_unit_footprint(
+                        neural_path=neural_path,
+                        unit_id=unit_id,
+                    )
+                    buf = io.BytesIO()
+                    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+                    plt.close(fig)
+                    buf.seek(0)
+                    img_data = base64.b64encode(buf.read()).decode("utf-8")
+                    max_proj_footprints_imgs[unit_id] = f"data:image/png;base64,{img_data}"
+                except Exception:
+                    # Skip units that can't be visualized
+                    continue
+        except Exception as exc:
+            click.echo(f"Warning: could not generate max projection images: {exc}")
+
     out_html = generate_place_browser_html(
         data=data,
         s_threshold=s_threshold,
         speed_threshold=speed_threshold,
         output_prefix=output_prefix,
+        max_proj_footprints_imgs=max_proj_footprints_imgs,
     )
 
     click.echo(f"Wrote place browser HTML to: {out_html}")
@@ -559,6 +598,20 @@ def analyze(
 
     # 3) Place browser (internal function)
     click.echo("=== Place browser ===")
+    # Try to load curated units if available
+    curated_units_file = out_dir / "curated_units.txt"
+    curated_units = None
+    if curated_units_file.exists():
+        try:
+            curated_array = np.loadtxt(curated_units_file, dtype=int)
+            if curated_array.ndim == 0:
+                curated_units = [int(curated_array)]
+            else:
+                curated_units = [int(uid) for uid in curated_array.tolist()]
+            click.echo(f"Using {len(curated_units)} curated units for visualization")
+        except Exception as exc:
+            click.echo(f"Warning: could not load curated units: {exc}")
+
     _run_browse_place(
         spike_place=out_dir / f"spike_place_{label}.csv",
         spike_index=out_dir / f"spike_index_{label}.csv",
@@ -576,4 +629,5 @@ def analyze(
         neural_fps=cfg.neural.data.fps,
         output_prefix=f"{label}_place_browser",
         deconv_zarr=out_dir / f"{label}_oasis_deconv.zarr",
+        curated_units=curated_units,
     )

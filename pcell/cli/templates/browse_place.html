@@ -10,6 +10,10 @@
       #status {{ margin-left: 0.5rem; font-size: 0.9rem; color: #444; }}
       select {{ min-width: 120px; }}
       button {{ padding: 0.3rem 0.7rem; }}
+      #place-container {{ display: flex; gap: 1rem; width: 100%; max-width: 1200px; }}
+      #plot_place {{ flex: 1; min-width: 0; width: 600px; height: 600px; }}
+      #max-proj-container {{ flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; }}
+      #max-proj-img {{ width: 400px; height: auto; }}
     </style>
   </head>
   <body>
@@ -23,8 +27,13 @@
       </label>
       <span id="status"></span>
     </div>
+    <div id="place-container">
+      <div id="plot_place"></div>
+      <div id="max-proj-container" style="display: none;">
+        <img id="max-proj-img" src="" alt="Max projection with spatial footprints" />
+      </div>
+    </div>
     <div id="plot_trace" style="width: 100%; max-width: 1200px; height: 280px;"></div>
-    <div id="plot_place" style="width: 100%; max-width: 1200px; height: 500px;"></div>
     <script>
       const unitIds = {unit_ids_json};
       const x_full = {x_full_json};
@@ -37,17 +46,21 @@
       const countsBelow = {counts_below_json};
       const traceT = {trace_t_json};
       const traceYsRaw = {trace_ys_raw_json};
-      const traceYsLp = {trace_ys_lp_json};
-      const traceYsYrA = {trace_ys_yrA_json};
-      const traceYsS = {trace_ys_S_json};
-      const hasYrA = {has_yrA};
-      const hasS = {has_S};
       const speedThreshold = {speed_threshold};
       const speedUnits = '{speed_units}';
+      const sThreshold = {s_threshold};
       const spikeTsTraceAbove = {spike_ts_trace_above_json};
       const spikeYTraceAbove = {spike_y_trace_above_json};
       const spikeTsTraceBelow = {spike_ts_trace_below_json};
       const spikeYTraceBelow = {spike_y_trace_below_json};
+      const hasMaxProjFootprints = {has_max_proj_footprints};
+      const maxProjFootprintsImgs = {max_proj_footprints_imgs_json};
+
+      // Show max projection image if available
+      if (hasMaxProjFootprints && Object.keys(maxProjFootprintsImgs).length > 0) {{
+        const container = document.getElementById('max-proj-container');
+        container.style.display = 'block';
+      }}
 
       const hasTraces = traceT.length > 0 && traceYsRaw.length === unitIds.length;
 
@@ -92,125 +105,64 @@
           mode: 'markers',
           name: 'spikes (speed < ' + speedThreshold + ' ' + speedUnits + ')',
           marker: {{ size: 6, color: 'orange', opacity: 0.7 }},
+          visible: 'legendonly'
         }};
 
-        const dataPlace = [
-          traj,
-          spikesAbove,
-          {{
-            x: xsBelow,
-            y: ysBelow,
-            mode: 'markers',
-            name: 'spikes (speed < ' + speedThreshold + ' ' + speedUnits + ')',
-            marker: {{ size: 6, color: 'orange', opacity: 0.7 }},
-            visible: 'legendonly'
-          }}
-        ];
+        const dataPlace = [traj, spikesAbove, spikesBelow];
         const totalSpikes = countsAbove[idx] + countsBelow[idx];
+        const paramString = 's ≥ ' + sThreshold + ', speed threshold: ' + speedThreshold + ' ' + speedUnits;
         const layoutPlace = {{
           title: 'unit ' + uid + ' (above: ' + countsAbove[idx] + ', below: ' + countsBelow[idx] + ', total: ' + totalSpikes + ')',
           xaxis: {{ title: 'X' }},
           yaxis: {{ title: 'Y', scaleanchor: 'x', scaleratio: 1 }},
-          margin: {{ l: 60, r: 20, t: 40, b: 50 }},
-          showlegend: true,
+          margin: {{ l: 60, r: 20, t: 40, b: 100 }},
+          showlegend: false,
+          annotations: [{{
+            text: paramString,
+            xref: 'paper',
+            yref: 'paper',
+            x: 0.5,
+            y: -0.15,
+            xanchor: 'center',
+            yanchor: 'top',
+            showarrow: false,
+            font: {{ size: 12 }}
+          }}],
         }};
 
         Plotly.newPlot('plot_place', dataPlace, layoutPlace, {{responsive: true}});
 
         if (hasTraces) {{
           const yRaw = traceYsRaw[idx];
-          const yLp = traceYsLp[idx];
-          const yYrA = hasYrA && traceYsYrA[idx] ? traceYsYrA[idx] : null;
-          const yS = hasS && traceYsS[idx] ? traceYsS[idx] : null;
           const stsAbove = spikeTsTraceAbove[idx] || [];
           const syAbove = spikeYTraceAbove[idx] || [];
           const stsBelow = spikeTsTraceBelow[idx] || [];
           const syBelow = spikeYTraceBelow[idx] || [];
 
-          // Find min/max of C trace for scaling S pulses
-          const yMin = Math.min(...yRaw);
-          const yMax = Math.max(...yRaw);
-          const yRange = yMax - yMin;
-          const sPulseHeight = yRange * 0.05;  // 5% of trace height
-          const sPulseBase = yMin - sPulseHeight * 2;  // Position pulses below trace
-
-          const dataTrace = [];
-          
-          // Add YrA if available (hidden by default)
-          if (yYrA) {{
-            dataTrace.push({{
+          const dataTrace = [
+            {{
               x: traceT,
-              y: yYrA,
+              y: yRaw,
               mode: 'lines',
-              name: 'YrA',
-              line: {{ color: 'purple', width: 1 }},
+              name: 'C',
+              line: {{ color: 'blue', width: 1 }},
+            }},
+            {{
+              x: stsAbove,
+              y: syAbove,
+              mode: 'markers',
+              name: 'spikes (speed ≥ ' + speedThreshold + ' ' + speedUnits + ')',
+              marker: {{ size: 6, color: 'red' }},
+            }},
+            {{
+              x: stsBelow,
+              y: syBelow,
+              mode: 'markers',
+              name: 'spikes (speed < ' + speedThreshold + ' ' + speedUnits + ')',
+              marker: {{ size: 6, color: 'orange' }},
               visible: 'legendonly'
-            }});
-          }}
-          
-          // Add C trace (visible by default)
-          dataTrace.push({{
-            x: traceT,
-            y: yRaw,
-            mode: 'lines',
-            name: 'C',
-            line: {{ color: 'blue', width: 1 }},
-            visible: true
-          }});
-          
-          // Add filtered C (hidden by default)
-          dataTrace.push({{
-            x: traceT,
-            y: yLp,
-            mode: 'lines',
-            name: 'C (LPF)',
-            line: {{ color: 'green', width: 1.5 }},
-            visible: 'legendonly'
-          }});
-          
-          // Add S as minimized pulses at bottom (visible by default)
-          if (yS) {{
-            // Create vertical line segments for each spike
-            const sX = [];
-            const sY = [];
-            for (let i = 0; i < traceT.length; i++) {{
-              if (yS[i] > 0) {{
-                const t = traceT[i];
-                // Vertical line from base to base + pulse height scaled by S value
-                const pulseHeight = sPulseHeight * (yS[i] / Math.max(...yS));
-                sX.push(t, t, null);
-                sY.push(sPulseBase, sPulseBase + pulseHeight, null);
-              }}
             }}
-            dataTrace.push({{
-              x: sX,
-              y: sY,
-              mode: 'lines',
-              name: 'S',
-              line: {{ color: 'red', width: 1 }},
-              visible: true
-            }});
-          }}
-          
-          // Add spikes above threshold (visible by default)
-          dataTrace.push({{
-            x: stsAbove,
-            y: syAbove,
-            mode: 'markers',
-            name: 'spikes (speed ≥ ' + speedThreshold + ' ' + speedUnits + ')',
-            marker: {{ size: 6, color: 'red' }},
-            visible: true
-          }});
-          
-          // Add spikes below threshold (hidden by default)
-          dataTrace.push({{
-            x: stsBelow,
-            y: syBelow,
-            mode: 'markers',
-            name: 'spikes (speed < ' + speedThreshold + ' ' + speedUnits + ')',
-            marker: {{ size: 6, color: 'orange' }},
-            visible: 'legendonly'
-          }});
+          ];
           
           const layoutTrace = {{
             title: 'unit ' + uid + ' trace',
@@ -225,6 +177,14 @@
         }}
         unitSelect.value = String(idx);
         statusEl.textContent = 'Unit ' + uid + ' (' + (idx + 1) + '/' + unitIds.length + ')';
+
+        // Update max projection image if available
+        if (hasMaxProjFootprints && maxProjFootprintsImgs[uid]) {{
+          const img = document.getElementById('max-proj-img');
+          if (img) {{
+            img.src = maxProjFootprintsImgs[uid];
+          }}
+        }}
       }}
 
       document.getElementById('prev-btn').addEventListener('click', () => {{
