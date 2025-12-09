@@ -1,4 +1,4 @@
-"""Event detection and kinetics utilities derived from ``WL25_oasis.ipynb``.
+"""Event detection and kinetics utilities derived Marcel's OASIS notebook.
 
 These helpers are factored out so they can be reused from scripts and notebooks.
 """
@@ -148,8 +148,7 @@ def measure_event_kinetics(
     """
     Measure rise time (10–90%) and decay time constant τ for one event window.
 
-    This is a refactored version of ``measure_event_kinetics`` from
-    ``WL25_oasis.ipynb``.
+    This is a refactored version of ``measure_event_kinetics`` from Marcel's OASIS notebook.
 
     Parameters
     ----------

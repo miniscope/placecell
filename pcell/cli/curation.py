@@ -55,7 +55,7 @@ def _load_template(name: str) -> str:
     help="Optional limit on number of units to review.",
 )
 def curate_traces(
-    minian_path: Path,
+    neural_path: Path,
     trace_name: str,
     fps: float,
     out_file: Path,
@@ -63,10 +63,10 @@ def curate_traces(
 ) -> None:
     """Interactively view traces and write kept unit IDs to a text file."""
 
-    minian_path = minian_path.resolve()
-    click.echo(f"Loading traces for curation from: {minian_path}")
+    neural_path = neural_path.resolve()
+    click.echo(f"Loading traces for curation from: {neural_path}")
 
-    C = load_traces(minian_path, trace_name=trace_name)
+    C = load_traces(neural_path, trace_name=trace_name)
     click.echo(
         f"Traces loaded: shape={tuple(C.shape)}, dims={C.dims}. " "Launching interactive viewer..."
     )
@@ -84,12 +84,10 @@ def curate_traces(
     help="Curation mode: 'show' displays many traces with checkboxes, 'browse' shows one at a time.",
 )
 @click.option(
-    "--minian-path",
+    "--neural-path",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
-    default=None,
-    show_default=False,
-    help="Minian dataset directory (folder containing C.zarr). "
-    "If omitted, must be provided by --config or will be prompted.",
+    required=True,
+    help="Directory containing neural data (C.zarr).",
 )
 @click.option(
     "--trace-name",
@@ -128,7 +126,7 @@ def curate_traces(
 )
 def curate(
     mode: str,
-    minian_path: Path | None,
+    neural_path: Path,
     trace_name: str,
     fps: float,
     max_units: int | None,
@@ -145,7 +143,6 @@ def curate(
     # Optional YAML config overrides basic data/LFP settings
     if config is not None:
         cfg = AppConfig.from_yaml(config)
-        minian_path = cfg.curation.data.minian_path
         trace_name = cfg.curation.data.trace_name
         fps = cfg.curation.data.fps
         if cfg.curation.max_units is not None:
@@ -153,18 +150,13 @@ def curate(
     else:
         cfg = None
 
-    if minian_path is None:
-        # Fallback prompt only if neither CLI nor config provided a path
-        minian_path_str = click.prompt(
-            "Path to Minian dataset directory (folder containing C.zarr)",
-            type=str,
-        )
-        minian_path = Path(minian_path_str)
+    if neural_path is None:
+        raise click.ClickException("--neural-path is required. Specify the directory containing neural data (C.zarr).")
 
-    minian_path = minian_path.resolve()
-    click.echo(f"Loading traces from: {minian_path}")
+    neural_path = neural_path.resolve()
+    click.echo(f"Loading traces from: {neural_path}")
 
-    C = load_traces(minian_path, trace_name=trace_name)
+    C = load_traces(neural_path, trace_name=trace_name)
 
     # Optional low-pass filter
     if cfg is not None and cfg.curation.lpf.enabled:
@@ -239,7 +231,7 @@ def curate(
 
     html = _load_template("show").format(
         n=n,
-        minian_path=minian_path,
+        minian_path=neural_path,  # template variable name
         plot_div=plot_div,
         checkboxes_html=checkboxes_html,
     )

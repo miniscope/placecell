@@ -20,12 +20,10 @@ def _parse_g(ctx, param, value: Tuple[float, float]) -> Tuple[float, float]:
 
 @click.command(name="deconvolve")
 @click.option(
-    "--minian-path",
+    "--neural-path",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
-    default=None,
-    show_default=False,
-    help="Minian dataset directory (folder containing C.zarr). "
-    "If omitted, must be provided by --config or will be prompted.",
+    required=True,
+    help="Directory containing neural data (C.zarr).",
 )
 @click.option(
     "--trace-name",
@@ -107,7 +105,7 @@ def _parse_g(ctx, param, value: Tuple[float, float]) -> Tuple[float, float]:
     help="Optional YAML config file overriding data settings.",
 )
 def deconvolve(
-    minian_path: Path | None,
+    neural_path: Path,
     trace_name: str,
     fps: float,
     g: Tuple[float, float] | None,
@@ -137,7 +135,6 @@ def deconvolve(
     # Optional YAML config
     if config is not None:
         cfg = AppConfig.from_yaml(config)
-        minian_path = cfg.curation.data.minian_path
         trace_name = cfg.curation.data.trace_name
         fps = cfg.curation.data.fps
         if cfg.curation.max_units is not None:
@@ -147,22 +144,18 @@ def deconvolve(
     else:
         cfg = None
 
-    if minian_path is None:
-        minian_path_str = click.prompt(
-            "Path to Minian dataset directory (folder containing C.zarr)",
-            type=str,
-        )
-        minian_path = Path(minian_path_str)
+    if neural_path is None:
+        raise click.ClickException("--neural-path is required. Specify the directory containing neural data (C.zarr).")
 
-    minian_path = minian_path.resolve()
+    neural_path = neural_path.resolve()
     out_dir = out_dir.resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    click.echo(f"Using Minian dataset at: {minian_path}")
+    click.echo(f"Using neural data at: {neural_path}")
 
     # Use the same loader as visualization, to handle Dataset/DataArray nicely.
-    click.echo(f"Loading traces from: {minian_path / (trace_name + '.zarr')}")
-    C_da = load_traces(minian_path, trace_name=trace_name)
+    click.echo(f"Loading traces from: {neural_path / (trace_name + '.zarr')}")
+    C_da = load_traces(neural_path, trace_name=trace_name)
 
     all_unit_ids = list(map(int, C_da["unit_id"].values))
 

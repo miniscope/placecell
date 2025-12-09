@@ -32,10 +32,6 @@ class LpfConfig(MiniscopeConfig, ConfigYAMLMixin):
 class DataConfig(MiniscopeConfig, ConfigYAMLMixin):
     """Source data configuration (Minian output)."""
 
-    minian_path: Path = Field(
-        ...,
-        description="Directory containing <trace_name>.zarr.",
-    )
     trace_name: str = Field(
         "C",
         description="Base name of the zarr group (e.g. 'C' or 'C_lp').",
@@ -50,7 +46,7 @@ class CurationConfig(MiniscopeConfig, ConfigYAMLMixin):
     """Curation / visualization configuration."""
 
     data: DataConfig
-    lpf: LpfConfig = LpfConfig()
+    lpf: LpfConfig = Field(default_factory=LpfConfig)
     max_units: int | None = Field(
         None,
         ge=1,

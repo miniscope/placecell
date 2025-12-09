@@ -89,7 +89,7 @@ def prepare_place_browser_data(
     speed_threshold: float,
     speed_window_frames: int,
     s_threshold: float,
-    minian_path: Path | None,
+    neural_path: Path | None,
     trace_name: str,
     trace_name_lp: str,
     neural_fps: float,
@@ -178,11 +178,11 @@ def prepare_place_browser_data(
     spike_ts_trace_below: list[list[float]] = []
     spike_y_trace_below: list[list[float]] = []
 
-    if minian_path is not None and Path(minian_path).is_dir():
+    if neural_path is not None and Path(neural_path).is_dir():
         try:
             # Try to load YrA first (most raw - spatial components on raw video)
             try:
-                YrA = load_traces(minian_path, trace_name="YrA")
+                YrA = load_traces(neural_path, trace_name="YrA")
                 has_yrA = True
                 click.echo("Loaded YrA traces (raw fluorescence)")
             except Exception:
@@ -190,10 +190,10 @@ def prepare_place_browser_data(
                 has_yrA = False
 
             # Load raw C
-            C_raw = load_traces(minian_path, trace_name=trace_name)
+            C_raw = load_traces(neural_path, trace_name=trace_name)
             # Try to load filtered C, fall back to applying filter if not found
             try:
-                C_lp = load_traces(minian_path, trace_name=trace_name_lp)
+                C_lp = load_traces(neural_path, trace_name=trace_name_lp)
             except Exception:
                 from pcell.filters import butter_lowpass_xr
 
@@ -246,7 +246,7 @@ def prepare_place_browser_data(
                     spike_ts_trace_below.append([])
                     spike_y_trace_below.append([])
         except Exception as exc:  # pragma: no cover - best-effort
-            click.echo(f"Warning: could not load traces from {minian_path}: {exc}")
+            click.echo(f"Warning: could not load traces from {neural_path}: {exc}")
             trace_t = []
             trace_ys_raw = []
             trace_ys_lp = []
@@ -277,7 +277,7 @@ def prepare_place_browser_data(
             for uid in unit_ids:
                 trace_ys_S.append([])
 
-    # Fallback to deconv zarr if minian_path not provided
+    # Fallback to deconv zarr if neural_path not provided
     if not trace_t and deconv_zarr is not None and Path(deconv_zarr).is_dir():
         try:
             ds = xr.open_zarr(deconv_zarr)
@@ -410,7 +410,7 @@ def _run_browse_place(
     speed_threshold: float,
     speed_window_frames: int,
     s_threshold: float,
-    minian_path: Path | None,
+    neural_path: Path | None,
     trace_name: str,
     trace_name_lp: str,
     neural_fps: float,
@@ -431,7 +431,7 @@ def _run_browse_place(
         speed_threshold=speed_threshold,
         speed_window_frames=speed_window_frames,
         s_threshold=s_threshold,
-        minian_path=minian_path,
+        minian_path=neural_path,  # template variable name
         trace_name=trace_name,
         trace_name_lp=trace_name_lp,
         neural_fps=neural_fps,
@@ -461,7 +461,23 @@ def _run_browse_place(
     required=True,
     help="YAML config file defining curation and analysis settings.",
 )
-def analyze(config: Path) -> None:
+@click.option(
+    "--neural-path",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
+    required=True,
+    help="Directory containing neural data (C.zarr, neural_timestamp.csv).",
+)
+@click.option(
+    "--behavior-path",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
+    required=True,
+    help="Directory containing behavior data (behavior_position.csv, behavior_timestamp.csv).",
+)
+def analyze(
+    config: Path,
+    neural_path: Path,
+    behavior_path: Path,
+) -> None:
     """Run deconvolution, spike-place matching, and place browser from one config."""
 
     import subprocess
@@ -471,6 +487,20 @@ def analyze(config: Path) -> None:
         raise click.ClickException("Config file must include an 'analysis' section.")
 
     label = cfg.analysis.label
+    bodypart = cfg.analysis.bodypart
+
+    # Construct paths from directories
+    neural_timestamp = neural_path / "neural_timestamp.csv"
+    behavior_position = behavior_path / "behavior_position.csv"
+    behavior_timestamp = behavior_path / "behavior_timestamp.csv"
+
+    # Verify files exist
+    if not neural_timestamp.exists():
+        raise click.ClickException(f"Neural timestamp file not found: {neural_timestamp}")
+    if not behavior_position.exists():
+        raise click.ClickException(f"Behavior position file not found: {behavior_position}")
+    if not behavior_timestamp.exists():
+        raise click.ClickException(f"Behavior timestamp file not found: {behavior_timestamp}")
 
     # 1) Deconvolution
     click.echo("=== Deconvolution ===")
@@ -479,6 +509,8 @@ def analyze(config: Path) -> None:
         "deconvolve",
         "--config",
         str(config),
+        "--neural-path",
+        str(neural_path),
         "--out-dir",
         "export",
         "--label",
@@ -492,10 +524,10 @@ def analyze(config: Path) -> None:
     click.echo("=== Spike-place ===")
     _run_spike_place(
         spike_index=Path(f"export/spike_index_{label}.csv"),
-        neural_timestamp=Path("pcell/assets/neural_data/timestamp.csv"),
-        behavior_position=Path("pcell/assets/behavior/WL25_25_12_01_behavior_position.csv"),
-        behavior_timestamp=Path("pcell/assets/behavior/WL25_25_12_01_behavior_timestamp.csv"),
-        bodypart="LED",
+        neural_timestamp=neural_timestamp,
+        behavior_position=behavior_position,
+        behavior_timestamp=behavior_timestamp,
+        bodypart=bodypart,
         behavior_fps=cfg.analysis.behavior_fps,
         speed_threshold=cfg.analysis.speed_threshold,
         cm_per_pixel=None,
@@ -508,15 +540,15 @@ def analyze(config: Path) -> None:
     _run_browse_place(
         spike_place=Path(f"export/spike_place_{label}.csv"),
         spike_index=Path(f"export/spike_index_{label}.csv"),
-        neural_timestamp=Path("pcell/assets/neural_data/timestamp.csv"),
-        behavior_position=Path("pcell/assets/behavior/WL25_25_12_01_behavior_position.csv"),
-        behavior_timestamp=Path("pcell/assets/behavior/WL25_25_12_01_behavior_timestamp.csv"),
-        bodypart="LED",
+        neural_timestamp=neural_timestamp,
+        behavior_position=behavior_position,
+        behavior_timestamp=behavior_timestamp,
+        bodypart=bodypart,
         behavior_fps=cfg.analysis.behavior_fps,
         speed_threshold=cfg.analysis.speed_threshold,
         speed_window_frames=cfg.analysis.speed_window_frames,
         s_threshold=cfg.analysis.s_threshold,
-        minian_path=cfg.curation.data.minian_path,
+        minian_path=neural_path,
         trace_name=cfg.curation.data.trace_name,
         trace_name_lp="C_lp",
         neural_fps=cfg.curation.data.fps,
