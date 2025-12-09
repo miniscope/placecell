@@ -1,15 +1,9 @@
-"""
-Configuration models for pcell, loaded from YAML.
+"""Configuration models for pcell, loaded from YAML."""
 
-..todo::
-    - Update to config system like mio package
-"""
-
-from pathlib import Path
-
-from pydantic import Field
 from mio.models import MiniscopeConfig
 from mio.models.mixins import ConfigYAMLMixin
+from pydantic import Field
+
 
 class LpfConfig(MiniscopeConfig, ConfigYAMLMixin):
     """Low-pass filter configuration."""
@@ -32,21 +26,21 @@ class LpfConfig(MiniscopeConfig, ConfigYAMLMixin):
 class DataConfig(MiniscopeConfig, ConfigYAMLMixin):
     """Source data configuration (Minian output)."""
 
-    trace_name: str = Field(
-        "C",
-        description="Base name of the zarr group (e.g. 'C' or 'C_lp').",
-    )
     fps: float = Field(
         20.0,
         description="Sampling rate in frames per second.",
     )
 
 
-class CurationConfig(MiniscopeConfig, ConfigYAMLMixin):
-    """Curation / visualization configuration."""
+class NeuralConfig(MiniscopeConfig, ConfigYAMLMixin):
+    """Neural data configuration."""
 
     data: DataConfig
     lpf: LpfConfig = Field(default_factory=LpfConfig)
+    trace_name: str = Field(
+        "C",
+        description="Base name of the zarr group (e.g. 'C' or 'C_lp').",
+    )
     max_units: int | None = Field(
         None,
         ge=1,
@@ -56,27 +50,26 @@ class CurationConfig(MiniscopeConfig, ConfigYAMLMixin):
             "override is provided."
         ),
     )
-
-
-class AnalysisConfig(MiniscopeConfig, ConfigYAMLMixin):
-    """Analysis / place-field configuration."""
-
-    label: str = Field(
-        "session",
-        description="Label used for output filenames (e.g. WL25_DEC1).",
+    s_threshold: float = Field(
+        0.0,
+        description="Minimum spike amplitude s to visualize in place browser.",
     )
+
+
+class BehaviorConfig(MiniscopeConfig, ConfigYAMLMixin):
+    """Behavior / place-field configuration."""
+
     behavior_fps: float = Field(
         ...,
         gt=0.0,
-        description="Behavior data sampling rate in frames per second. Required for spike-place matching.",
+        description=(
+            "Behavior data sampling rate in frames per second. "
+            "Required for spike-place matching."
+        ),
     )
     speed_threshold: float = Field(
         50.0,
         description="Minimum running speed to keep spikes (pixels/s or cm/s).",
-    )
-    s_threshold: float = Field(
-        0.0,
-        description="Minimum spike amplitude s to visualize in place browser.",
     )
     speed_window_frames: int = Field(
         5,
@@ -84,12 +77,14 @@ class AnalysisConfig(MiniscopeConfig, ConfigYAMLMixin):
         "Larger values give more stable speed estimates but less temporal resolution. "
         "Default 5 frames (0.25s at 20 fps).",
     )
+    bodypart: str = Field(
+        ...,
+        description="Body part name to use for position tracking (e.g. 'LED').",
+    )
 
 
 class AppConfig(MiniscopeConfig, ConfigYAMLMixin):
     """Top-level application configuration."""
 
-    curation: CurationConfig
-    analysis: AnalysisConfig | None = None
-
-
+    neural: NeuralConfig
+    behavior: BehaviorConfig | None = None

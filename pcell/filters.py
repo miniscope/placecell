@@ -63,10 +63,7 @@ def butter_lowpass_xr(
         # Safe pad length for short traces
         L = tr.size
         pl_default = 3 * max(len(a), len(b))
-        if padlen is None:
-            pl = min(pl_default, max(1, L - 1))
-        else:
-            pl = min(int(padlen), max(1, L - 1))
+        pl = min(pl_default, max(1, L - 1)) if padlen is None else min(int(padlen), max(1, L - 1))
 
         try:
             y = filtfilt(b, a, tr, method="pad", padlen=pl)

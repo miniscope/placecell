@@ -9,70 +9,10 @@ import plotly.graph_objs as go
 import plotly.io as pio
 from plotly.subplots import make_subplots
 
+from pcell.cli.utils import load_template
 from pcell.config import AppConfig
-from pcell.curation import interactive_select_units, load_traces
+from pcell.curation import load_traces
 from pcell.filters import butter_lowpass_xr
-
-
-def _load_template(name: str) -> str:
-    """Load an HTML template from the templates directory."""
-    template_path = Path(__file__).parent / "templates" / f"{name}.html"
-    return template_path.read_text(encoding="utf-8")
-
-
-@click.command(name="curate-traces")
-@click.option(
-    "--minian-path",
-    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
-    prompt="Path to Minian dataset directory (folder containing C.zarr)",
-)
-@click.option(
-    "--trace-name",
-    type=str,
-    default="C",
-    show_default=True,
-    help="Name of the traces zarr group to load (e.g. 'C' or 'C_lp').",
-)
-@click.option(
-    "--fps",
-    type=float,
-    default=20.0,
-    show_default=True,
-    help="Sampling rate in frames per second.",
-)
-@click.option(
-    "--out-file",
-    type=click.Path(dir_okay=False, path_type=Path),
-    default=Path("export/curated_units.txt"),
-    show_default=True,
-    help="Path to write selected unit IDs (one per line).",
-)
-@click.option(
-    "--max-units",
-    type=int,
-    default=None,
-    show_default=False,
-    help="Optional limit on number of units to review.",
-)
-def curate_traces(
-    neural_path: Path,
-    trace_name: str,
-    fps: float,
-    out_file: Path,
-    max_units: int | None,
-) -> None:
-    """Interactively view traces and write kept unit IDs to a text file."""
-
-    neural_path = neural_path.resolve()
-    click.echo(f"Loading traces for curation from: {neural_path}")
-
-    C = load_traces(neural_path, trace_name=trace_name)
-    click.echo(
-        f"Traces loaded: shape={tuple(C.shape)}, dims={C.dims}. " "Launching interactive viewer..."
-    )
-
-    kept = interactive_select_units(C, fps=fps, out_file=out_file, max_units=max_units)
-    click.echo(f"Kept {len(kept)} units. IDs written to: {out_file.resolve()}")
 
 
 @click.command(name="curate")
@@ -81,7 +21,10 @@ def curate_traces(
     type=click.Choice(["show", "browse"], case_sensitive=False),
     default="browse",
     show_default=True,
-    help="Curation mode: 'show' displays many traces with checkboxes, 'browse' shows one at a time.",
+    help=(
+        "Curation mode: 'show' displays many traces with checkboxes, "
+        "'browse' shows one at a time."
+    ),
 )
 @click.option(
     "--neural-path",
@@ -115,7 +58,10 @@ def curate_traces(
     type=str,
     default=None,
     show_default=False,
-    help="Prefix for the generated HTML files (default: 'pcell_traces' for show, 'pcell_browse' for browse).",
+    help=(
+        "Prefix for the generated HTML files "
+        "(default: 'pcell_traces' for show, 'pcell_browse' for browse)."
+    ),
 )
 @click.option(
     "--config",
@@ -143,15 +89,17 @@ def curate(
     # Optional YAML config overrides basic data/LFP settings
     if config is not None:
         cfg = AppConfig.from_yaml(config)
-        trace_name = cfg.curation.data.trace_name
-        fps = cfg.curation.data.fps
-        if cfg.curation.max_units is not None:
-            max_units = min(max_units, cfg.curation.max_units)
+        trace_name = cfg.neural.trace_name
+        fps = cfg.neural.data.fps
+        if cfg.neural.max_units is not None:
+            max_units = min(max_units, cfg.neural.max_units)
     else:
         cfg = None
 
     if neural_path is None:
-        raise click.ClickException("--neural-path is required. Specify the directory containing neural data (C.zarr).")
+        raise click.ClickException(
+            "--neural-path is required. Specify the directory containing neural data (C.zarr)."
+        )
 
     neural_path = neural_path.resolve()
     click.echo(f"Loading traces from: {neural_path}")
@@ -159,16 +107,16 @@ def curate(
     C = load_traces(neural_path, trace_name=trace_name)
 
     # Optional low-pass filter
-    if cfg is not None and cfg.curation.lpf.enabled:
+    if cfg is not None and cfg.neural.lpf.enabled:
         click.echo(
-            f"Applying low-pass filter: cutoff={cfg.curation.lpf.cutoff_hz} Hz, "
-            f"order={cfg.curation.lpf.order}"
+            f"Applying low-pass filter: cutoff={cfg.neural.lpf.cutoff_hz} Hz, "
+            f"order={cfg.neural.lpf.order}"
         )
         C = butter_lowpass_xr(
             C,
             fps=fps,
-            cutoff_hz=cfg.curation.lpf.cutoff_hz,
-            order=cfg.curation.lpf.order,
+            cutoff_hz=cfg.neural.lpf.cutoff_hz,
+            order=cfg.neural.lpf.order,
         )
     unit_ids = list(map(int, C["unit_id"].values))
     if not unit_ids:
@@ -229,7 +177,7 @@ def curate(
         for uid in unit_ids
     )
 
-    html = _load_template("show").format(
+    html = load_template("show").format(
         n=n,
         minian_path=neural_path,  # template variable name
         plot_div=plot_div,

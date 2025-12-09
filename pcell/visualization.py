@@ -1,54 +1,27 @@
 """Visualization functions for place cell data."""
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 
+try:
+    import matplotlib.pyplot as plt
 
-def plot_rate_map(
-    rate_map: np.ndarray,
-    ax: plt.Axes | None = None,
-    cmap: str = "hot",
-    **kwargs,
-) -> plt.Axes:
-    """
-    Plot a firing rate map.
-
-    Parameters
-    ----------
-    rate_map : np.ndarray
-        Firing rate map to plot
-    ax : plt.Axes, optional
-        Matplotlib axes to plot on
-    cmap : str
-        Colormap to use (default: "hot")
-    **kwargs
-        Additional arguments passed to imshow
-
-    Returns
-    -------
-    plt.Axes
-        The axes object
-    """
-    if ax is None:
-        fig, ax = plt.subplots()
-
-    im = ax.imshow(rate_map, cmap=cmap, origin="lower", **kwargs)
-    ax.set_xlabel("X position")
-    ax.set_ylabel("Y position")
-    plt.colorbar(im, ax=ax, label="Firing rate (Hz)")
-
-    return ax
+    if TYPE_CHECKING:
+        from matplotlib.axes import Axes
+except ImportError:
+    plt = None
+    Axes = None
 
 
 def plot_trajectory(
     csv_path: str | Path,
-    bodypart: str = "LED",
-    ax: plt.Axes | None = None,
-    **kwargs,
-) -> plt.Axes:
+    bodypart: str,
+    ax: "Axes | None" = None,
+    linewidth: float = 0.5,
+    alpha: float = 0.7,
+) -> "Axes":
     """
     Plot trajectory from DeepLabCut CSV file.
 
@@ -58,16 +31,29 @@ def plot_trajectory(
         Path to the DLC CSV file
     bodypart : str
         Body part to plot (default: "LED")
-    ax : plt.Axes, optional
+    ax : matplotlib.Axes, optional
         Matplotlib axes to plot on
-    **kwargs
-        Additional arguments passed to plot
+    linewidth : float
+        Line width for trajectory plot (default: 0.5)
+    alpha : float
+        Alpha (transparency) for trajectory plot (default: 0.7)
 
     Returns
     -------
-    plt.Axes
+    matplotlib.Axes
         The axes object
+
+    Raises
+    ------
+    ImportError
+        If matplotlib is not installed
     """
+    if plt is None:
+        raise ImportError(
+            "matplotlib is required for trajectory plotting. "
+            "Install it with: pip install matplotlib"
+        )
+
     # Read CSV with multi-index header
     df = pd.read_csv(csv_path, header=[0, 1, 2])
 
@@ -84,7 +70,7 @@ def plot_trajectory(
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 8))
 
-    ax.plot(x, y, **kwargs)
+    ax.plot(x, y, linewidth=linewidth, alpha=alpha)
     ax.set_xlabel("X position (pixels)")
     ax.set_ylabel("Y position (pixels)")
     ax.set_title(f"{bodypart} trajectory")

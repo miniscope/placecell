@@ -12,7 +12,9 @@ from pcell.config import AppConfig
 from pcell.curation import load_traces
 
 
-def _parse_g(ctx, param, value: Tuple[float, float]) -> Tuple[float, float]:
+def _parse_g(
+    ctx: click.Context, param: click.Parameter, value: Tuple[float, float]
+) -> Tuple[float, float]:
     if len(value) != 2:
         raise click.BadParameter("g must be two floats: g1 g2")
     return float(value[0]), float(value[1])
@@ -130,22 +132,24 @@ def deconvolve(
             "Deconvolution requires the oasis-deconv package and its C++ "
             "dependencies to be installed and loadable.\n\n"
             f"Original error:\n{exc}"
-        )
+        ) from exc
 
     # Optional YAML config
     if config is not None:
         cfg = AppConfig.from_yaml(config)
-        trace_name = cfg.curation.data.trace_name
-        fps = cfg.curation.data.fps
-        if cfg.curation.max_units is not None:
+        trace_name = cfg.neural.trace_name
+        fps = cfg.neural.data.fps
+        if cfg.neural.max_units is not None:
             max_units = (
-                min(max_units, cfg.curation.max_units) if max_units else cfg.curation.max_units
+                min(max_units, cfg.neural.max_units) if max_units else cfg.neural.max_units
             )
     else:
         cfg = None
 
     if neural_path is None:
-        raise click.ClickException("--neural-path is required. Specify the directory containing neural data (C.zarr).")
+        raise click.ClickException(
+            "--neural-path is required. Specify the directory containing neural data (C.zarr)."
+        )
 
     neural_path = neural_path.resolve()
     out_dir = out_dir.resolve()
@@ -178,7 +182,9 @@ def deconvolve(
                 f"(out of {len(all_unit_ids)} available)."
             )
         except Exception as exc:
-            raise click.ClickException(f"Failed to read curated units from {curated_path}: {exc}")
+            raise click.ClickException(
+                f"Failed to read curated units from {curated_path}: {exc}"
+            ) from exc
     else:
         # No curated file exists - prompt for range
         click.echo(
@@ -249,7 +255,7 @@ def deconvolve(
             except ValueError:
                 raise click.ClickException(
                     f"Could not interpret baseline={baseline!r} " "as 'pXX' or numeric value."
-                )
+                ) from None
 
         # Use oasis-deconv high-level API.
         # If g was provided, pass it as an initial AR(2) guess; otherwise

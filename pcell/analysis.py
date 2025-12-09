@@ -6,8 +6,16 @@ import numpy as np
 import pandas as pd
 
 
-def _load_behavior_led_xy(csv_path: Path, bodypart: str = "LED") -> pd.DataFrame:
-    """Load DeepLabCut-style behavior CSV and return LED x/y per frame."""
+def _load_behavior_xy(csv_path: Path, bodypart: str) -> pd.DataFrame:
+    """Load DeepLabCut-style behavior CSV and return x/y coordinates per frame.
+
+    Parameters
+    ----------
+    csv_path:
+        Path to DeepLabCut CSV file with multi-index header.
+    bodypart:
+        Body part name to extract (e.g. 'LED').
+    """
 
     df = pd.read_csv(csv_path, header=[0, 1, 2])
     scorer = df.columns[1][0]
@@ -20,7 +28,6 @@ def _load_behavior_led_xy(csv_path: Path, bodypart: str = "LED") -> pd.DataFrame
 def compute_behavior_speed(
     positions: pd.DataFrame,
     timestamps: pd.DataFrame,
-    cm_per_pixel: float | None = None,
     window_frames: int = 5,
 ) -> pd.DataFrame:
     """Compute speed from behavior positions and timestamps using a window.
@@ -34,13 +41,14 @@ def compute_behavior_speed(
         DataFrame with columns ``frame_index``, ``x``, ``y`` in pixels.
     timestamps:
         DataFrame with columns ``frame_index``, ``unix_time`` in seconds.
-    cm_per_pixel:
-        Optional conversion factor. If provided, speeds are in cm/s;
-        otherwise in pixels/s.
     window_frames:
         Number of frames to use for speed calculation. Speed is computed
         as distance traveled over this window divided by time elapsed.
         Default is 5 frames (0.25s at 20 fps).
+
+    Returns
+    -------
+    DataFrame with speed in pixels/s.
     """
 
     df = positions.merge(timestamps, on="frame_index", how="inner").sort_values("frame_index")
@@ -64,9 +72,6 @@ def compute_behavior_speed(
             dt = t_vals[end_idx] - t_vals[i]
 
             dist = np.sqrt(dx**2 + dy**2)
-            if cm_per_pixel is not None:
-                dist = dist * float(cm_per_pixel)
-
             distances[i] = dist
             time_diffs[i] = dt if dt > 0 else np.nan
         else:
@@ -84,9 +89,8 @@ def build_spike_place_dataframe(
     behavior_position_path: Path,
     behavior_timestamp_path: Path,
     *,
-    bodypart: str = "LED",
+    bodypart: str,
     speed_threshold: float = 50.0,
-    cm_per_pixel: float | None = None,
     use_neural_last_timestamp: bool = True,
     speed_window_frames: int = 5,
     behavior_fps: float,
@@ -128,13 +132,12 @@ def build_spike_place_dataframe(
         ["frame", "neural_time"]
     ]
 
-    beh_pos = _load_behavior_led_xy(behavior_position_path, bodypart=bodypart)
+    beh_pos = _load_behavior_xy(behavior_position_path, bodypart=bodypart)
     beh_ts = pd.read_csv(behavior_timestamp_path)  # frame_index, unix_time
 
     beh = compute_behavior_speed(
         positions=beh_pos,
         timestamps=beh_ts,
-        cm_per_pixel=cm_per_pixel,
         window_frames=speed_window_frames,
     )
 

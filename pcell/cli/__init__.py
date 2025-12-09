@@ -1,9 +1,11 @@
 """Command-line interface for pcell.
 
-Provides a grouped command:
+Provides grouped commands:
 
-    pcell curate
-    pcell deconvolve
+    pcell curate          - Interactive trace curation
+    pcell deconvolve       - OASIS deconvolution
+    pcell analyze          - Full analysis pipeline
+    pcell behavior         - Behavior analysis commands
 """
 
-from pcell.cli.main import pcell
+from pcell.cli.main import pcell  # noqa: F401

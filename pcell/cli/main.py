@@ -3,7 +3,8 @@
 import click
 
 from pcell.cli.analysis import analyze
-from pcell.cli.curation import curate, curate_traces
+from pcell.cli.behavior import behavior
+from pcell.cli.curation import curate
 from pcell.cli.deconvolve import deconvolve
 
 
@@ -14,6 +15,6 @@ def pcell() -> None:
 
 # Register all command groups
 pcell.add_command(curate)
-pcell.add_command(curate_traces)
 pcell.add_command(deconvolve)
 pcell.add_command(analyze)
+pcell.add_command(behavior)

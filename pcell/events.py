@@ -65,10 +65,7 @@ def detect_isolated_events(
 
     y_arr = np.asarray(y, dtype=float)
 
-    if smooth_sec is not None:
-        y_use = simple_lowpass(y_arr, wlen_sec=smooth_sec, fps=fps)
-    else:
-        y_use = y_arr
+    y_use = simple_lowpass(y_arr, wlen_sec=smooth_sec, fps=fps) if smooth_sec is not None else y_arr
 
     base = robust_baseline(y_use, q=10)
     z = y_use - base
@@ -209,10 +206,7 @@ def measure_event_kinetics(
 
     # noise floor from pre-peak tail: MAD × 1.4826
     pre = z[max(0, peak_idx - 20) : peak_idx]
-    if pre.size:
-        mad = np.median(np.abs(pre - np.median(pre))) * 1.4826
-    else:
-        mad = 0.0
+    mad = np.median(np.abs(pre - np.median(pre))) * 1.4826 if pre.size else 0.0
     noise_floor = noise_k * mad
 
     # decide tail stop value

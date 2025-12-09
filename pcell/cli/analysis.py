@@ -11,6 +11,7 @@ import pandas as pd
 import xarray as xr
 
 from pcell.analysis import build_spike_place_dataframe
+from pcell.cli.utils import load_template
 from pcell.config import AppConfig
 
 
@@ -47,7 +48,6 @@ def _run_spike_place(
     bodypart: str,
     behavior_fps: float,
     speed_threshold: float,
-    cm_per_pixel: float | None,
     speed_window_frames: int,
     out_file: Path,
 ) -> None:
@@ -61,7 +61,6 @@ def _run_spike_place(
         bodypart=bodypart,
         behavior_fps=behavior_fps,
         speed_threshold=speed_threshold,
-        cm_per_pixel=cm_per_pixel,
         speed_window_frames=speed_window_frames,
     )
 
@@ -70,12 +69,6 @@ def _run_spike_place(
     df.to_csv(out_file, index=False)
 
     click.echo(f"Wrote {len(df)} rows to {out_file}")
-
-
-def _load_template(name: str) -> str:
-    """Load HTML template from templates directory."""
-    template_path = Path(__file__).parent / "templates" / f"{name}.html"
-    return template_path.read_text(encoding="utf-8")
 
 
 def prepare_place_browser_data(
@@ -270,11 +263,11 @@ def prepare_place_browser_data(
                     S_vec = np.asarray(ds["S"].sel(unit_id=int(uid)).values, dtype=float)
                     trace_ys_S.append(S_vec.tolist())
             else:
-                for uid in unit_ids:
+                for _ in unit_ids:
                     trace_ys_S.append([])
         except Exception as exc:  # pragma: no cover - best-effort
             click.echo(f"Warning: could not load S from {deconv_zarr}: {exc}")
-            for uid in unit_ids:
+            for _ in unit_ids:
                 trace_ys_S.append([])
 
     # Fallback to deconv zarr if neural_path not provided
@@ -338,7 +331,6 @@ def generate_place_browser_html(
     data: PlaceBrowserData,
     s_threshold: float,
     speed_threshold: float,
-    cm_per_pixel: float | None,
     output_prefix: str,
 ) -> Path:
     """Generate place browser HTML from prepared data."""
@@ -362,10 +354,10 @@ def generate_place_browser_html(
     spike_ts_trace_below_json = json.dumps(data.spike_ts_trace_below)
     spike_y_trace_below_json = json.dumps(data.spike_y_trace_below)
 
-    # Determine speed units
-    speed_units = "cm/s" if cm_per_pixel is not None else "px/s"
+    # Speed units are always pixels/s
+    speed_units = "px/s"
 
-    html = _load_template("browse_place").format(
+    html = load_template("browse_place").format(
         s_threshold=s_threshold,
         speed_threshold=speed_threshold,
         speed_units=speed_units,
@@ -416,9 +408,11 @@ def _run_browse_place(
     neural_fps: float,
     output_prefix: str,
     deconv_zarr: Path | None,
-    cm_per_pixel: float | None,
 ) -> None:
-    """Internal function: Browser for place fields: trace + trajectory + spike locations per unit."""
+    """Internal function: Browser for place fields.
+
+    Shows trace + trajectory + spike locations per unit.
+    """
 
     data = prepare_place_browser_data(
         spike_place=spike_place,
@@ -431,7 +425,7 @@ def _run_browse_place(
         speed_threshold=speed_threshold,
         speed_window_frames=speed_window_frames,
         s_threshold=s_threshold,
-        minian_path=neural_path,  # template variable name
+        neural_path=neural_path,
         trace_name=trace_name,
         trace_name_lp=trace_name_lp,
         neural_fps=neural_fps,
@@ -442,7 +436,6 @@ def _run_browse_place(
         data=data,
         s_threshold=s_threshold,
         speed_threshold=speed_threshold,
-        cm_per_pixel=cm_per_pixel,
         output_prefix=output_prefix,
     )
 
@@ -473,21 +466,51 @@ def _run_browse_place(
     required=True,
     help="Directory containing behavior data (behavior_position.csv, behavior_timestamp.csv).",
 )
+@click.option(
+    "--out-dir",
+    type=click.Path(file_okay=False, dir_okay=True, path_type=Path),
+    default=Path("export"),
+    help="Output directory for analysis results.",
+)
+@click.option(
+    "--label",
+    type=str,
+    default=None,
+    help="Label for output filenames. If omitted, auto-generated from output directory name.",
+)
 def analyze(
     config: Path,
     neural_path: Path,
     behavior_path: Path,
+    out_dir: Path,
+    label: str | None,
 ) -> None:
     """Run deconvolution, spike-place matching, and place browser from one config."""
 
     import subprocess
 
     cfg = AppConfig.from_yaml(config)
-    if cfg.analysis is None:
-        raise click.ClickException("Config file must include an 'analysis' section.")
+    if cfg.behavior is None:
+        raise click.ClickException("Config file must include a 'behavior' section.")
 
-    label = cfg.analysis.label
-    bodypart = cfg.analysis.bodypart
+    bodypart = cfg.behavior.bodypart
+
+    # Auto-generate label from output directory if not provided
+    if label is None:
+        base_label = out_dir.name
+        if not base_label or base_label == ".":
+            base_label = "output"
+
+        # Check if output directory exists and find next available label
+        label = base_label
+        counter = 0
+        while (out_dir / f"{label}_oasis_deconv.zarr").exists():
+            counter += 1
+            label = f"{base_label}_{counter}"
+
+    # Ensure output directory exists
+    out_dir = out_dir.resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     # Construct paths from directories
     neural_timestamp = neural_path / "neural_timestamp.csv"
@@ -512,47 +535,45 @@ def analyze(
         "--neural-path",
         str(neural_path),
         "--out-dir",
-        "export",
+        str(out_dir),
         "--label",
         label,
         "--spike-index-out",
-        f"export/spike_index_{label}.csv",
+        str(out_dir / f"spike_index_{label}.csv"),
     ]
     subprocess.run(cmd1, check=True)
 
     # 2) Spike-place (internal function)
     click.echo("=== Spike-place ===")
     _run_spike_place(
-        spike_index=Path(f"export/spike_index_{label}.csv"),
+        spike_index=out_dir / f"spike_index_{label}.csv",
         neural_timestamp=neural_timestamp,
         behavior_position=behavior_position,
         behavior_timestamp=behavior_timestamp,
         bodypart=bodypart,
-        behavior_fps=cfg.analysis.behavior_fps,
-        speed_threshold=cfg.analysis.speed_threshold,
-        cm_per_pixel=None,
-        speed_window_frames=cfg.analysis.speed_window_frames,
-        out_file=Path(f"export/spike_place_{label}.csv"),
+        behavior_fps=cfg.behavior.behavior_fps,
+        speed_threshold=cfg.behavior.speed_threshold,
+        speed_window_frames=cfg.behavior.speed_window_frames,
+        out_file=out_dir / f"spike_place_{label}.csv",
     )
 
     # 3) Place browser (internal function)
     click.echo("=== Place browser ===")
     _run_browse_place(
-        spike_place=Path(f"export/spike_place_{label}.csv"),
-        spike_index=Path(f"export/spike_index_{label}.csv"),
+        spike_place=out_dir / f"spike_place_{label}.csv",
+        spike_index=out_dir / f"spike_index_{label}.csv",
         neural_timestamp=neural_timestamp,
         behavior_position=behavior_position,
         behavior_timestamp=behavior_timestamp,
         bodypart=bodypart,
-        behavior_fps=cfg.analysis.behavior_fps,
-        speed_threshold=cfg.analysis.speed_threshold,
-        speed_window_frames=cfg.analysis.speed_window_frames,
-        s_threshold=cfg.analysis.s_threshold,
-        minian_path=neural_path,
-        trace_name=cfg.curation.data.trace_name,
+        behavior_fps=cfg.behavior.behavior_fps,
+        speed_threshold=cfg.behavior.speed_threshold,
+        speed_window_frames=cfg.behavior.speed_window_frames,
+        s_threshold=cfg.neural.s_threshold,
+        neural_path=neural_path,
+        trace_name=cfg.neural.trace_name,
         trace_name_lp="C_lp",
-        neural_fps=cfg.curation.data.fps,
+        neural_fps=cfg.neural.data.fps,
         output_prefix=f"{label}_place_browser",
-        deconv_zarr=Path(f"export/{label}_oasis_deconv.zarr"),
-        cm_per_pixel=None,
+        deconv_zarr=out_dir / f"{label}_oasis_deconv.zarr",
     )
