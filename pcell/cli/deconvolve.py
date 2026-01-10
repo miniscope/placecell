@@ -6,10 +6,13 @@ from typing import Tuple
 import click
 import numpy as np
 import xarray as xr
+from mio.logging import init_logger
 from tqdm import tqdm
 
+from pcell.analysis import load_traces
 from pcell.config import AppConfig
-from pcell.curation import load_traces
+
+logger = init_logger(__name__)
 
 
 def _parse_g(
@@ -81,15 +84,7 @@ def _parse_g(
     type=int,
     default=None,
     show_default=False,
-    help="Optional maximum number of units to deconvolve (after curation filtering).",
-)
-@click.option(
-    "--curated-units-file",
-    type=click.Path(dir_okay=False, path_type=Path),
-    default=Path("export/curated_units.txt"),
-    show_default=True,
-    help="Optional text file with curated unit IDs (one per line). If it exists, "
-    "only those units will be deconvolved.",
+    help="Optional maximum number of units to deconvolve.",
 )
 @click.option(
     "--spike-index-out",
@@ -116,13 +111,12 @@ def deconvolve(
     out_dir: Path,
     label: str,
     max_units: int | None,
-    curated_units_file: Path,
     spike_index_out: Path,
     config: Path | None,
 ) -> None:
     """Run OASIS AR(2) deconvolution on all units and save results as zarr."""
 
-    # Lazy, guarded import so that `pcell` / `pcell curate` still work
+    # Lazy, guarded import so that `pcell` still works
     # even if oasis-deconv is not available on this system.
     try:
         from oasis.functions import deconvolve as oasis_deconvolve  # type: ignore
@@ -153,84 +147,43 @@ def deconvolve(
     out_dir = out_dir.resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    click.echo(f"Using neural data at: {neural_path}")
+    logger.info(f"Using neural data at: {neural_path}")
 
     # Use the same loader as visualization, to handle Dataset/DataArray nicely.
-    click.echo(f"Loading traces from: {neural_path / (trace_name + '.zarr')}")
+    logger.info(f"Loading traces from: {neural_path / (trace_name + '.zarr')}")
     C_da = load_traces(neural_path, trace_name=trace_name)
 
     all_unit_ids = list(map(int, C_da["unit_id"].values))
 
-    # Optional curation filter
-    selected_unit_ids = all_unit_ids
-    curated_path = curated_units_file.resolve()
-    if curated_path.is_file():
-        try:
-            curated = np.loadtxt(curated_path, dtype=int)
-            if curated.ndim == 0:
-                curated = curated[None]
-            curated_set = set(int(x) for x in curated.tolist())
-            selected_unit_ids = [uid for uid in all_unit_ids if uid in curated_set]
-            if not selected_unit_ids:
-                raise click.ClickException(
-                    f"Curated units file {curated_path} did not match any unit_id in data."
-                )
-            click.echo(
-                f"Using {len(selected_unit_ids)} curated units from {curated_path} "
-                f"(out of {len(all_unit_ids)} available)."
-            )
-        except Exception as exc:
-            raise click.ClickException(
-                f"Failed to read curated units from {curated_path}: {exc}"
-            ) from exc
-    else:
-        # No curated file exists - prompt for range
-        click.echo(
-            f"Found {len(all_unit_ids)} units (IDs: {all_unit_ids[0]} to {all_unit_ids[-1]})"
-        )
-        click.echo("No curated units file found. Select a range of units to process.")
+    start_idx = click.prompt(
+        f"Start index [0-{len(all_unit_ids) - 1}]", type=int, default=0
+    )
+    end_idx = click.prompt(
+        f"End index [{start_idx}-{len(all_unit_ids) - 1}]",
+        type=int,
+        default=len(all_unit_ids) - 1,
+    )
 
-        start_idx = click.prompt(
-            f"Start index (0 to {len(all_unit_ids) - 1})",
-            type=int,
-            default=0,
-        )
-        end_idx = click.prompt(
-            f"End index ({start_idx} to {len(all_unit_ids) - 1})",
-            type=int,
-            default=len(all_unit_ids) - 1,
-        )
+    if (
+        start_idx < 0
+        or start_idx >= len(all_unit_ids)
+        or end_idx < start_idx
+        or end_idx >= len(all_unit_ids)
+    ):
+        raise click.ClickException("Invalid range")
 
-        # Validate range
-        if start_idx < 0 or start_idx >= len(all_unit_ids):
-            raise click.ClickException(
-                f"Start index {start_idx} is out of range [0, {len(all_unit_ids) - 1}]"
-            )
-        if end_idx < start_idx or end_idx >= len(all_unit_ids):
-            raise click.ClickException(
-                f"End index {end_idx} is out of range [{start_idx}, {len(all_unit_ids) - 1}]"
-            )
-
-        selected_unit_ids = all_unit_ids[start_idx : end_idx + 1]
-        click.echo(
-            f"Selected {len(selected_unit_ids)} units (indices {start_idx} to {end_idx}, "
-            f"unit IDs: {selected_unit_ids[0]} to {selected_unit_ids[-1]})"
-        )
-
-    # Optional max_units limiter (after curation)
-    if max_units is not None and len(selected_unit_ids) > max_units:
-        selected_unit_ids = selected_unit_ids[:max_units]
-        click.echo(f"Limiting to first {len(selected_unit_ids)} units due to --max-units.")
-
-    unit_ids = selected_unit_ids
+    unit_ids = all_unit_ids[start_idx : end_idx + 1]
+    if max_units is not None and len(unit_ids) > max_units:
+        unit_ids = unit_ids[:max_units]
+        logger.info(f"Limiting to first {len(unit_ids)} units due to --max-units.")
     if g is not None:
         g1, g2 = float(g[0]), float(g[1])
-        click.echo(
+        logger.info(
             f"Running OASIS deconvolution on {len(unit_ids)} units "
             f"(user-specified initial g=({g1}, {g2}))"
         )
     else:
-        click.echo(
+        logger.info(
             f"Running OASIS deconvolution on {len(unit_ids)} units "
             "(letting oasis-deconv estimate AR parameters)."
         )
@@ -264,7 +217,7 @@ def deconvolve(
         try:
             c, s, b_est, g_est, lam = oasis_deconvolve(y - b, **kwargs)
         except Exception as exc:
-            click.echo(f"Skipping unit {uid} due to oasis-deconv error: {exc}")
+            logger.warning(f"Skipping unit {uid} due to oasis-deconv error: {exc}")
             continue
 
         good_unit_ids.append(int(uid))
@@ -282,7 +235,7 @@ def deconvolve(
     if not good_unit_ids:
         raise click.ClickException("OASIS deconvolution failed for all units.")
 
-    click.echo("OASIS finished; building xarray dataset.")
+    logger.info("OASIS finished; building xarray dataset.")
 
     # Build xarray.Dataset similar to the notebook's zarr output
     unit_idx = np.array(good_unit_ids, dtype=int)
@@ -311,7 +264,7 @@ def deconvolve(
     )
 
     out_path = out_dir / f"{label}_oasis_deconv.zarr"
-    click.echo(f"Saving deconvolution results to: {out_path}")
+    logger.info(f"Saving deconvolution results to: {out_path}")
     ds.to_zarr(out_path, mode="w")
 
     # Optional spike-index CSV
@@ -325,6 +278,6 @@ def deconvolve(
                 frames = np.nonzero(s_vec > 0)[0]
                 for fr in frames:
                     f.write(f"{int(uid)},{int(fr)},{float(s_vec[fr])}\n")
-        click.echo(f"Wrote spike index CSV to: {spike_index_out}")
+        logger.info(f"Wrote spike index CSV to: {spike_index_out}")
 
-    click.echo("Done.")
+    logger.info("Done.")

@@ -23,8 +23,6 @@ def plot_trajectory(
     csv_path: str | Path,
     bodypart: str,
     ax: "Axes | None" = None,
-    linewidth: float = 0.5,
-    alpha: float = 0.7,
 ) -> "Axes":
     """
     Plot trajectory from DeepLabCut CSV file.
@@ -37,10 +35,6 @@ def plot_trajectory(
         Body part to plot (default: "LED")
     ax : matplotlib.Axes, optional
         Matplotlib axes to plot on
-    linewidth : float
-        Line width for trajectory plot (default: 0.5)
-    alpha : float
-        Alpha (transparency) for trajectory plot (default: 0.7)
 
     Returns
     -------
@@ -86,7 +80,7 @@ def plot_trajectory(
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 8))
 
-    ax.plot(x, y, linewidth=linewidth, alpha=alpha)
+    ax.plot(x, y, linewidth=0.5, alpha=0.7)
     ax.set_xlabel("X position (pixels)")
     ax.set_ylabel("Y position (pixels)")
     ax.set_title(f"{bodypart} trajectory")
@@ -148,7 +142,7 @@ def plot_max_projection_with_unit_footprint(
         raise FileNotFoundError(f"Spatial footprint file not found: {A_path}")
 
     # Load max projection
-    max_proj_ds = xr.open_zarr(max_proj_path)
+    max_proj_ds = xr.open_zarr(max_proj_path, consolidated=False)
     if "max_proj" in max_proj_ds:
         max_proj = max_proj_ds["max_proj"]
     else:
@@ -162,7 +156,7 @@ def plot_max_projection_with_unit_footprint(
     max_proj_data = np.asarray(max_proj.values, dtype=float)
 
     # Load spatial footprints
-    A_ds = xr.open_zarr(A_path)
+    A_ds = xr.open_zarr(A_path, consolidated=False)
     A = A_ds[A_name] if A_name in A_ds else A_ds[list(A_ds.data_vars)[0]]
 
     # Create single figure with overlay

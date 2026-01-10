@@ -2,7 +2,6 @@
 
 Provides grouped commands:
 
-    pcell curate          - Interactive trace curation
     pcell deconvolve       - OASIS deconvolution
     pcell analyze          - Full analysis pipeline
     pcell behavior         - Behavior analysis commands

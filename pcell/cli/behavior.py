@@ -3,9 +3,12 @@
 from pathlib import Path
 
 import click
+from mio.logging import init_logger
 
 from pcell.config import AppConfig, BehaviorConfig
 from pcell.visualization import plot_trajectory
+
+logger = init_logger(__name__)
 
 try:
     import matplotlib.pyplot as plt
@@ -37,31 +40,10 @@ def behavior() -> None:
     default=None,
     help="Output path for the plot. If omitted, displays interactively.",
 )
-@click.option(
-    "--dpi",
-    type=int,
-    default=150,
-    help="DPI for saved plot.",
-)
-@click.option(
-    "--linewidth",
-    type=float,
-    default=0.5,
-    help="Line width for trajectory plot.",
-)
-@click.option(
-    "--alpha",
-    type=float,
-    default=0.7,
-    help="Alpha (transparency) for trajectory plot.",
-)
 def trajectory(
     config: Path,
     behavior_path: Path,
     output: Path | None,
-    dpi: int,
-    linewidth: float,
-    alpha: float,
 ) -> None:
     """Plot trajectory from behavior position data using config settings."""
     # Try to load as AppConfig first, then fall back to BehaviorConfig
@@ -92,14 +74,14 @@ def trajectory(
             "Install it with: pip install matplotlib"
         )
 
-    click.echo(f"Plotting trajectory for bodypart '{bodypart}' from {behavior_position}")
-    plot_trajectory(behavior_position, bodypart=bodypart, linewidth=linewidth, alpha=alpha)
+    logger.info(f"Plotting trajectory for bodypart '{bodypart}' from {behavior_position}")
+    plot_trajectory(behavior_position, bodypart=bodypart)
     plt.tight_layout()
 
     if output is not None:
         output.parent.mkdir(parents=True, exist_ok=True)
-        plt.savefig(output, dpi=dpi)
-        click.echo(f"Plot saved to {output.resolve()}")
+        plt.savefig(output, dpi=150)
+        logger.info(f"Plot saved to {output.resolve()}")
     else:
-        click.echo("Displaying plot interactively...")
+        logger.info("Displaying plot interactively...")
         plt.show()

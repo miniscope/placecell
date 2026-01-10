@@ -9,6 +9,7 @@ import click
 import numpy as np
 import pandas as pd
 import xarray as xr
+from mio.logging import init_logger
 
 try:
     import matplotlib.pyplot as plt
@@ -18,6 +19,8 @@ except ImportError:
 from pcell.analysis import build_spike_place_dataframe
 from pcell.cli.utils import load_template
 from pcell.config import AppConfig
+
+logger = init_logger(__name__)
 
 
 class PlaceBrowserData(NamedTuple):
@@ -73,7 +76,7 @@ def _run_spike_place(
     out_file.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(out_file, index=False)
 
-    click.echo(f"Wrote {len(df)} rows to {out_file}")
+    logger.info(f"Wrote {len(df)} rows to {out_file}")
 
 
 def prepare_place_browser_data(
@@ -103,7 +106,7 @@ def prepare_place_browser_data(
         Neural data sampling rate (frames per second), used for converting neural frames to time.
     """
 
-    from pcell.curation import load_traces
+    from pcell.analysis import load_traces
 
     # Load spikes - if spike_index provided, load all spikes with speed info
     if spike_index is not None:
@@ -182,7 +185,7 @@ def prepare_place_browser_data(
             try:
                 YrA = load_traces(neural_path, trace_name="YrA")
                 has_yrA = True
-                click.echo("Loaded YrA traces (raw fluorescence)")
+                logger.info("Loaded YrA traces (raw fluorescence)")
             except Exception:
                 YrA = None
                 has_yrA = False
@@ -195,7 +198,9 @@ def prepare_place_browser_data(
             except Exception:
                 from pcell.filters import butter_lowpass_xr
 
-                click.echo(f"Filtered trace {trace_name_lp} not found, applying low-pass filter...")
+                logger.info(
+                    f"Filtered trace {trace_name_lp} not found, applying low-pass filter..."
+                )
                 C_lp = butter_lowpass_xr(C_raw, fps=neural_fps, cutoff_hz=1.0, order=4)
 
             # Use YrA if available, otherwise use C_raw
@@ -244,7 +249,7 @@ def prepare_place_browser_data(
                     spike_ts_trace_below.append([])
                     spike_y_trace_below.append([])
         except Exception as exc:  # pragma: no cover - best-effort
-            click.echo(f"Warning: could not load traces from {neural_path}: {exc}")
+            logger.warning(f"Could not load traces from {neural_path}: {exc}")
             trace_t = []
             trace_ys_raw = []
             trace_ys_lp = []
@@ -257,7 +262,7 @@ def prepare_place_browser_data(
     # Try to load S (spike train) from deconv zarr if available
     if deconv_zarr is not None and Path(deconv_zarr).is_dir():
         try:
-            ds = xr.open_zarr(deconv_zarr)
+            ds = xr.open_zarr(deconv_zarr, consolidated=False)
             if "S" in ds:
                 has_S = True
                 T_S = int(ds.sizes["frame"])
@@ -271,14 +276,14 @@ def prepare_place_browser_data(
                 for _ in unit_ids:
                     trace_ys_S.append([])
         except Exception as exc:  # pragma: no cover - best-effort
-            click.echo(f"Warning: could not load S from {deconv_zarr}: {exc}")
+            logger.warning(f"Could not load S from {deconv_zarr}: {exc}")
             for _ in unit_ids:
                 trace_ys_S.append([])
 
     # Fallback to deconv zarr if neural_path not provided
     if not trace_t and deconv_zarr is not None and Path(deconv_zarr).is_dir():
         try:
-            ds = xr.open_zarr(deconv_zarr)
+            ds = xr.open_zarr(deconv_zarr, consolidated=False)
             var = "C_deconv" if "C_deconv" in ds else "S" if "S" in ds else None
             if var is not None:
                 T = int(ds.sizes["frame"])
@@ -306,7 +311,7 @@ def prepare_place_browser_data(
                     spike_ts_trace_below.append([])
                     spike_y_trace_below.append([])
         except Exception as exc:  # pragma: no cover - best-effort
-            click.echo(f"Warning: could not load traces from {deconv_zarr}: {exc}")
+            logger.warning(f"Could not load traces from {deconv_zarr}: {exc}")
 
     return PlaceBrowserData(
         unit_ids=unit_ids,
@@ -417,7 +422,6 @@ def _run_browse_place(
     neural_fps: float,
     output_prefix: str,
     deconv_zarr: Path | None,
-    curated_units: list[int] | None = None,
 ) -> None:
     """Internal function: Browser for place fields.
 
@@ -468,7 +472,7 @@ def _run_browse_place(
                     # Skip units that can't be visualized
                     continue
         except Exception as exc:
-            click.echo(f"Warning: could not generate max projection images: {exc}")
+            logger.warning(f"Could not generate max projection images: {exc}")
 
     out_html = generate_place_browser_html(
         data=data,
@@ -478,7 +482,7 @@ def _run_browse_place(
         max_proj_footprints_imgs=max_proj_footprints_imgs,
     )
 
-    click.echo(f"Wrote place browser HTML to: {out_html}")
+    logger.info(f"Wrote place browser HTML to: {out_html}")
 
     try:
         webbrowser.open(out_html.as_uri())
@@ -491,7 +495,7 @@ def _run_browse_place(
     "--config",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     required=True,
-    help="YAML config file defining curation and analysis settings.",
+    help="YAML config file defining analysis settings.",
 )
 @click.option(
     "--neural-path",
@@ -598,20 +602,6 @@ def analyze(
 
     # 3) Place browser (internal function)
     click.echo("=== Place browser ===")
-    # Try to load curated units if available
-    curated_units_file = out_dir / "curated_units.txt"
-    curated_units = None
-    if curated_units_file.exists():
-        try:
-            curated_array = np.loadtxt(curated_units_file, dtype=int)
-            if curated_array.ndim == 0:
-                curated_units = [int(curated_array)]
-            else:
-                curated_units = [int(uid) for uid in curated_array.tolist()]
-            click.echo(f"Using {len(curated_units)} curated units for visualization")
-        except Exception as exc:
-            click.echo(f"Warning: could not load curated units: {exc}")
-
     _run_browse_place(
         spike_place=out_dir / f"spike_place_{label}.csv",
         spike_index=out_dir / f"spike_index_{label}.csv",
@@ -629,5 +619,4 @@ def analyze(
         neural_fps=cfg.neural.data.fps,
         output_prefix=f"{label}_place_browser",
         deconv_zarr=out_dir / f"{label}_oasis_deconv.zarr",
-        curated_units=curated_units,
     )
