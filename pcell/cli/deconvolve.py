@@ -58,9 +58,7 @@ def deconvolve(
     try:
         from oasis.functions import deconvolve as oasis_deconvolve  # type: ignore
     except Exception as exc:
-        raise click.ClickException(
-            f"Could not import oasis-deconv: {exc}"
-        ) from exc
+        raise click.ClickException(f"Could not import oasis-deconv: {exc}") from exc
 
     cfg = AppConfig.from_yaml(config)
     trace_name = cfg.neural.trace_name
@@ -85,9 +83,7 @@ def deconvolve(
 
     all_unit_ids = list(map(int, C_da["unit_id"].values))
 
-    start_idx = click.prompt(
-        f"Start index [0-{len(all_unit_ids) - 1}]", type=int, default=0
-    )
+    start_idx = click.prompt(f"Start index [0-{len(all_unit_ids) - 1}]", type=int, default=0)
     end_idx = click.prompt(
         f"End index [{start_idx}-{len(all_unit_ids) - 1}]",
         type=int,
