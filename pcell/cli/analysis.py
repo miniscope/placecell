@@ -487,7 +487,7 @@ def _run_browse_place(
     try:
         webbrowser.open(out_html.as_uri())
     except Exception:
-        click.echo("Could not open browser automatically; open the HTML file manually.")
+        logger.info("Could not open browser automatically; open the HTML file manually.")
 
 
 @click.command(name="analyze")
