@@ -1,0 +1,26 @@
+id: test_config
+mio_model: pcell.config.AppConfig
+mio_version: 0.8.1
+neural:
+  id: neural
+  data:
+    id: data
+    fps: 20.0
+  lpf:
+    id: lpf
+    enabled: false
+    cutoff_hz: 1.0
+    order: 4
+  oasis:
+    id: oasis
+    s_min: 1.0
+    baseline: p10
+  trace_name: C
+  max_units: null
+  s_threshold: 0.0
+behavior:
+  id: behavior
+  behavior_fps: 30.0
+  speed_threshold: 50.0
+  speed_window_frames: 5
+  bodypart: LED
