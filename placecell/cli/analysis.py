@@ -1073,3 +1073,47 @@ def visualize(
         min_occupancy=cfg.behavior.ratemap.min_occupancy,
         smooth_sigma=cfg.behavior.ratemap.smooth_sigma,
     )
+
+
+@click.command(name="plot")
+@click.option(
+    "--config",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=True,
+    help="YAML config file.",
+)
+@click.option(
+    "--spike-place",
+    "spike_place_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=True,
+    help="Spike-place CSV file.",
+)
+@click.option(
+    "--neural-path",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    default=None,
+    help="Directory containing neural data (for traces and max projection).",
+)
+def plot(
+    config: Path,
+    spike_place_path: Path,
+    neural_path: Path | None,
+) -> None:
+    """Interactive matplotlib browser for place cells."""
+    from placecell.visualization import browse_place_cells
+
+    cfg = AppConfig.from_yaml(config)
+    if cfg.behavior is None:
+        raise click.ClickException("Config file must include a 'behavior' section.")
+
+    browse_place_cells(
+        spike_place_csv=spike_place_path,
+        neural_path=neural_path,
+        min_speed=cfg.behavior.speed_threshold,
+        min_occupancy=cfg.behavior.ratemap.min_occupancy,
+        bins=cfg.behavior.ratemap.bins,
+        smooth_sigma=cfg.behavior.ratemap.smooth_sigma,
+        behavior_fps=cfg.behavior.behavior_fps,
+        neural_fps=cfg.neural.data.fps,
+    )
