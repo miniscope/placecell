@@ -16,9 +16,9 @@ try:
 except ImportError:
     plt = None
 
-from pcell.analysis import build_spike_place_dataframe
-from pcell.cli.utils import load_template
-from pcell.config import AppConfig
+from placecell.analysis import build_spike_place_dataframe
+from placecell.cli.utils import load_template
+from placecell.config import AppConfig
 
 logger = init_logger(__name__)
 
@@ -106,7 +106,7 @@ def prepare_place_browser_data(
         Neural data sampling rate (frames per second), used for converting neural frames to time.
     """
 
-    from pcell.analysis import load_traces
+    from placecell.analysis import load_traces
 
     # Load spikes - if spike_index provided, load all spikes with speed info
     if spike_index is not None:
@@ -196,7 +196,7 @@ def prepare_place_browser_data(
             try:
                 C_lp = load_traces(neural_path, trace_name=trace_name_lp)
             except Exception:
-                from pcell.filters import butter_lowpass_xr
+                from placecell.filters import butter_lowpass_xr
 
                 logger.info(
                     f"Filtered trace {trace_name_lp} not found, applying low-pass filter..."
@@ -453,7 +453,7 @@ def _run_browse_place(
             import base64
             import io
 
-            from pcell.visualization import plot_max_projection_with_unit_footprint
+            from placecell.visualization import plot_max_projection_with_unit_footprint
 
             # Generate image for each unit in the data
             for unit_id in data.unit_ids:

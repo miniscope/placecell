@@ -6,9 +6,10 @@ import click
 import numpy as np
 import xarray as xr
 from mio.logging import init_logger
-from pcell.analysis import load_traces
-from pcell.config import AppConfig
 from tqdm import tqdm
+
+from placecell.analysis import load_traces
+from placecell.config import AppConfig
 
 logger = init_logger(__name__)
 
