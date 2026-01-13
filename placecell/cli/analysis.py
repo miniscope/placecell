@@ -135,23 +135,44 @@ def prepare_place_browser_data(
             speed_threshold=0.0,  # Don't filter by speed
             speed_window_frames=speed_window_frames,
         )
-        # Filter by s_threshold only
-        if s_threshold > 0:
-            sp_all = sp_all[sp_all["s"] >= s_threshold].reset_index(drop=True)
+
+        # Apply dynamic 2-sigma threshold per unit
+        # For each unit, keep only spikes where s > mean(s) + 2*std(s)
+        filtered_dfs = []
+        for uid in sp_all["unit_id"].unique():
+            unit_df = sp_all[sp_all["unit_id"] == uid]
+            s_mean = unit_df["s"].mean()
+            s_std = unit_df["s"].std()
+            dynamic_threshold = s_mean + 2 * s_std
+            # Also apply fixed threshold if provided
+            effective_threshold = max(dynamic_threshold, s_threshold) if s_threshold > 0 else dynamic_threshold
+            filtered_dfs.append(unit_df[unit_df["s"] >= effective_threshold])
+        sp_all = pd.concat(filtered_dfs, ignore_index=True) if filtered_dfs else pd.DataFrame()
 
         # Separate by speed threshold
-        sp_above = sp_all[sp_all["speed"] >= speed_threshold].reset_index(drop=True)
-        sp_below = sp_all[sp_all["speed"] < speed_threshold].reset_index(drop=True)
+        sp_above = sp_all[sp_all["speed"] >= speed_threshold].reset_index(drop=True) if not sp_all.empty else pd.DataFrame()
+        sp_below = sp_all[sp_all["speed"] < speed_threshold].reset_index(drop=True) if not sp_all.empty else pd.DataFrame()
 
         # Use all units that have spikes
-        unit_ids = sorted(sp_all["unit_id"].unique().tolist())
+        unit_ids = sorted(sp_all["unit_id"].unique().tolist()) if not sp_all.empty else []
     else:
         # Use existing spike_place file (already filtered)
-        sp_above = pd.read_csv(spike_place)
-        if s_threshold > 0:
-            sp_above = sp_above[sp_above["s"] >= s_threshold].reset_index(drop=True)
+        sp_above_raw = pd.read_csv(spike_place)
+
+        # Apply dynamic 2-sigma threshold per unit
+        filtered_dfs = []
+        for uid in sp_above_raw["unit_id"].unique():
+            unit_df = sp_above_raw[sp_above_raw["unit_id"] == uid]
+            s_mean = unit_df["s"].mean()
+            s_std = unit_df["s"].std()
+            dynamic_threshold = s_mean + 2 * s_std
+            # Also apply fixed threshold if provided
+            effective_threshold = max(dynamic_threshold, s_threshold) if s_threshold > 0 else dynamic_threshold
+            filtered_dfs.append(unit_df[unit_df["s"] >= effective_threshold])
+        sp_above = pd.concat(filtered_dfs, ignore_index=True) if filtered_dfs else pd.DataFrame()
+
         sp_below = pd.DataFrame()  # Empty - no below-threshold spikes available
-        unit_ids = sorted(sp_above["unit_id"].unique().tolist())
+        unit_ids = sorted(sp_above["unit_id"].unique().tolist()) if not sp_above.empty else []
 
     if sp_above.empty and sp_below.empty:
         raise click.ClickException("No spikes to plot after applying thresholds.")
