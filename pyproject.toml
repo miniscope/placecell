@@ -1,5 +1,5 @@
 [project]
-name = "pcell"
+name = "placecell"
 version = "0.1.0"
 description = "Package for analyzing place cells"
 license = {text = "AGPL-3.0"}
