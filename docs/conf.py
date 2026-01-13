@@ -21,6 +21,11 @@ myst_enable_extensions = [
 ]
 
 html_theme = "sphinx_book_theme"
-html_title = "pcell"
+html_title = "placecell"
+
+html_theme_options = {
+    "show_toc_level": 2,
+    "toc_title": "On this page",
+}
 
 autosummary_generate = True

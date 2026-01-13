@@ -4,8 +4,9 @@ from pathlib import Path
 
 import click
 from mio.logging import init_logger
-from pcell.config import AppConfig, BehaviorConfig
-from pcell.visualization import plot_trajectory
+
+from placecell.config import AppConfig, BehaviorConfig
+from placecell.visualization import plot_trajectory
 
 logger = init_logger(__name__)
 
