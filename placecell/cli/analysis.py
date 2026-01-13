@@ -63,6 +63,8 @@ def _run_spike_place(
     speed_threshold: float,
     speed_window_frames: int,
     out_file: Path,
+    start_idx: int = 0,
+    end_idx: int | None = None,
 ) -> None:
     """Internal function: Match spikes to behavior positions and write CSV."""
 
@@ -77,11 +79,18 @@ def _run_spike_place(
         speed_window_frames=speed_window_frames,
     )
 
+    # Filter by unit index range
+    all_unit_ids = sorted(df["unit_id"].unique())
+    if end_idx is None:
+        end_idx = len(all_unit_ids) - 1
+    selected_units = all_unit_ids[start_idx : end_idx + 1]
+    df = df[df["unit_id"].isin(selected_units)]
+
     out_file = out_file.resolve()
     out_file.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(out_file, index=False)
 
-    logger.info(f"Wrote {len(df)} rows to {out_file}")
+    logger.info(f"Wrote {len(df)} rows for units {start_idx}-{end_idx} to {out_file}")
 
 
 def prepare_place_browser_data(
@@ -427,6 +436,8 @@ def _run_browse_place(
     neural_fps: float,
     output_prefix: str,
     deconv_zarr: Path | None,
+    start_idx: int = 0,
+    end_idx: int | None = None,
 ) -> None:
     """Internal function: Browser for place fields.
 
@@ -449,6 +460,40 @@ def _run_browse_place(
         trace_name_lp=trace_name_lp,
         neural_fps=neural_fps,
         deconv_zarr=deconv_zarr,
+    )
+
+    # Filter by unit index range
+    all_unit_ids = data.unit_ids
+    if end_idx is None:
+        end_idx = len(all_unit_ids) - 1
+    end_idx = min(end_idx, len(all_unit_ids) - 1)
+    idx_slice = slice(start_idx, end_idx + 1)
+
+    data = PlaceBrowserData(
+        unit_ids=all_unit_ids[idx_slice],
+        x_full=data.x_full,
+        y_full=data.y_full,
+        spike_xs_above=data.spike_xs_above[idx_slice],
+        spike_ys_above=data.spike_ys_above[idx_slice],
+        spike_xs_below=data.spike_xs_below[idx_slice],
+        spike_ys_below=data.spike_ys_below[idx_slice],
+        counts_above=data.counts_above[idx_slice],
+        counts_below=data.counts_below[idx_slice],
+        trace_t=data.trace_t,
+        trace_ys_raw=data.trace_ys_raw[idx_slice] if data.trace_ys_raw else [],
+        trace_ys_lp=data.trace_ys_lp[idx_slice] if data.trace_ys_lp else [],
+        trace_ys_yrA=data.trace_ys_yrA[idx_slice] if data.trace_ys_yrA else [],
+        trace_ys_S=data.trace_ys_S[idx_slice] if data.trace_ys_S else [],
+        has_yrA=data.has_yrA,
+        has_S=data.has_S,
+        spike_ts_trace_above=(
+            data.spike_ts_trace_above[idx_slice] if data.spike_ts_trace_above else []
+        ),
+        spike_y_trace_above=data.spike_y_trace_above[idx_slice] if data.spike_y_trace_above else [],
+        spike_ts_trace_below=(
+            data.spike_ts_trace_below[idx_slice] if data.spike_ts_trace_below else []
+        ),
+        spike_y_trace_below=data.spike_y_trace_below[idx_slice] if data.spike_y_trace_below else [],
     )
 
     # Generate max projection and footprints images for each unit as base64
@@ -526,12 +571,27 @@ def _run_browse_place(
     default=None,
     help="Output CSV path. Defaults to output/spike_place_<timestamp>.csv",
 )
+@click.option(
+    "--start-idx",
+    type=int,
+    default=0,
+    show_default=True,
+    help="Start unit index.",
+)
+@click.option(
+    "--end-idx",
+    type=int,
+    default=None,
+    help="End unit index (inclusive). Defaults to last unit.",
+)
 def spike_place(
     config: Path,
     spike_index: Path,
     neural_path: Path,
     behavior_path: Path,
     out: Path | None,
+    start_idx: int,
+    end_idx: int | None,
 ) -> None:
     """Match spikes to behavior positions."""
     if out is None:
@@ -551,6 +611,8 @@ def spike_place(
         speed_threshold=cfg.behavior.speed_threshold,
         speed_window_frames=cfg.behavior.speed_window_frames,
         out_file=out,
+        start_idx=start_idx,
+        end_idx=end_idx,
     )
 
 
@@ -592,6 +654,19 @@ def spike_place(
     default=None,
     help="Output prefix for HTML file. Defaults to output/place_browser_<timestamp>",
 )
+@click.option(
+    "--start-idx",
+    type=int,
+    default=0,
+    show_default=True,
+    help="Start unit index.",
+)
+@click.option(
+    "--end-idx",
+    type=int,
+    default=None,
+    help="End unit index (inclusive). Defaults to last unit.",
+)
 def generate_html(
     config: Path,
     spike_place_path: Path,
@@ -599,6 +674,8 @@ def generate_html(
     neural_path: Path,
     behavior_path: Path,
     out_prefix: str | None,
+    start_idx: int,
+    end_idx: int | None,
 ) -> None:
     """Generate interactive place browser HTML."""
     if out_prefix is None:
@@ -625,6 +702,8 @@ def generate_html(
         neural_fps=cfg.neural.data.fps,
         output_prefix=out_prefix,
         deconv_zarr=None,
+        start_idx=start_idx,
+        end_idx=end_idx,
     )
 
 
@@ -660,12 +739,27 @@ def generate_html(
     default=None,
     help="Label for output filenames. Defaults to timestamp.",
 )
+@click.option(
+    "--start-idx",
+    type=int,
+    default=0,
+    show_default=True,
+    help="Start unit index.",
+)
+@click.option(
+    "--end-idx",
+    type=int,
+    default=None,
+    help="End unit index (inclusive). Defaults to last unit.",
+)
 def analyze(
     config: Path,
     neural_path: Path,
     behavior_path: Path,
     out_dir: Path,
     label: str | None,
+    start_idx: int,
+    end_idx: int | None,
 ) -> None:
     """Run deconvolution, spike-place matching, and place browser from one config."""
 
@@ -713,7 +807,11 @@ def analyze(
         label,
         "--spike-index-out",
         str(out_dir / f"spike_index_{label}.csv"),
+        "--start-idx",
+        str(start_idx),
     ]
+    if end_idx is not None:
+        cmd1.extend(["--end-idx", str(end_idx)])
     subprocess.run(cmd1, check=True)
 
     # 2) Spike-place (internal function)
