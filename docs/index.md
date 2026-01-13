@@ -15,7 +15,7 @@ cli
    :toctree: _generated
    :recursive:
 
-   pcell
+   placecell
 ```
 
 ## Installation
