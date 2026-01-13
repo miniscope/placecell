@@ -208,6 +208,7 @@ def browse_place_cells(
     behavior_fps: float = 20.0,
     neural_fps: float = 20.0,
     n_shuffles: int = 100,
+    random_seed: int | None = None,
 ) -> None:
     """
     Interactive browser for place cell analysis with keyboard navigation.
@@ -240,6 +241,8 @@ def browse_place_cells(
         Neural data sampling rate (default 20.0).
     n_shuffles : int
         Number of shuffles for significance test (default 100).
+    random_seed : int, optional
+        Random seed for reproducible shuffling. If None, results vary between runs.
     """
     if plt is None:
         raise ImportError(
@@ -247,6 +250,10 @@ def browse_place_cells(
         )
 
     from scipy.ndimage import gaussian_filter
+
+    # Set random seed for reproducibility
+    if random_seed is not None:
+        np.random.seed(random_seed)
 
     # Load spike data
     df = pd.read_csv(spike_place_csv)
@@ -532,6 +539,7 @@ def plot_place_cell_summary(
     smooth_sigma: float = 1.0,
     behavior_fps: float = 20.0,
     n_shuffles: int = 100,
+    random_seed: int | None = None,
 ) -> pd.DataFrame:
     """
     Generate place cell summary figures with 5 subplots per unit.
@@ -560,6 +568,8 @@ def plot_place_cell_summary(
         Behavior sampling rate (default 20.0).
     n_shuffles : int
         Number of shuffles for significance test (default 100).
+    random_seed : int, optional
+        Random seed for reproducible shuffling. If None, results vary between runs.
 
     Returns
     -------
@@ -572,6 +582,10 @@ def plot_place_cell_summary(
         )
 
     from scipy.ndimage import gaussian_filter
+
+    # Set random seed for reproducibility
+    if random_seed is not None:
+        np.random.seed(random_seed)
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)

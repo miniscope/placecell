@@ -93,6 +93,16 @@ class RateMapConfig(MiniscopeConfig, ConfigYAMLMixin):
         ge=0.0,
         description="Gaussian smoothing sigma for rate map (default 1.0, 0 = no smoothing).",
     )
+    n_shuffles: int = Field(
+        100,
+        ge=1,
+        le=10000,
+        description="Number of shuffles for spatial information significance test (default 100).",
+    )
+    random_seed: int | None = Field(
+        None,
+        description="Random seed for reproducible shuffling. If None, results vary between runs.",
+    )
 
 
 class BehaviorConfig(MiniscopeConfig, ConfigYAMLMixin):

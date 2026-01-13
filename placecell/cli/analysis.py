@@ -301,4 +301,6 @@ def plot(
         smooth_sigma=cfg.behavior.ratemap.smooth_sigma,
         behavior_fps=cfg.behavior.behavior_fps,
         neural_fps=cfg.neural.data.fps,
+        n_shuffles=cfg.behavior.ratemap.n_shuffles,
+        random_seed=cfg.behavior.ratemap.random_seed,
     )
