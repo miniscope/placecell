@@ -572,7 +572,7 @@ def spike_place(
     "--spike-index",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     default=None,
-    help="Spike index CSV (optional, for trace overlay).",
+    help="Spike index CSV (optional, shows below-threshold spikes too).",
 )
 @click.option(
     "--neural-path",
@@ -587,12 +587,6 @@ def spike_place(
     help="Directory containing behavior data.",
 )
 @click.option(
-    "--deconv-zarr",
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
-    default=None,
-    help="Deconvolution zarr from deconvolve step (optional).",
-)
-@click.option(
     "--out-prefix",
     type=str,
     default=None,
@@ -604,7 +598,6 @@ def generate_html(
     spike_index: Path | None,
     neural_path: Path,
     behavior_path: Path,
-    deconv_zarr: Path | None,
     out_prefix: str | None,
 ) -> None:
     """Generate interactive place browser HTML."""
@@ -631,7 +624,7 @@ def generate_html(
         trace_name_lp="C_lp",
         neural_fps=cfg.neural.data.fps,
         output_prefix=out_prefix,
-        deconv_zarr=deconv_zarr,
+        deconv_zarr=None,
     )
 
 
