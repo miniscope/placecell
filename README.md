@@ -14,7 +14,7 @@
 Runs the full pipeline: deconvolution, spike-place matching, and generates the place browser HTML.
 
 ```bash
-pcell analyze \
+pcell workflow visualize \
   --config your_config.yaml \
   --neural-path /path/to/neural \
   --behavior-path /path/to/behavior \

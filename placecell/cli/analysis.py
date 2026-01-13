@@ -707,7 +707,13 @@ def generate_html(
     )
 
 
-@click.command(name="analyze")
+@click.group(name="workflow")
+def workflow() -> None:
+    """Workflow commands for place cell analysis."""
+    pass
+
+
+@workflow.command(name="visualize")
 @click.option(
     "--config",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -752,7 +758,7 @@ def generate_html(
     default=None,
     help="End unit index (inclusive). Defaults to last unit.",
 )
-def analyze(
+def visualize(
     config: Path,
     neural_path: Path,
     behavior_path: Path,
@@ -761,7 +767,7 @@ def analyze(
     start_idx: int,
     end_idx: int | None,
 ) -> None:
-    """Run deconvolution, spike-place matching, and place browser from one config."""
+    """Run deconvolution, spike-place matching, and place browser."""
 
     import subprocess
 
