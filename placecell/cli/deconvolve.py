@@ -51,12 +51,27 @@ def _default_label() -> str:
     default=None,
     help="CSV file to write spike indices. Defaults to <out-dir>/spike_index_<label>.csv",
 )
+@click.option(
+    "--start-idx",
+    type=int,
+    default=0,
+    show_default=True,
+    help="Start unit index.",
+)
+@click.option(
+    "--end-idx",
+    type=int,
+    default=None,
+    help="End unit index (inclusive). Defaults to last unit.",
+)
 def deconvolve(
     config: Path,
     neural_path: Path,
     out_dir: Path,
     label: str | None,
     spike_index_out: Path | None,
+    start_idx: int,
+    end_idx: int | None,
 ) -> None:
     """Run OASIS deconvolution using settings from config file."""
 
@@ -91,12 +106,8 @@ def deconvolve(
 
     all_unit_ids = list(map(int, C_da["unit_id"].values))
 
-    start_idx = click.prompt(f"Start index [0-{len(all_unit_ids) - 1}]", type=int, default=0)
-    end_idx = click.prompt(
-        f"End index [{start_idx}-{len(all_unit_ids) - 1}]",
-        type=int,
-        default=len(all_unit_ids) - 1,
-    )
+    if end_idx is None:
+        end_idx = len(all_unit_ids) - 1
 
     if (
         start_idx < 0
@@ -104,7 +115,10 @@ def deconvolve(
         or end_idx < start_idx
         or end_idx >= len(all_unit_ids)
     ):
-        raise click.ClickException("Invalid range")
+        raise click.ClickException(
+            f"Invalid range: start_idx={start_idx}, end_idx={end_idx}, "
+            f"valid range is 0-{len(all_unit_ids) - 1}"
+        )
 
     unit_ids = all_unit_ids[start_idx : end_idx + 1]
     if max_units is not None and len(unit_ids) > max_units:
