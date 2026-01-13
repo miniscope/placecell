@@ -9,6 +9,7 @@ extensions = [
     "sphinx_click",
     "sphinx.ext.autodoc",
     "sphinx.ext.autosummary",
+    "sphinx.ext.napoleon",
 ]
 
 source_suffix = {
@@ -28,4 +29,14 @@ html_theme_options = {
     "toc_title": "On this page",
 }
 
+# Autodoc settings
+autodoc_default_options = {
+    "members": True,
+    "undoc-members": True,
+    "show-inheritance": True,
+    "member-order": "bysource",
+}
+autodoc_typehints = "both"
+
+# Autosummary settings
 autosummary_generate = True
