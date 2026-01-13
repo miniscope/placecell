@@ -1,11 +1,9 @@
 """Main CLI entry point for placecell."""
 
-import logging
-
 import click
 from mio.logging import init_logger
 
-from placecell.cli.analysis import analyze
+from placecell.cli.analysis import generate_html, spike_place, workflow
 from placecell.cli.behavior import behavior
 from placecell.cli.deconvolve import deconvolve
 
@@ -19,10 +17,12 @@ from placecell.cli.deconvolve import deconvolve
 )
 def placecell(verbose: bool) -> None:
     """placecell command-line tools."""
-    init_logger(level=logging.DEBUG if verbose else logging.INFO)
+    init_logger(__name__, level="DEBUG" if verbose else "INFO")
 
 
 # Register all command groups
 placecell.add_command(deconvolve)
-placecell.add_command(analyze)
+placecell.add_command(spike_place)
+placecell.add_command(generate_html)
+placecell.add_command(workflow)
 placecell.add_command(behavior)

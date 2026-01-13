@@ -2,6 +2,7 @@
 
 import json
 import webbrowser
+from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
 
@@ -21,6 +22,10 @@ from placecell.cli.utils import load_template
 from placecell.config import AppConfig
 
 logger = init_logger(__name__)
+
+
+def _default_timestamp() -> str:
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
 class PlaceBrowserData(NamedTuple):
@@ -58,6 +63,8 @@ def _run_spike_place(
     speed_threshold: float,
     speed_window_frames: int,
     out_file: Path,
+    start_idx: int = 0,
+    end_idx: int | None = None,
 ) -> None:
     """Internal function: Match spikes to behavior positions and write CSV."""
 
@@ -72,11 +79,18 @@ def _run_spike_place(
         speed_window_frames=speed_window_frames,
     )
 
+    # Filter by unit index range
+    all_unit_ids = sorted(df["unit_id"].unique())
+    if end_idx is None:
+        end_idx = len(all_unit_ids) - 1
+    selected_units = all_unit_ids[start_idx : end_idx + 1]
+    df = df[df["unit_id"].isin(selected_units)]
+
     out_file = out_file.resolve()
     out_file.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(out_file, index=False)
 
-    logger.info(f"Wrote {len(df)} rows to {out_file}")
+    logger.info(f"Wrote {len(df)} rows for units {start_idx}-{end_idx} to {out_file}")
 
 
 def prepare_place_browser_data(
@@ -422,6 +436,8 @@ def _run_browse_place(
     neural_fps: float,
     output_prefix: str,
     deconv_zarr: Path | None,
+    start_idx: int = 0,
+    end_idx: int | None = None,
 ) -> None:
     """Internal function: Browser for place fields.
 
@@ -444,6 +460,40 @@ def _run_browse_place(
         trace_name_lp=trace_name_lp,
         neural_fps=neural_fps,
         deconv_zarr=deconv_zarr,
+    )
+
+    # Filter by unit index range
+    all_unit_ids = data.unit_ids
+    if end_idx is None:
+        end_idx = len(all_unit_ids) - 1
+    end_idx = min(end_idx, len(all_unit_ids) - 1)
+    idx_slice = slice(start_idx, end_idx + 1)
+
+    data = PlaceBrowserData(
+        unit_ids=all_unit_ids[idx_slice],
+        x_full=data.x_full,
+        y_full=data.y_full,
+        spike_xs_above=data.spike_xs_above[idx_slice],
+        spike_ys_above=data.spike_ys_above[idx_slice],
+        spike_xs_below=data.spike_xs_below[idx_slice],
+        spike_ys_below=data.spike_ys_below[idx_slice],
+        counts_above=data.counts_above[idx_slice],
+        counts_below=data.counts_below[idx_slice],
+        trace_t=data.trace_t,
+        trace_ys_raw=data.trace_ys_raw[idx_slice] if data.trace_ys_raw else [],
+        trace_ys_lp=data.trace_ys_lp[idx_slice] if data.trace_ys_lp else [],
+        trace_ys_yrA=data.trace_ys_yrA[idx_slice] if data.trace_ys_yrA else [],
+        trace_ys_S=data.trace_ys_S[idx_slice] if data.trace_ys_S else [],
+        has_yrA=data.has_yrA,
+        has_S=data.has_S,
+        spike_ts_trace_above=(
+            data.spike_ts_trace_above[idx_slice] if data.spike_ts_trace_above else []
+        ),
+        spike_y_trace_above=data.spike_y_trace_above[idx_slice] if data.spike_y_trace_above else [],
+        spike_ts_trace_below=(
+            data.spike_ts_trace_below[idx_slice] if data.spike_ts_trace_below else []
+        ),
+        spike_y_trace_below=data.spike_y_trace_below[idx_slice] if data.spike_y_trace_below else [],
     )
 
     # Generate max projection and footprints images for each unit as base64
@@ -490,7 +540,180 @@ def _run_browse_place(
         logger.info("Could not open browser automatically; open the HTML file manually.")
 
 
-@click.command(name="analyze")
+@click.command(name="spike-place")
+@click.option(
+    "--config",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=True,
+    help="YAML config file with behavior settings.",
+)
+@click.option(
+    "--spike-index",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=True,
+    help="Spike index CSV from deconvolve step.",
+)
+@click.option(
+    "--neural-path",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    required=True,
+    help="Directory containing neural_timestamp.csv.",
+)
+@click.option(
+    "--behavior-path",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    required=True,
+    help="Directory containing behavior_position.csv and behavior_timestamp.csv.",
+)
+@click.option(
+    "--out",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="Output CSV path. Defaults to output/spike_place_<timestamp>.csv",
+)
+@click.option(
+    "--start-idx",
+    type=int,
+    default=0,
+    show_default=True,
+    help="Start unit index.",
+)
+@click.option(
+    "--end-idx",
+    type=int,
+    default=None,
+    help="End unit index (inclusive). Defaults to last unit.",
+)
+def spike_place(
+    config: Path,
+    spike_index: Path,
+    neural_path: Path,
+    behavior_path: Path,
+    out: Path | None,
+    start_idx: int,
+    end_idx: int | None,
+) -> None:
+    """Match spikes to behavior positions."""
+    if out is None:
+        out = Path(f"output/spike_place_{_default_timestamp()}.csv")
+
+    cfg = AppConfig.from_yaml(config)
+    if cfg.behavior is None:
+        raise click.ClickException("Config file must include a 'behavior' section.")
+
+    _run_spike_place(
+        spike_index=spike_index,
+        neural_timestamp=neural_path / "neural_timestamp.csv",
+        behavior_position=behavior_path / "behavior_position.csv",
+        behavior_timestamp=behavior_path / "behavior_timestamp.csv",
+        bodypart=cfg.behavior.bodypart,
+        behavior_fps=cfg.behavior.behavior_fps,
+        speed_threshold=cfg.behavior.speed_threshold,
+        speed_window_frames=cfg.behavior.speed_window_frames,
+        out_file=out,
+        start_idx=start_idx,
+        end_idx=end_idx,
+    )
+
+
+@click.command(name="generate-html")
+@click.option(
+    "--config",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=True,
+    help="YAML config file.",
+)
+@click.option(
+    "--spike-place",
+    "spike_place_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=True,
+    help="Spike-place CSV from spike-place step.",
+)
+@click.option(
+    "--spike-index",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Spike index CSV (optional, shows below-threshold spikes too).",
+)
+@click.option(
+    "--neural-path",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    required=True,
+    help="Directory containing neural data.",
+)
+@click.option(
+    "--behavior-path",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    required=True,
+    help="Directory containing behavior data.",
+)
+@click.option(
+    "--out-prefix",
+    type=str,
+    default=None,
+    help="Output prefix for HTML file. Defaults to output/place_browser_<timestamp>",
+)
+@click.option(
+    "--start-idx",
+    type=int,
+    default=0,
+    show_default=True,
+    help="Start unit index.",
+)
+@click.option(
+    "--end-idx",
+    type=int,
+    default=None,
+    help="End unit index (inclusive). Defaults to last unit.",
+)
+def generate_html(
+    config: Path,
+    spike_place_path: Path,
+    spike_index: Path | None,
+    neural_path: Path,
+    behavior_path: Path,
+    out_prefix: str | None,
+    start_idx: int,
+    end_idx: int | None,
+) -> None:
+    """Generate interactive place browser HTML."""
+    if out_prefix is None:
+        out_prefix = f"output/place_browser_{_default_timestamp()}"
+
+    cfg = AppConfig.from_yaml(config)
+    if cfg.behavior is None:
+        raise click.ClickException("Config file must include a 'behavior' section.")
+
+    _run_browse_place(
+        spike_place=spike_place_path,
+        spike_index=spike_index,
+        neural_timestamp=neural_path / "neural_timestamp.csv",
+        behavior_position=behavior_path / "behavior_position.csv",
+        behavior_timestamp=behavior_path / "behavior_timestamp.csv",
+        bodypart=cfg.behavior.bodypart,
+        behavior_fps=cfg.behavior.behavior_fps,
+        speed_threshold=cfg.behavior.speed_threshold,
+        speed_window_frames=cfg.behavior.speed_window_frames,
+        s_threshold=cfg.neural.s_threshold,
+        neural_path=neural_path,
+        trace_name=cfg.neural.trace_name,
+        trace_name_lp="C_lp",
+        neural_fps=cfg.neural.data.fps,
+        output_prefix=out_prefix,
+        deconv_zarr=None,
+        start_idx=start_idx,
+        end_idx=end_idx,
+    )
+
+
+@click.group(name="workflow")
+def workflow() -> None:
+    """Workflow commands for place cell analysis."""
+    pass
+
+
+@workflow.command(name="visualize")
 @click.option(
     "--config",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -512,23 +735,39 @@ def _run_browse_place(
 @click.option(
     "--out-dir",
     type=click.Path(file_okay=False, dir_okay=True, path_type=Path),
-    default=Path("export"),
+    default=Path("output"),
+    show_default=True,
     help="Output directory for analysis results.",
 )
 @click.option(
     "--label",
     type=str,
     default=None,
-    help="Label for output filenames. If omitted, auto-generated from output directory name.",
+    help="Label for output filenames. Defaults to timestamp.",
 )
-def analyze(
+@click.option(
+    "--start-idx",
+    type=int,
+    default=0,
+    show_default=True,
+    help="Start unit index.",
+)
+@click.option(
+    "--end-idx",
+    type=int,
+    default=None,
+    help="End unit index (inclusive). Defaults to last unit.",
+)
+def visualize(
     config: Path,
     neural_path: Path,
     behavior_path: Path,
     out_dir: Path,
     label: str | None,
+    start_idx: int,
+    end_idx: int | None,
 ) -> None:
-    """Run deconvolution, spike-place matching, and place browser from one config."""
+    """Run deconvolution, spike-place matching, and place browser."""
 
     import subprocess
 
@@ -538,18 +777,9 @@ def analyze(
 
     bodypart = cfg.behavior.bodypart
 
-    # Auto-generate label from output directory if not provided
+    # Auto-generate label with timestamp if not provided
     if label is None:
-        base_label = out_dir.name
-        if not base_label or base_label == ".":
-            base_label = "output"
-
-        # Check if output directory exists and find next available label
-        label = base_label
-        counter = 0
-        while (out_dir / f"{label}_oasis_deconv.zarr").exists():
-            counter += 1
-            label = f"{base_label}_{counter}"
+        label = _default_timestamp()
 
     # Ensure output directory exists
     out_dir = out_dir.resolve()
@@ -583,7 +813,11 @@ def analyze(
         label,
         "--spike-index-out",
         str(out_dir / f"spike_index_{label}.csv"),
+        "--start-idx",
+        str(start_idx),
     ]
+    if end_idx is not None:
+        cmd1.extend(["--end-idx", str(end_idx)])
     subprocess.run(cmd1, check=True)
 
     # 2) Spike-place (internal function)

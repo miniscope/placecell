@@ -44,7 +44,7 @@ all = [
 ]
 
 [project.scripts]
-pcell = "placecell.cli:placecell"
+pcell = "placecell.cli.main:placecell"
 
 [tool.pdm.scripts]
 test = "pytest"

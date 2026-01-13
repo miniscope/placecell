@@ -1,5 +1,6 @@
 """Deconvolution CLI command."""
 
+from datetime import datetime
 from pathlib import Path
 
 import click
@@ -12,6 +13,10 @@ from placecell.analysis import load_traces
 from placecell.config import AppConfig
 
 logger = init_logger(__name__)
+
+
+def _default_label() -> str:
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
 @click.command(name="deconvolve")
@@ -30,15 +35,15 @@ logger = init_logger(__name__)
 @click.option(
     "--out-dir",
     type=click.Path(file_okay=False, dir_okay=True, path_type=Path),
-    required=True,
+    default=Path("output"),
+    show_default=True,
     help="Output directory for deconvolution results.",
 )
 @click.option(
     "--label",
     type=str,
-    default="session",
-    show_default=True,
-    help="Label used in the output zarr folder name.",
+    default=None,
+    help="Label used in output filenames. Defaults to timestamp.",
 )
 @click.option(
     "--spike-index-out",
@@ -46,12 +51,27 @@ logger = init_logger(__name__)
     default=None,
     help="CSV file to write spike indices. Defaults to <out-dir>/spike_index_<label>.csv",
 )
+@click.option(
+    "--start-idx",
+    type=int,
+    default=0,
+    show_default=True,
+    help="Start unit index.",
+)
+@click.option(
+    "--end-idx",
+    type=int,
+    default=None,
+    help="End unit index (inclusive). Defaults to last unit.",
+)
 def deconvolve(
     config: Path,
     neural_path: Path,
     out_dir: Path,
-    label: str,
+    label: str | None,
     spike_index_out: Path | None,
+    start_idx: int,
+    end_idx: int | None,
 ) -> None:
     """Run OASIS deconvolution using settings from config file."""
 
@@ -59,6 +79,9 @@ def deconvolve(
         from oasis.functions import deconvolve as oasis_deconvolve  # type: ignore
     except Exception as exc:
         raise click.ClickException(f"Could not import oasis-deconv: {exc}") from exc
+
+    if label is None:
+        label = _default_label()
 
     cfg = AppConfig.from_yaml(config)
     trace_name = cfg.neural.trace_name
@@ -83,12 +106,8 @@ def deconvolve(
 
     all_unit_ids = list(map(int, C_da["unit_id"].values))
 
-    start_idx = click.prompt(f"Start index [0-{len(all_unit_ids) - 1}]", type=int, default=0)
-    end_idx = click.prompt(
-        f"End index [{start_idx}-{len(all_unit_ids) - 1}]",
-        type=int,
-        default=len(all_unit_ids) - 1,
-    )
+    if end_idx is None:
+        end_idx = len(all_unit_ids) - 1
 
     if (
         start_idx < 0
@@ -96,7 +115,10 @@ def deconvolve(
         or end_idx < start_idx
         or end_idx >= len(all_unit_ids)
     ):
-        raise click.ClickException("Invalid range")
+        raise click.ClickException(
+            f"Invalid range: start_idx={start_idx}, end_idx={end_idx}, "
+            f"valid range is 0-{len(all_unit_ids) - 1}"
+        )
 
     unit_ids = all_unit_ids[start_idx : end_idx + 1]
     if max_units is not None and len(unit_ids) > max_units:
