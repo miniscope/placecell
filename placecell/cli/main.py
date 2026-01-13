@@ -5,7 +5,7 @@ import logging
 import click
 from mio.logging import init_logger
 
-from placecell.cli.analysis import analyze
+from placecell.cli.analysis import analyze, generate_html, spike_place
 from placecell.cli.behavior import behavior
 from placecell.cli.deconvolve import deconvolve
 
@@ -24,5 +24,7 @@ def placecell(verbose: bool) -> None:
 
 # Register all command groups
 placecell.add_command(deconvolve)
+placecell.add_command(spike_place)
+placecell.add_command(generate_html)
 placecell.add_command(analyze)
 placecell.add_command(behavior)

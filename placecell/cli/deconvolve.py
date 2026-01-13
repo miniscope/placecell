@@ -1,5 +1,6 @@
 """Deconvolution CLI command."""
 
+from datetime import datetime
 from pathlib import Path
 
 import click
@@ -12,6 +13,10 @@ from placecell.analysis import load_traces
 from placecell.config import AppConfig
 
 logger = init_logger(__name__)
+
+
+def _default_label() -> str:
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
 @click.command(name="deconvolve")
@@ -30,15 +35,15 @@ logger = init_logger(__name__)
 @click.option(
     "--out-dir",
     type=click.Path(file_okay=False, dir_okay=True, path_type=Path),
-    required=True,
+    default=Path("output"),
+    show_default=True,
     help="Output directory for deconvolution results.",
 )
 @click.option(
     "--label",
     type=str,
-    default="session",
-    show_default=True,
-    help="Label used in the output zarr folder name.",
+    default=None,
+    help="Label used in output filenames. Defaults to timestamp.",
 )
 @click.option(
     "--spike-index-out",
@@ -50,7 +55,7 @@ def deconvolve(
     config: Path,
     neural_path: Path,
     out_dir: Path,
-    label: str,
+    label: str | None,
     spike_index_out: Path | None,
 ) -> None:
     """Run OASIS deconvolution using settings from config file."""
@@ -59,6 +64,9 @@ def deconvolve(
         from oasis.functions import deconvolve as oasis_deconvolve  # type: ignore
     except Exception as exc:
         raise click.ClickException(f"Could not import oasis-deconv: {exc}") from exc
+
+    if label is None:
+        label = _default_label()
 
     cfg = AppConfig.from_yaml(config)
     trace_name = cfg.neural.trace_name

@@ -2,6 +2,7 @@
 
 import json
 import webbrowser
+from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
 
@@ -21,6 +22,10 @@ from placecell.cli.utils import load_template
 from placecell.config import AppConfig
 
 logger = init_logger(__name__)
+
+
+def _default_timestamp() -> str:
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
 class PlaceBrowserData(NamedTuple):
@@ -490,6 +495,146 @@ def _run_browse_place(
         logger.info("Could not open browser automatically; open the HTML file manually.")
 
 
+@click.command(name="spike-place")
+@click.option(
+    "--config",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=True,
+    help="YAML config file with behavior settings.",
+)
+@click.option(
+    "--spike-index",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=True,
+    help="Spike index CSV from deconvolve step.",
+)
+@click.option(
+    "--neural-path",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    required=True,
+    help="Directory containing neural_timestamp.csv.",
+)
+@click.option(
+    "--behavior-path",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    required=True,
+    help="Directory containing behavior_position.csv and behavior_timestamp.csv.",
+)
+@click.option(
+    "--out",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="Output CSV path. Defaults to output/spike_place_<timestamp>.csv",
+)
+def spike_place(
+    config: Path,
+    spike_index: Path,
+    neural_path: Path,
+    behavior_path: Path,
+    out: Path | None,
+) -> None:
+    """Match spikes to behavior positions."""
+    if out is None:
+        out = Path(f"output/spike_place_{_default_timestamp()}.csv")
+
+    cfg = AppConfig.from_yaml(config)
+    if cfg.behavior is None:
+        raise click.ClickException("Config file must include a 'behavior' section.")
+
+    _run_spike_place(
+        spike_index=spike_index,
+        neural_timestamp=neural_path / "neural_timestamp.csv",
+        behavior_position=behavior_path / "behavior_position.csv",
+        behavior_timestamp=behavior_path / "behavior_timestamp.csv",
+        bodypart=cfg.behavior.bodypart,
+        behavior_fps=cfg.behavior.behavior_fps,
+        speed_threshold=cfg.behavior.speed_threshold,
+        speed_window_frames=cfg.behavior.speed_window_frames,
+        out_file=out,
+    )
+
+
+@click.command(name="generate-html")
+@click.option(
+    "--config",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=True,
+    help="YAML config file.",
+)
+@click.option(
+    "--spike-place",
+    "spike_place_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=True,
+    help="Spike-place CSV from spike-place step.",
+)
+@click.option(
+    "--spike-index",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Spike index CSV (optional, for trace overlay).",
+)
+@click.option(
+    "--neural-path",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    required=True,
+    help="Directory containing neural data.",
+)
+@click.option(
+    "--behavior-path",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    required=True,
+    help="Directory containing behavior data.",
+)
+@click.option(
+    "--deconv-zarr",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    default=None,
+    help="Deconvolution zarr from deconvolve step (optional).",
+)
+@click.option(
+    "--out-prefix",
+    type=str,
+    default=None,
+    help="Output prefix for HTML file. Defaults to output/place_browser_<timestamp>",
+)
+def generate_html(
+    config: Path,
+    spike_place_path: Path,
+    spike_index: Path | None,
+    neural_path: Path,
+    behavior_path: Path,
+    deconv_zarr: Path | None,
+    out_prefix: str | None,
+) -> None:
+    """Generate interactive place browser HTML."""
+    if out_prefix is None:
+        out_prefix = f"output/place_browser_{_default_timestamp()}"
+
+    cfg = AppConfig.from_yaml(config)
+    if cfg.behavior is None:
+        raise click.ClickException("Config file must include a 'behavior' section.")
+
+    _run_browse_place(
+        spike_place=spike_place_path,
+        spike_index=spike_index,
+        neural_timestamp=neural_path / "neural_timestamp.csv",
+        behavior_position=behavior_path / "behavior_position.csv",
+        behavior_timestamp=behavior_path / "behavior_timestamp.csv",
+        bodypart=cfg.behavior.bodypart,
+        behavior_fps=cfg.behavior.behavior_fps,
+        speed_threshold=cfg.behavior.speed_threshold,
+        speed_window_frames=cfg.behavior.speed_window_frames,
+        s_threshold=cfg.neural.s_threshold,
+        neural_path=neural_path,
+        trace_name=cfg.neural.trace_name,
+        trace_name_lp="C_lp",
+        neural_fps=cfg.neural.data.fps,
+        output_prefix=out_prefix,
+        deconv_zarr=deconv_zarr,
+    )
+
+
 @click.command(name="analyze")
 @click.option(
     "--config",
@@ -512,14 +657,15 @@ def _run_browse_place(
 @click.option(
     "--out-dir",
     type=click.Path(file_okay=False, dir_okay=True, path_type=Path),
-    default=Path("export"),
+    default=Path("output"),
+    show_default=True,
     help="Output directory for analysis results.",
 )
 @click.option(
     "--label",
     type=str,
     default=None,
-    help="Label for output filenames. If omitted, auto-generated from output directory name.",
+    help="Label for output filenames. Defaults to timestamp.",
 )
 def analyze(
     config: Path,
@@ -538,18 +684,9 @@ def analyze(
 
     bodypart = cfg.behavior.bodypart
 
-    # Auto-generate label from output directory if not provided
+    # Auto-generate label with timestamp if not provided
     if label is None:
-        base_label = out_dir.name
-        if not base_label or base_label == ".":
-            base_label = "output"
-
-        # Check if output directory exists and find next available label
-        label = base_label
-        counter = 0
-        while (out_dir / f"{label}_oasis_deconv.zarr").exists():
-            counter += 1
-            label = f"{base_label}_{counter}"
+        label = _default_timestamp()
 
     # Ensure output directory exists
     out_dir = out_dir.resolve()
