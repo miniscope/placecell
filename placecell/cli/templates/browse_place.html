@@ -10,15 +10,16 @@
       #status {{ margin-left: 0.5rem; font-size: 0.9rem; color: #444; }}
       select {{ min-width: 120px; }}
       button {{ padding: 0.3rem 0.7rem; }}
-      #place-container {{ display: flex; gap: 1rem; width: 100%; max-width: 1200px; }}
-      #plot_place {{ flex: 1; min-width: 0; width: 500px; height: 500px; }}
+      #place-container {{ display: flex; gap: 1rem; width: 100%; max-width: 1600px; flex-wrap: wrap; }}
+      #plot_place {{ flex: 1; min-width: 400px; height: 450px; }}
+      #plot_ratemap {{ flex: 1; min-width: 400px; height: 450px; }}
       #max-proj-container {{ flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; }}
       #max-proj-img {{ max-width: 100%; height: auto; }}
     </style>
   </head>
   <body>
     <h1>pcell place browser</h1>
-    <p>Trajectory with spike locations per unit (s ≥ {s_threshold}, speed threshold: {speed_threshold} {speed_units}).</p>
+    <p>Trajectory with spike locations per unit (dynamic 2σ threshold, speed threshold: {speed_threshold} {speed_units}).</p>
     <div id="controls">
       <button id="prev-btn">&laquo; Prev</button>
       <button id="next-btn">Next &raquo;</button>
@@ -29,11 +30,12 @@
     </div>
     <div id="place-container">
       <div id="plot_place"></div>
+      <div id="plot_ratemap"></div>
       <div id="max-proj-container" style="display: none;">
         <img id="max-proj-img" src="" alt="Max projection with spatial footprints" />
       </div>
     </div>
-    <div id="plot_trace" style="width: 100%; max-width: 1200px; height: 280px;"></div>
+    <div id="plot_trace" style="width: 100%; max-width: 1600px; height: 280px;"></div>
     <script>
       const unitIds = {unit_ids_json};
       const x_full = {x_full_json};
@@ -55,6 +57,9 @@
       const spikeYTraceBelow = {spike_y_trace_below_json};
       const hasMaxProjFootprints = {has_max_proj_footprints};
       const maxProjFootprintsImgs = {max_proj_footprints_imgs_json};
+      const rateMaps = {rate_maps_json};
+      const xEdges = {x_edges_json};
+      const yEdges = {y_edges_json};
 
       // Show max projection image if available
       if (hasMaxProjFootprints && Object.keys(maxProjFootprintsImgs).length > 0) {{
@@ -63,6 +68,7 @@
       }}
 
       const hasTraces = traceT.length > 0 && traceYsRaw.length === unitIds.length;
+      const hasRateMaps = rateMaps.length === unitIds.length && xEdges.length > 0;
 
       const unitSelect = document.getElementById('unit-select');
       const statusEl = document.getElementById('status');
@@ -110,9 +116,9 @@
 
         const dataPlace = [traj, spikesAbove, spikesBelow];
         const totalSpikes = countsAbove[idx] + countsBelow[idx];
-        const paramString = 's ≥ ' + sThreshold + ', speed threshold: ' + speedThreshold + ' ' + speedUnits;
+        const paramString = 'Dynamic 2σ threshold, speed ≥ ' + speedThreshold + ' ' + speedUnits;
         const layoutPlace = {{
-          title: 'unit ' + uid + ' (above: ' + countsAbove[idx] + ', below: ' + countsBelow[idx] + ', total: ' + totalSpikes + ')',
+          title: 'unit ' + uid + ' trajectory (above: ' + countsAbove[idx] + ', below: ' + countsBelow[idx] + ')',
           xaxis: {{ title: 'X' }},
           yaxis: {{ title: 'Y', scaleanchor: 'x', scaleratio: 1 }},
           margin: {{ l: 60, r: 20, t: 40, b: 100 }},
@@ -131,6 +137,37 @@
         }};
 
         Plotly.newPlot('plot_place', dataPlace, layoutPlace, {{responsive: true}});
+
+        // Rate map plot
+        if (hasRateMaps) {{
+          const rateMap = rateMaps[idx];
+          const x0 = xEdges[0];
+          const x1 = xEdges[xEdges.length - 1];
+          const y0 = yEdges[0];
+          const y1 = yEdges[yEdges.length - 1];
+
+          const heatmapData = [{{
+            z: rateMap,
+            type: 'heatmap',
+            colorscale: 'Jet',
+            x0: x0,
+            dx: (x1 - x0) / rateMap[0].length,
+            y0: y0,
+            dy: (y1 - y0) / rateMap.length,
+            colorbar: {{ title: 'Rate' }}
+          }}];
+
+          const layoutRateMap = {{
+            title: 'unit ' + uid + ' rate map',
+            xaxis: {{ title: 'X' }},
+            yaxis: {{ title: 'Y', scaleanchor: 'x', scaleratio: 1 }},
+            margin: {{ l: 60, r: 20, t: 40, b: 50 }},
+          }};
+
+          Plotly.newPlot('plot_ratemap', heatmapData, layoutRateMap, {{responsive: true}});
+        }} else {{
+          document.getElementById('plot_ratemap').innerHTML = '<em>No rate map data</em>';
+        }}
 
         if (hasTraces) {{
           const yRaw = traceYsRaw[idx];

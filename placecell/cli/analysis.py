@@ -51,6 +51,10 @@ class PlaceBrowserData(NamedTuple):
     spike_y_trace_above: list[list[float]]
     spike_ts_trace_below: list[list[float]]
     spike_y_trace_below: list[list[float]]
+    # Rate map data
+    rate_maps: list[list[list[float]]]  # Per-unit 2D rate maps
+    x_edges: list[float]  # Bin edges for x axis
+    y_edges: list[float]  # Bin edges for y axis
 
 
 def _run_spike_place(
@@ -109,6 +113,9 @@ def prepare_place_browser_data(
     trace_name_lp: str,
     neural_fps: float,
     deconv_zarr: Path | None,
+    bins: int = 30,
+    min_occupancy: float = 0.1,
+    smooth_sigma: float = 1.0,
 ) -> PlaceBrowserData:
     """Prepare data for place browser visualization.
 
@@ -118,6 +125,12 @@ def prepare_place_browser_data(
         Behavior data sampling rate (frames per second), used for spike-place matching.
     neural_fps:
         Neural data sampling rate (frames per second), used for converting neural frames to time.
+    bins:
+        Number of spatial bins for rate map (default 30).
+    min_occupancy:
+        Minimum occupancy time (seconds) for a bin to be included (default 0.1).
+    smooth_sigma:
+        Gaussian smoothing sigma for rate map (default 1.0).
     """
 
     from placecell.analysis import load_traces
@@ -145,13 +158,23 @@ def prepare_place_browser_data(
             s_std = unit_df["s"].std()
             dynamic_threshold = s_mean + 2 * s_std
             # Also apply fixed threshold if provided
-            effective_threshold = max(dynamic_threshold, s_threshold) if s_threshold > 0 else dynamic_threshold
+            effective_threshold = (
+                max(dynamic_threshold, s_threshold) if s_threshold > 0 else dynamic_threshold
+            )
             filtered_dfs.append(unit_df[unit_df["s"] >= effective_threshold])
         sp_all = pd.concat(filtered_dfs, ignore_index=True) if filtered_dfs else pd.DataFrame()
 
         # Separate by speed threshold
-        sp_above = sp_all[sp_all["speed"] >= speed_threshold].reset_index(drop=True) if not sp_all.empty else pd.DataFrame()
-        sp_below = sp_all[sp_all["speed"] < speed_threshold].reset_index(drop=True) if not sp_all.empty else pd.DataFrame()
+        sp_above = (
+            sp_all[sp_all["speed"] >= speed_threshold].reset_index(drop=True)
+            if not sp_all.empty
+            else pd.DataFrame()
+        )
+        sp_below = (
+            sp_all[sp_all["speed"] < speed_threshold].reset_index(drop=True)
+            if not sp_all.empty
+            else pd.DataFrame()
+        )
 
         # Use all units that have spikes
         unit_ids = sorted(sp_all["unit_id"].unique().tolist()) if not sp_all.empty else []
@@ -167,7 +190,9 @@ def prepare_place_browser_data(
             s_std = unit_df["s"].std()
             dynamic_threshold = s_mean + 2 * s_std
             # Also apply fixed threshold if provided
-            effective_threshold = max(dynamic_threshold, s_threshold) if s_threshold > 0 else dynamic_threshold
+            effective_threshold = (
+                max(dynamic_threshold, s_threshold) if s_threshold > 0 else dynamic_threshold
+            )
             filtered_dfs.append(unit_df[unit_df["s"] >= effective_threshold])
         sp_above = pd.concat(filtered_dfs, ignore_index=True) if filtered_dfs else pd.DataFrame()
 
@@ -183,6 +208,22 @@ def prepare_place_browser_data(
     x_full = beh_pos[(scorer, bodypart, "x")].to_numpy().tolist()
     y_full = beh_pos[(scorer, bodypart, "y")].to_numpy().tolist()
 
+    # Calculate rate maps for each unit
+    from scipy.ndimage import gaussian_filter
+
+    x_arr = np.array(x_full)
+    y_arr = np.array(y_full)
+    x_edges = np.linspace(float(np.nanmin(x_arr)), float(np.nanmax(x_arr)), bins + 1).tolist()
+    y_edges = np.linspace(float(np.nanmin(y_arr)), float(np.nanmax(y_arr)), bins + 1).tolist()
+    time_per_frame = 1.0 / behavior_fps
+
+    # Occupancy from trajectory (unique frames only)
+    traj_x = np.array([x_full[i] for i in range(len(x_full))])
+    traj_y = np.array([y_full[i] for i in range(len(y_full))])
+    occupancy_counts, _, _ = np.histogram2d(traj_x, traj_y, bins=[x_edges, y_edges])
+    occupancy_time = occupancy_counts * time_per_frame
+    valid_occupancy_mask = occupancy_time >= min_occupancy
+
     # Precompute spike positions per unit (above and below threshold)
     spike_xs_above: list[list[float]] = []
     spike_ys_above: list[list[float]] = []
@@ -190,6 +231,8 @@ def prepare_place_browser_data(
     spike_ys_below: list[list[float]] = []
     counts_above: list[int] = []
     counts_below: list[int] = []
+    rate_maps: list[list[list[float]]] = []
+
     for uid in unit_ids:
         df_u_above = sp_above[sp_above["unit_id"] == uid] if not sp_above.empty else pd.DataFrame()
         df_u_below = sp_below[sp_below["unit_id"] == uid] if not sp_below.empty else pd.DataFrame()
@@ -200,6 +243,23 @@ def prepare_place_browser_data(
         spike_ys_below.append(df_u_below["y"].to_numpy().tolist() if not df_u_below.empty else [])
         counts_above.append(len(df_u_above))
         counts_below.append(len(df_u_below))
+
+        # Calculate rate map for this unit (using above-threshold spikes)
+        if not df_u_above.empty:
+            spike_weights, _, _ = np.histogram2d(
+                df_u_above["x"].to_numpy(),
+                df_u_above["y"].to_numpy(),
+                bins=[x_edges, y_edges],
+                weights=df_u_above["s"].to_numpy(),
+            )
+            rate_map = np.zeros_like(occupancy_time)
+            rate_map[valid_occupancy_mask] = (
+                spike_weights[valid_occupancy_mask] / occupancy_time[valid_occupancy_mask]
+            )
+            rate_map_smooth = gaussian_filter(rate_map, sigma=smooth_sigma)
+            rate_maps.append(rate_map_smooth.T.tolist())  # Transpose for image orientation
+        else:
+            rate_maps.append([[0.0] * bins for _ in range(bins)])
 
     # Load raw C, filtered C, and optionally YrA (most raw)
     trace_t: list[float] = []
@@ -369,6 +429,9 @@ def prepare_place_browser_data(
         spike_y_trace_above=spike_y_trace_above,
         spike_ts_trace_below=spike_ts_trace_below,
         spike_y_trace_below=spike_y_trace_below,
+        rate_maps=rate_maps,
+        x_edges=x_edges,
+        y_edges=y_edges,
     )
 
 
@@ -403,6 +466,9 @@ def generate_place_browser_html(
     spike_y_trace_above_json = json.dumps(data.spike_y_trace_above)
     spike_ts_trace_below_json = json.dumps(data.spike_ts_trace_below)
     spike_y_trace_below_json = json.dumps(data.spike_y_trace_below)
+    rate_maps_json = json.dumps(data.rate_maps)
+    x_edges_json = json.dumps(data.x_edges)
+    y_edges_json = json.dumps(data.y_edges)
 
     # Speed units are always pixels/s
     speed_units = "px/s"
@@ -430,6 +496,9 @@ def generate_place_browser_html(
         has_max_proj_footprints=json.dumps(
             max_proj_footprints_imgs is not None and len(max_proj_footprints_imgs) > 0
         ),
+        rate_maps_json=rate_maps_json,
+        x_edges_json=x_edges_json,
+        y_edges_json=y_edges_json,
     )
 
     out_html = Path("export") / f"{output_prefix}.html"
@@ -459,6 +528,9 @@ def _run_browse_place(
     deconv_zarr: Path | None,
     start_idx: int = 0,
     end_idx: int | None = None,
+    bins: int = 30,
+    min_occupancy: float = 0.1,
+    smooth_sigma: float = 1.0,
 ) -> None:
     """Internal function: Browser for place fields.
 
@@ -481,6 +553,9 @@ def _run_browse_place(
         trace_name_lp=trace_name_lp,
         neural_fps=neural_fps,
         deconv_zarr=deconv_zarr,
+        bins=bins,
+        min_occupancy=min_occupancy,
+        smooth_sigma=smooth_sigma,
     )
 
     # Filter by unit index range
@@ -515,6 +590,9 @@ def _run_browse_place(
             data.spike_ts_trace_below[idx_slice] if data.spike_ts_trace_below else []
         ),
         spike_y_trace_below=data.spike_y_trace_below[idx_slice] if data.spike_y_trace_below else [],
+        rate_maps=data.rate_maps[idx_slice] if data.rate_maps else [],
+        x_edges=data.x_edges,
+        y_edges=data.y_edges,
     )
 
     # Generate max projection and footprints images for each unit as base64
@@ -725,6 +803,9 @@ def generate_html(
         deconv_zarr=None,
         start_idx=start_idx,
         end_idx=end_idx,
+        bins=cfg.behavior.ratemap.bins,
+        min_occupancy=cfg.behavior.ratemap.min_occupancy,
+        smooth_sigma=cfg.behavior.ratemap.smooth_sigma,
     )
 
 
@@ -874,4 +955,7 @@ def visualize(
         neural_fps=cfg.neural.data.fps,
         output_prefix=f"{label}_place_browser",
         deconv_zarr=out_dir / f"{label}_oasis_deconv.zarr",
+        bins=cfg.behavior.ratemap.bins,
+        min_occupancy=cfg.behavior.ratemap.min_occupancy,
+        smooth_sigma=cfg.behavior.ratemap.smooth_sigma,
     )

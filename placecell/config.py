@@ -74,6 +74,27 @@ class NeuralConfig(MiniscopeConfig, ConfigYAMLMixin):
     )
 
 
+class RateMapConfig(MiniscopeConfig, ConfigYAMLMixin):
+    """Rate map visualization configuration."""
+
+    bins: int = Field(
+        30,
+        ge=5,
+        le=200,
+        description="Number of spatial bins for rate map (default 30).",
+    )
+    min_occupancy: float = Field(
+        0.1,
+        ge=0.0,
+        description="Minimum occupancy time (seconds) for a bin to be included (default 0.1).",
+    )
+    smooth_sigma: float = Field(
+        1.0,
+        ge=0.0,
+        description="Gaussian smoothing sigma for rate map (default 1.0, 0 = no smoothing).",
+    )
+
+
 class BehaviorConfig(MiniscopeConfig, ConfigYAMLMixin):
     """Behavior / place-field configuration."""
 
@@ -98,6 +119,10 @@ class BehaviorConfig(MiniscopeConfig, ConfigYAMLMixin):
     bodypart: str = Field(
         ...,
         description="Body part name to use for position tracking (e.g. 'LED').",
+    )
+    ratemap: RateMapConfig = Field(
+        default_factory=RateMapConfig,
+        description="Rate map visualization settings.",
     )
 
 
