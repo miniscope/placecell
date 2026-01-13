@@ -1,5 +1,5 @@
 [project]
-name = "pcell"
+name = "placecell"
 version = "0.1.0"
 description = "Package for analyzing place cells"
 license = {text = "AGPL-3.0"}
@@ -33,40 +33,41 @@ tests = [
     "pytest-timeout>=2.3.1",
 ]
 docs = [
-    "sphinx>=6.2.1",
+    "sphinx>=7.0.0",
     "sphinx-click>=6.0.0",
-    "furo>2023.07.26",
-    "myst-parser>3.0.0",
+    "sphinx-book-theme>=1.1.0",
+    "myst-parser>=3.0.0",
     "autodoc-pydantic>=2.0.1",
 ]
 all = [
-    "pcell[dev,tests,docs]",
+    "placecell[dev,tests,docs]",
 ]
 
 [project.scripts]
-pcell = "pcell.cli:pcell"
+pcell = "placecell.cli:placecell"
 
 [tool.pdm.scripts]
 test = "pytest"
 lint.composite = [
     "ruff check",
-    "black pcell --diff"
+    "black placecell --diff"
 ]
 format.composite = [
-    "black pcell",
+    "black placecell",
     "ruff check --fix",
 ]
+docs = "sphinx-build -b html docs docs/_build/html"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.hatchling.build]
-packages = ["pcell"]
+[tool.hatch.build.targets.wheel]
+packages = ["placecell"]
 
 [tool.ruff]
 target-version = "py311"
-include = ["pcell/**/*.py", "pyproject.toml"]
-exclude = ["docs", "tests", "pcell/assets"]
+include = ["placecell/**/*.py", "pyproject.toml"]
+exclude = ["docs", "tests", "placecell/assets"]
 line-length = 100
 
 [tool.ruff.lint]
@@ -105,5 +106,5 @@ ignore = [
 
 [tool.black]
 target-version = ['py311', 'py312']
-include = "pcell/.*\\.py$"
+include = "placecell/.*\\.py$"
 line-length = 100

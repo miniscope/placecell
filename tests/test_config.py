@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from pcell.config import AppConfig
+from placecell.config import AppConfig
 
 
 def test_config_loads(example_config_path: Path) -> None:

@@ -1,4 +1,4 @@
-"""Command-line interface for pcell.
+"""Command-line interface for placecell.
 
 Provides grouped commands:
 
@@ -7,4 +7,4 @@ Provides grouped commands:
     pcell behavior         - Behavior analysis commands
 """
 
-from pcell.cli.main import pcell  # noqa: F401
+from placecell.cli.main import placecell  # noqa: F401

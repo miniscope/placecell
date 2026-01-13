@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 import xarray as xr
 
-from pcell.analysis import build_spike_place_dataframe, load_traces
+from placecell.analysis import build_spike_place_dataframe, load_traces
 
 
 def test_spike_place_regression(assets_dir: Path) -> None:
