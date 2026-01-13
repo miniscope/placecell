@@ -55,6 +55,10 @@ class PlaceBrowserData(NamedTuple):
     rate_maps: list[list[list[float]]]  # Per-unit 2D rate maps
     x_edges: list[float]  # Bin edges for x axis
     y_edges: list[float]  # Bin edges for y axis
+    # Spatial information and shuffling
+    spatial_info: list[float]  # Per-unit spatial information (bits/s)
+    shuffled_sis: list[list[float]]  # Per-unit shuffled SI distributions
+    p_values: list[float]  # Per-unit p-values from shuffling test
 
 
 def _run_spike_place(
@@ -138,7 +142,7 @@ def prepare_place_browser_data(
     # Load spikes - if spike_index provided, load all spikes with speed info
     if spike_index is not None:
         # Load all spikes (not filtered by speed)
-        sp_all = build_spike_place_dataframe(
+        sp_all_raw = build_spike_place_dataframe(
             spike_index_path=spike_index,
             neural_timestamp_path=neural_timestamp,
             behavior_position_path=behavior_position,
@@ -149,47 +153,51 @@ def prepare_place_browser_data(
             speed_window_frames=speed_window_frames,
         )
 
-        # Apply dynamic 2-sigma threshold per unit
-        # For each unit, keep only spikes where s > mean(s) + 2*std(s)
+        # Speed-filtered spikes (for rate map & SI calculation - matches script.py)
+        sp_speed_filtered = (
+            sp_all_raw[sp_all_raw["speed"] >= speed_threshold].reset_index(drop=True)
+            if not sp_all_raw.empty
+            else pd.DataFrame()
+        )
+
+        # Apply dynamic 2-sigma threshold per unit (for visualization only)
         filtered_dfs = []
-        for uid in sp_all["unit_id"].unique():
-            unit_df = sp_all[sp_all["unit_id"] == uid]
+        for uid in sp_all_raw["unit_id"].unique():
+            unit_df = sp_all_raw[sp_all_raw["unit_id"] == uid]
             s_mean = unit_df["s"].mean()
             s_std = unit_df["s"].std()
             dynamic_threshold = s_mean + 2 * s_std
-            # Also apply fixed threshold if provided
             effective_threshold = (
                 max(dynamic_threshold, s_threshold) if s_threshold > 0 else dynamic_threshold
             )
             filtered_dfs.append(unit_df[unit_df["s"] >= effective_threshold])
-        sp_all = pd.concat(filtered_dfs, ignore_index=True) if filtered_dfs else pd.DataFrame()
+        sp_2sigma = pd.concat(filtered_dfs, ignore_index=True) if filtered_dfs else pd.DataFrame()
 
-        # Separate by speed threshold
+        # Separate 2-sigma filtered by speed (for scatter plot visualization)
         sp_above = (
-            sp_all[sp_all["speed"] >= speed_threshold].reset_index(drop=True)
-            if not sp_all.empty
+            sp_2sigma[sp_2sigma["speed"] >= speed_threshold].reset_index(drop=True)
+            if not sp_2sigma.empty
             else pd.DataFrame()
         )
         sp_below = (
-            sp_all[sp_all["speed"] < speed_threshold].reset_index(drop=True)
-            if not sp_all.empty
+            sp_2sigma[sp_2sigma["speed"] < speed_threshold].reset_index(drop=True)
+            if not sp_2sigma.empty
             else pd.DataFrame()
         )
 
         # Use all units that have spikes
-        unit_ids = sorted(sp_all["unit_id"].unique().tolist()) if not sp_all.empty else []
+        unit_ids = sorted(sp_all_raw["unit_id"].unique().tolist()) if not sp_all_raw.empty else []
     else:
-        # Use existing spike_place file (already filtered)
-        sp_above_raw = pd.read_csv(spike_place)
+        # Use existing spike_place file (already speed filtered)
+        sp_speed_filtered = pd.read_csv(spike_place)
 
-        # Apply dynamic 2-sigma threshold per unit
+        # Apply dynamic 2-sigma threshold per unit (for visualization only)
         filtered_dfs = []
-        for uid in sp_above_raw["unit_id"].unique():
-            unit_df = sp_above_raw[sp_above_raw["unit_id"] == uid]
+        for uid in sp_speed_filtered["unit_id"].unique():
+            unit_df = sp_speed_filtered[sp_speed_filtered["unit_id"] == uid]
             s_mean = unit_df["s"].mean()
             s_std = unit_df["s"].std()
             dynamic_threshold = s_mean + 2 * s_std
-            # Also apply fixed threshold if provided
             effective_threshold = (
                 max(dynamic_threshold, s_threshold) if s_threshold > 0 else dynamic_threshold
             )
@@ -197,7 +205,7 @@ def prepare_place_browser_data(
         sp_above = pd.concat(filtered_dfs, ignore_index=True) if filtered_dfs else pd.DataFrame()
 
         sp_below = pd.DataFrame()  # Empty - no below-threshold spikes available
-        unit_ids = sorted(sp_above["unit_id"].unique().tolist()) if not sp_above.empty else []
+        unit_ids = sorted(sp_speed_filtered["unit_id"].unique().tolist()) if not sp_speed_filtered.empty else []
 
     if sp_above.empty and sp_below.empty:
         raise click.ClickException("No spikes to plot after applying thresholds.")
@@ -211,15 +219,28 @@ def prepare_place_browser_data(
     # Calculate rate maps for each unit
     from scipy.ndimage import gaussian_filter
 
-    x_arr = np.array(x_full)
-    y_arr = np.array(y_full)
-    x_edges = np.linspace(float(np.nanmin(x_arr)), float(np.nanmax(x_arr)), bins + 1).tolist()
-    y_edges = np.linspace(float(np.nanmin(y_arr)), float(np.nanmax(y_arr)), bins + 1).tolist()
+    # Build speed-filtered trajectory for occupancy (matching script.py)
+    # Use sp_speed_filtered for rate map & SI (not 2-sigma filtered)
+    if not sp_speed_filtered.empty:
+        # Get unique (beh_frame_index, x, y) tuples from speed-filtered spikes
+        trajectory_df = (
+            sp_speed_filtered[["beh_frame_index", "x", "y"]]
+            .drop_duplicates(subset=["beh_frame_index"])
+            .sort_values("beh_frame_index")
+        )
+        traj_x = trajectory_df["x"].to_numpy()
+        traj_y = trajectory_df["y"].to_numpy()
+        traj_frames = trajectory_df["beh_frame_index"].to_numpy()
+    else:
+        traj_x = np.array(x_full)
+        traj_y = np.array(y_full)
+        traj_frames = np.arange(len(x_full))
+
+    x_edges = np.linspace(float(np.nanmin(traj_x)), float(np.nanmax(traj_x)), bins + 1).tolist()
+    y_edges = np.linspace(float(np.nanmin(traj_y)), float(np.nanmax(traj_y)), bins + 1).tolist()
     time_per_frame = 1.0 / behavior_fps
 
-    # Occupancy from trajectory (unique frames only)
-    traj_x = np.array([x_full[i] for i in range(len(x_full))])
-    traj_y = np.array([y_full[i] for i in range(len(y_full))])
+    # Occupancy from speed-filtered trajectory (only active periods)
     occupancy_counts, _, _ = np.histogram2d(traj_x, traj_y, bins=[x_edges, y_edges])
     occupancy_time = occupancy_counts * time_per_frame
     valid_occupancy_mask = occupancy_time >= min_occupancy
@@ -232,8 +253,12 @@ def prepare_place_browser_data(
     counts_above: list[int] = []
     counts_below: list[int] = []
     rate_maps: list[list[list[float]]] = []
+    spatial_info: list[float] = []
+    shuffled_sis: list[list[float]] = []
+    p_values: list[float] = []
 
     for uid in unit_ids:
+        # 2-sigma filtered spikes for visualization (scatter plot)
         df_u_above = sp_above[sp_above["unit_id"] == uid] if not sp_above.empty else pd.DataFrame()
         df_u_below = sp_below[sp_below["unit_id"] == uid] if not sp_below.empty else pd.DataFrame()
 
@@ -244,13 +269,20 @@ def prepare_place_browser_data(
         counts_above.append(len(df_u_above))
         counts_below.append(len(df_u_below))
 
-        # Calculate rate map for this unit (using above-threshold spikes)
-        if not df_u_above.empty:
+        # Speed-filtered spikes (no 2-sigma) for rate map & SI (matches script.py)
+        unit_data = (
+            sp_speed_filtered[sp_speed_filtered["unit_id"] == uid]
+            if not sp_speed_filtered.empty
+            else pd.DataFrame()
+        )
+
+        # Calculate rate map and SI using ALL speed-filtered spikes (matching script.py)
+        if not unit_data.empty:
             spike_weights, _, _ = np.histogram2d(
-                df_u_above["x"].to_numpy(),
-                df_u_above["y"].to_numpy(),
+                unit_data["x"].to_numpy(),
+                unit_data["y"].to_numpy(),
                 bins=[x_edges, y_edges],
-                weights=df_u_above["s"].to_numpy(),
+                weights=unit_data["s"].to_numpy(),
             )
             rate_map = np.zeros_like(occupancy_time)
             rate_map[valid_occupancy_mask] = (
@@ -258,8 +290,78 @@ def prepare_place_browser_data(
             )
             rate_map_smooth = gaussian_filter(rate_map, sigma=smooth_sigma)
             rate_maps.append(rate_map_smooth.T.tolist())  # Transpose for image orientation
+
+            # Spatial Information (SI) calculation
+            total_time = float(np.sum(occupancy_time[valid_occupancy_mask]))
+            total_spikes = float(np.sum(spike_weights[valid_occupancy_mask]))
+
+            if total_time > 0 and total_spikes > 0:
+                overall_lambda = total_spikes / total_time
+                P_i = np.zeros_like(occupancy_time)
+                P_i[valid_occupancy_mask] = occupancy_time[valid_occupancy_mask] / total_time
+                lambda_i = rate_map
+
+                valid_mask_si = (lambda_i > 0) & (overall_lambda > 0) & valid_occupancy_mask
+                if np.any(valid_mask_si):
+                    si_term = (
+                        P_i[valid_mask_si]
+                        * lambda_i[valid_mask_si]
+                        * np.log2(lambda_i[valid_mask_si] / overall_lambda)
+                    )
+                    actual_si = float(np.sum(si_term))
+                else:
+                    actual_si = 0.0
+
+                # Shuffling test (using all speed-filtered spikes, matching script.py)
+                if "beh_frame_index" in unit_data.columns:
+                    u_grouped = unit_data.groupby("beh_frame_index")["s"].sum()
+                    aligned_spikes = u_grouped.reindex(traj_frames, fill_value=0).values
+                else:
+                    aligned_spikes = np.zeros(len(traj_frames))
+
+                n_shuffles = 100
+                unit_shuffled_sis = []
+                for _ in range(n_shuffles):
+                    shift = np.random.randint(len(aligned_spikes))
+                    s_shuffled = np.roll(aligned_spikes, shift)
+
+                    spike_w_shuf, _, _ = np.histogram2d(
+                        traj_x, traj_y, bins=[x_edges, y_edges], weights=s_shuffled
+                    )
+
+                    rate_shuf = np.zeros_like(occupancy_time)
+                    rate_shuf[valid_occupancy_mask] = (
+                        spike_w_shuf[valid_occupancy_mask] / occupancy_time[valid_occupancy_mask]
+                    )
+
+                    lambda_shuf = rate_shuf
+                    valid_mask_s = (lambda_shuf > 0) & valid_occupancy_mask
+                    if np.any(valid_mask_s):
+                        si_shuf = float(
+                            np.sum(
+                                P_i[valid_mask_s]
+                                * lambda_shuf[valid_mask_s]
+                                * np.log2(lambda_shuf[valid_mask_s] / overall_lambda)
+                            )
+                        )
+                    else:
+                        si_shuf = 0.0
+                    unit_shuffled_sis.append(si_shuf)
+
+                p_val = float(np.sum(np.array(unit_shuffled_sis) >= actual_si) / n_shuffles)
+            else:
+                actual_si = 0.0
+                unit_shuffled_sis = [0.0] * 100
+                p_val = 1.0
+
+            spatial_info.append(actual_si)
+            shuffled_sis.append(unit_shuffled_sis)
+            p_values.append(p_val)
         else:
             rate_maps.append([[0.0] * bins for _ in range(bins)])
+            spatial_info.append(0.0)
+            shuffled_sis.append([0.0] * 100)
+            p_values.append(1.0)
 
     # Load raw C, filtered C, and optionally YrA (most raw)
     trace_t: list[float] = []
@@ -432,6 +534,9 @@ def prepare_place_browser_data(
         rate_maps=rate_maps,
         x_edges=x_edges,
         y_edges=y_edges,
+        spatial_info=spatial_info,
+        shuffled_sis=shuffled_sis,
+        p_values=p_values,
     )
 
 
@@ -469,6 +574,9 @@ def generate_place_browser_html(
     rate_maps_json = json.dumps(data.rate_maps)
     x_edges_json = json.dumps(data.x_edges)
     y_edges_json = json.dumps(data.y_edges)
+    spatial_info_json = json.dumps(data.spatial_info)
+    shuffled_sis_json = json.dumps(data.shuffled_sis)
+    p_values_json = json.dumps(data.p_values)
 
     # Speed units are always pixels/s
     speed_units = "px/s"
@@ -499,6 +607,9 @@ def generate_place_browser_html(
         rate_maps_json=rate_maps_json,
         x_edges_json=x_edges_json,
         y_edges_json=y_edges_json,
+        spatial_info_json=spatial_info_json,
+        shuffled_sis_json=shuffled_sis_json,
+        p_values_json=p_values_json,
     )
 
     out_html = Path("export") / f"{output_prefix}.html"
@@ -593,6 +704,9 @@ def _run_browse_place(
         rate_maps=data.rate_maps[idx_slice] if data.rate_maps else [],
         x_edges=data.x_edges,
         y_edges=data.y_edges,
+        spatial_info=data.spatial_info[idx_slice] if data.spatial_info else [],
+        shuffled_sis=data.shuffled_sis[idx_slice] if data.shuffled_sis else [],
+        p_values=data.p_values[idx_slice] if data.p_values else [],
     )
 
     # Generate max projection and footprints images for each unit as base64

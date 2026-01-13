@@ -10,9 +10,10 @@
       #status {{ margin-left: 0.5rem; font-size: 0.9rem; color: #444; }}
       select {{ min-width: 120px; }}
       button {{ padding: 0.3rem 0.7rem; }}
-      #place-container {{ display: flex; gap: 1rem; width: 100%; max-width: 1600px; flex-wrap: wrap; }}
-      #plot_place {{ flex: 1; min-width: 400px; height: 450px; }}
-      #plot_ratemap {{ flex: 1; min-width: 400px; height: 450px; }}
+      #place-container {{ display: flex; gap: 1rem; width: 100%; max-width: 1800px; flex-wrap: wrap; }}
+      #plot_place {{ flex: 1; min-width: 350px; height: 400px; }}
+      #plot_ratemap {{ flex: 1; min-width: 350px; height: 400px; }}
+      #plot_si {{ flex: 1; min-width: 350px; height: 400px; }}
       #max-proj-container {{ flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; }}
       #max-proj-img {{ max-width: 100%; height: auto; }}
     </style>
@@ -31,11 +32,12 @@
     <div id="place-container">
       <div id="plot_place"></div>
       <div id="plot_ratemap"></div>
+      <div id="plot_si"></div>
       <div id="max-proj-container" style="display: none;">
         <img id="max-proj-img" src="" alt="Max projection with spatial footprints" />
       </div>
     </div>
-    <div id="plot_trace" style="width: 100%; max-width: 1600px; height: 280px;"></div>
+    <div id="plot_trace" style="width: 100%; max-width: 1800px; height: 280px;"></div>
     <script>
       const unitIds = {unit_ids_json};
       const x_full = {x_full_json};
@@ -60,6 +62,9 @@
       const rateMaps = {rate_maps_json};
       const xEdges = {x_edges_json};
       const yEdges = {y_edges_json};
+      const spatialInfo = {spatial_info_json};
+      const shuffledSIs = {shuffled_sis_json};
+      const pValues = {p_values_json};
 
       // Show max projection image if available
       if (hasMaxProjFootprints && Object.keys(maxProjFootprintsImgs).length > 0) {{
@@ -69,6 +74,7 @@
 
       const hasTraces = traceT.length > 0 && traceYsRaw.length === unitIds.length;
       const hasRateMaps = rateMaps.length === unitIds.length && xEdges.length > 0;
+      const hasSI = spatialInfo.length === unitIds.length;
 
       const unitSelect = document.getElementById('unit-select');
       const statusEl = document.getElementById('status');
@@ -167,6 +173,41 @@
           Plotly.newPlot('plot_ratemap', heatmapData, layoutRateMap, {{responsive: true}});
         }} else {{
           document.getElementById('plot_ratemap').innerHTML = '<em>No rate map data</em>';
+        }}
+
+        // Spatial Information histogram (shuffling test)
+        if (hasSI) {{
+          const si = spatialInfo[idx];
+          const shuffled = shuffledSIs[idx] || [];
+          const pVal = pValues[idx];
+
+          const histData = [{{
+            x: shuffled,
+            type: 'histogram',
+            nbinsx: 15,
+            marker: {{ color: 'gray', opacity: 0.7 }},
+            name: 'Shuffled'
+          }}];
+
+          const layoutSI = {{
+            title: 'SI: ' + si.toFixed(2) + ' bits/s, p=' + pVal.toFixed(3),
+            xaxis: {{ title: 'Spatial Information (bits/s)' }},
+            yaxis: {{ title: 'Count' }},
+            margin: {{ l: 60, r: 20, t: 40, b: 50 }},
+            shapes: [{{
+              type: 'line',
+              x0: si,
+              x1: si,
+              y0: 0,
+              y1: 1,
+              yref: 'paper',
+              line: {{ color: 'red', width: 2, dash: 'dash' }}
+            }}]
+          }};
+
+          Plotly.newPlot('plot_si', histData, layoutSI, {{responsive: true}});
+        }} else {{
+          document.getElementById('plot_si').innerHTML = '<em>No spatial info data</em>';
         }}
 
         if (hasTraces) {{
