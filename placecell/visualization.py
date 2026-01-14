@@ -200,6 +200,8 @@ def plot_max_projection_with_unit_footprint(
 
 def browse_place_cells(
     spike_place_csv: str | Path,
+    behavior_path: str | Path,
+    bodypart: str,
     neural_path: str | Path | None = None,
     spike_index_csv: str | Path | None = None,
     trace_name: str = "C",
@@ -230,6 +232,10 @@ def browse_place_cells(
     ----------
     spike_place_csv : str or Path
         Path to spike_place CSV file (speed-filtered).
+    behavior_path : str or Path
+        Path to behavior data directory (must contain behavior_position.csv).
+    bodypart : str
+        Body part name to use for trajectory (e.g. "LED").
     neural_path : str or Path, optional
         Path to neural data directory (for traces and max projection).
     spike_index_csv : str or Path, optional
@@ -277,19 +283,28 @@ def browse_place_cells(
     if spike_index_csv is not None:
         df_all_spikes = pd.read_csv(spike_index_csv)  # unit_id, frame, s
 
-    # Build trajectory (deduplicated by frame)
-    trajectory_df = (
-        df_filtered[["beh_frame_index", "x", "y"]]
-        .drop_duplicates(subset=["beh_frame_index"])
-        .sort_values("beh_frame_index")
-    )
+    # Load full behavior trajectory for plotting and occupancy calculation
+    behavior_path = Path(behavior_path)
+    behavior_position_path = behavior_path / "behavior_position.csv"
+    if not behavior_position_path.exists():
+        raise FileNotFoundError(
+            f"Behavior position file not found: {behavior_position_path}. "
+            "This is required for full trajectory plotting and occupancy calculation."
+        )
+    
+    from placecell.analysis import _load_behavior_xy
+    
+    full_trajectory = _load_behavior_xy(behavior_position_path, bodypart=bodypart)
+    # Rename frame_index to beh_frame_index for consistency
+    full_trajectory = full_trajectory.rename(columns={"frame_index": "beh_frame_index"})
+    trajectory_df = full_trajectory.sort_values("beh_frame_index")
 
     # Spatial grid
     x_edges = np.linspace(trajectory_df["x"].min(), trajectory_df["x"].max(), bins + 1)
     y_edges = np.linspace(trajectory_df["y"].min(), trajectory_df["y"].max(), bins + 1)
     time_per_frame = 1.0 / behavior_fps
 
-    # Occupancy map
+    # Occupancy map (from full trajectory)
     occupancy_counts, _, _ = np.histogram2d(
         trajectory_df["x"], trajectory_df["y"], bins=[x_edges, y_edges]
     )
@@ -355,6 +370,8 @@ def browse_place_cells(
         rate_map = np.zeros_like(occupancy_time)
         rate_map[valid_mask] = spike_weights[valid_mask] / occupancy_time[valid_mask]
         rate_map_smooth = gaussian_filter(rate_map, sigma=smooth_sigma)
+        # Set invalid bins (below min_occupancy) to NaN so they appear white
+        rate_map_smooth[~valid_mask] = np.nan
 
         # Calculate sigma threshold from active (speed-filtered) spikes
         vis_thresh = unit_data["s"].mean() + spike_threshold_sigma * unit_data["s"].std()
@@ -523,23 +540,25 @@ def browse_place_cells(
 
         # 2. Trajectory + spikes (only above speed threshold)
         vis_data_above = result["vis_data_above"]
-        ax2.plot(trajectory_df["x"], trajectory_df["y"], "k-", alpha=0.1, linewidth=0.5)
+        ax2.plot(trajectory_df["x"], trajectory_df["y"], "k-", alpha=1.0, linewidth=0.5, zorder=1)
 
-        # Plot above-threshold spikes in red
+        # Plot above-threshold spikes in red (on top of trajectory)
         if not vis_data_above.empty:
-            ax2.scatter(vis_data_above["x"], vis_data_above["y"], c="red", s=10, alpha=0.6)
+            ax2.scatter(
+                vis_data_above["x"], vis_data_above["y"], c="red", s=10, zorder=2
+            )
 
         ax2.set_title(f"Trajectory ({len(vis_data_above)} spikes)")
         ax2.set_aspect("equal")
         ax2.axis("off")
 
-        # 3. Rate map
+        # 3. Rate map (NaN values will appear white - bins below min_occupancy)
         ax3.imshow(
             result["rate_map"].T,
             origin="lower",
             extent=[x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]],
             aspect="equal",
-            cmap="hot",
+            cmap="jet",
         )
         ax3.set_title("Rate map")
         ax3.axis("off")

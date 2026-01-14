@@ -265,6 +265,8 @@ def visualize(
 
     browse_place_cells(
         spike_place_csv=out_dir / f"spike_place_{label}.csv",
+        behavior_path=behavior_path,
+        bodypart=bodypart,
         neural_path=neural_path,
         spike_index_csv=out_dir / f"spike_index_{label}.csv",
         trace_name=cfg.neural.trace_name,
@@ -308,11 +310,18 @@ def visualize(
     default=None,
     help="Directory containing neural data (for traces and max projection).",
 )
+@click.option(
+    "--behavior-path",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    required=True,
+    help="Directory containing behavior data (behavior_position.csv).",
+)
 def plot(
     config: Path,
     spike_place_path: Path,
     spike_index_path: Path | None,
     neural_path: Path | None,
+    behavior_path: Path,
 ) -> None:
     """Interactive matplotlib browser for place cells."""
     from placecell.visualization import browse_place_cells
@@ -323,6 +332,8 @@ def plot(
 
     browse_place_cells(
         spike_place_csv=spike_place_path,
+        behavior_path=behavior_path,
+        bodypart=cfg.behavior.bodypart,
         neural_path=neural_path,
         spike_index_csv=spike_index_path,
         trace_name=cfg.neural.trace_name,
