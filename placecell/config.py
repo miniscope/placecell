@@ -43,6 +43,11 @@ class OasisConfig(MiniscopeConfig, ConfigYAMLMixin):
         "p10",
         description="Baseline mode: 'pXX' for percentile or numeric value.",
     )
+    penalty: float = Field(
+        0.0,
+        ge=0.0,
+        description="Sparsity penalty (L0 norm). Default 0 (no penalty).",
+    )
 
 
 class NeuralConfig(MiniscopeConfig, ConfigYAMLMixin):

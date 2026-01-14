@@ -89,6 +89,7 @@ def deconvolve(
     max_units = cfg.neural.max_units
     g = cfg.neural.oasis.g
     baseline = cfg.neural.oasis.baseline
+    penalty = cfg.neural.oasis.penalty
 
     neural_path = neural_path.resolve()
     out_dir = out_dir.resolve()
@@ -147,7 +148,7 @@ def deconvolve(
                     f"Could not interpret baseline={baseline!r} " "as 'pXX' or numeric value."
                 ) from None
 
-        kwargs: dict = {"penalty": 0}
+        kwargs: dict = {"penalty": penalty}
         if g is not None:
             kwargs["g"] = g
         try:
@@ -187,6 +188,7 @@ def deconvolve(
             "fps": float(fps),
             "g": "estimated" if g is None else list(g),
             "baseline": baseline,
+            "penalty": float(penalty),
         }
     )
 
