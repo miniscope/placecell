@@ -5,6 +5,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Cancel in-progress runs on new push
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
 permissions:
   contents: read
   pages: write
