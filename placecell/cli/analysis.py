@@ -192,7 +192,7 @@ def visualize(
     start_idx: int,
     end_idx: int | None,
 ) -> None:
-    """Run deconvolution and spike-place matching."""
+    """Run deconvolution, spike-place matching, and launch interactive plot."""
 
     import subprocess
 
@@ -257,6 +257,25 @@ def visualize(
         speed_threshold=cfg.behavior.speed_threshold,
         speed_window_frames=cfg.behavior.speed_window_frames,
         out_file=out_dir / f"spike_place_{label}.csv",
+    )
+
+    # 3) Interactive plot
+    click.echo("=== Interactive plot ===")
+    from placecell.visualization import browse_place_cells
+
+    browse_place_cells(
+        spike_place_csv=out_dir / f"spike_place_{label}.csv",
+        neural_path=neural_path,
+        spike_index_csv=out_dir / f"spike_index_{label}.csv",
+        trace_name=cfg.neural.trace_name,
+        min_speed=cfg.behavior.speed_threshold,
+        min_occupancy=cfg.behavior.ratemap.min_occupancy,
+        bins=cfg.behavior.ratemap.bins,
+        smooth_sigma=cfg.behavior.ratemap.smooth_sigma,
+        behavior_fps=cfg.behavior.behavior_fps,
+        neural_fps=cfg.neural.data.fps,
+        n_shuffles=cfg.behavior.ratemap.n_shuffles,
+        random_seed=cfg.behavior.ratemap.random_seed,
     )
 
 
