@@ -632,7 +632,7 @@ def browse_place_cells(
 
             ax5.set_xlim(t_start, t_end)
             ax5.set_xlabel("Time (s)")
-            ax5.set_ylabel("Fluorescence")
+            ax5.set_ylabel(trace_name)
             ax5.legend(loc="upper left", fontsize=8, framealpha=0.9)
 
             # Update trace slider range if needed
