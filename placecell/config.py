@@ -39,10 +39,6 @@ class OasisConfig(MiniscopeConfig, ConfigYAMLMixin):
         None,
         description="AR(2) coefficients (g1, g2). If None, estimated from data.",
     )
-    s_min: float = Field(
-        1.0,
-        description="Minimum spike size.",
-    )
     baseline: str = Field(
         "p10",
         description="Baseline mode: 'pXX' for percentile or numeric value.",

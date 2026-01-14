@@ -88,7 +88,6 @@ def deconvolve(
     fps = cfg.neural.data.fps
     max_units = cfg.neural.max_units
     g = cfg.neural.oasis.g
-    s_min = cfg.neural.oasis.s_min
     baseline = cfg.neural.oasis.baseline
 
     neural_path = neural_path.resolve()
@@ -187,7 +186,6 @@ def deconvolve(
         {
             "fps": float(fps),
             "g": "estimated" if g is None else list(g),
-            "s_min": float(s_min),
             "baseline": baseline,
         }
     )
