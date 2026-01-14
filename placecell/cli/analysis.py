@@ -277,6 +277,7 @@ def visualize(
         n_shuffles=cfg.behavior.ratemap.n_shuffles,
         random_seed=cfg.behavior.ratemap.random_seed,
         spike_threshold_sigma=cfg.behavior.ratemap.spike_threshold_sigma,
+        p_value_threshold=cfg.behavior.ratemap.p_value_threshold,
     )
 
 
@@ -334,4 +335,5 @@ def plot(
         n_shuffles=cfg.behavior.ratemap.n_shuffles,
         random_seed=cfg.behavior.ratemap.random_seed,
         spike_threshold_sigma=cfg.behavior.ratemap.spike_threshold_sigma,
+        p_value_threshold=cfg.behavior.ratemap.p_value_threshold,
     )

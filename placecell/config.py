@@ -123,6 +123,15 @@ class RateMapConfig(MiniscopeConfig, ConfigYAMLMixin):
         ge=0.0,
         description="Sigma multiplier for spike amplitude threshold in trajectory plot.",
     )
+    p_value_threshold: float | None = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "P-value threshold for filtering units in visualization. "
+            "Only units with p-value < threshold are plotted. If None, plot all units."
+        ),
+    )
 
 
 class BehaviorConfig(MiniscopeConfig, ConfigYAMLMixin):

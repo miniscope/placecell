@@ -213,6 +213,7 @@ def browse_place_cells(
     random_seed: int | None = None,
     trace_time_window: float = 600.0,
     spike_threshold_sigma: float = 2.0,
+    p_value_threshold: float | None = None,
 ) -> None:
     """
     Interactive browser for place cell analysis with keyboard navigation.
@@ -443,6 +444,22 @@ def browse_place_cells(
             "trace_data": trace_data,
             "trace_times": trace_times,
         }
+    
+    # Filter units by p-value threshold if specified
+    if p_value_threshold is not None and p_value_threshold < 1.0:
+        filtered_units = [
+            uid for uid in unique_units
+            if unit_results[uid]["p_val"] < p_value_threshold
+        ]
+        if len(filtered_units) == 0:
+            raise ValueError(
+                f"No units found with p-value < {p_value_threshold:.3f}. "
+                "Try adjusting the p_value_threshold or check your data."
+            )
+        unique_units = filtered_units
+        logger.info(
+            f"Filtered to {len(unique_units)} units with p-value < {p_value_threshold:.3f}"
+        )
 
     logger.info("Ready.")
 
