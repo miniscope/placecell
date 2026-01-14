@@ -13,14 +13,19 @@ neural:
     order: 4
   oasis:
     id: oasis
-    s_min: 1.0
     baseline: p10
   trace_name: C
   max_units: null
-  s_threshold: 0.0
 behavior:
   id: behavior
   behavior_fps: 30.0
   speed_threshold: 50.0
   speed_window_frames: 5
   bodypart: LED
+  ratemap:
+    id: ratemap
+    bins: 30
+    min_occupancy: 0.1
+    smooth_sigma: 1.0
+    n_shuffles: 100
+    random_seed: null

@@ -39,10 +39,6 @@ class OasisConfig(MiniscopeConfig, ConfigYAMLMixin):
         None,
         description="AR(2) coefficients (g1, g2). If None, estimated from data.",
     )
-    s_min: float = Field(
-        1.0,
-        description="Minimum spike size.",
-    )
     baseline: str = Field(
         "p10",
         description="Baseline mode: 'pXX' for percentile or numeric value.",
@@ -68,9 +64,36 @@ class NeuralConfig(MiniscopeConfig, ConfigYAMLMixin):
             "override is provided."
         ),
     )
-    s_threshold: float = Field(
-        0.0,
-        description="Minimum spike amplitude s to visualize in place browser.",
+
+
+class RateMapConfig(MiniscopeConfig, ConfigYAMLMixin):
+    """Rate map visualization configuration."""
+
+    bins: int = Field(
+        30,
+        ge=5,
+        le=200,
+        description="Number of spatial bins for rate map (default 30).",
+    )
+    min_occupancy: float = Field(
+        0.1,
+        ge=0.0,
+        description="Minimum occupancy time (seconds) for a bin to be included (default 0.1).",
+    )
+    smooth_sigma: float = Field(
+        1.0,
+        ge=0.0,
+        description="Gaussian smoothing sigma for rate map (default 1.0, 0 = no smoothing).",
+    )
+    n_shuffles: int = Field(
+        100,
+        ge=1,
+        le=10000,
+        description="Number of shuffles for spatial information significance test (default 100).",
+    )
+    random_seed: int | None = Field(
+        None,
+        description="Random seed for reproducible shuffling. If None, results vary between runs.",
     )
 
 
@@ -98,6 +121,10 @@ class BehaviorConfig(MiniscopeConfig, ConfigYAMLMixin):
     bodypart: str = Field(
         ...,
         description="Body part name to use for position tracking (e.g. 'LED').",
+    )
+    ratemap: RateMapConfig = Field(
+        default_factory=RateMapConfig,
+        description="Rate map visualization settings.",
     )
 
 
