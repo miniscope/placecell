@@ -211,6 +211,8 @@ def browse_place_cells(
     neural_fps: float = 20.0,
     n_shuffles: int = 100,
     random_seed: int | None = None,
+    trace_time_window: float = 600.0,
+    spike_threshold_sigma: float = 2.0,
 ) -> None:
     """
     Interactive browser for place cell analysis with keyboard navigation.
@@ -247,8 +249,12 @@ def browse_place_cells(
         Neural data sampling rate (default 20.0).
     n_shuffles : int
         Number of shuffles for significance test (default 100).
+    trace_time_window : float
+        Time window for trace display in seconds (default 600.0, i.e., 10 minutes).
     random_seed : int, optional
         Random seed for reproducible shuffling. If None, results vary between runs.
+    spike_threshold_sigma : float
+        Sigma multiplier for spike amplitude threshold in trajectory visualization (default 2.0).
     """
     if plt is None:
         raise ImportError(
@@ -264,7 +270,7 @@ def browse_place_cells(
     # Load spike data
     df = pd.read_csv(spike_place_csv)
     df_filtered = df[df["speed"] > min_speed].copy()
-    
+
     # Load all spikes from spike_index if provided (for trace plot only)
     df_all_spikes = None
     if spike_index_csv is not None:
@@ -332,7 +338,11 @@ def browse_place_cells(
     logger.info(f"Loaded {n_units} units, computing analysis...")
     unit_results = {}
     for unit_id in unique_units:
-        unit_data = df_filtered[df_filtered["unit_id"] == unit_id] if not df_filtered.empty else pd.DataFrame()
+        unit_data = (
+            df_filtered[df_filtered["unit_id"] == unit_id]
+            if not df_filtered.empty
+            else pd.DataFrame()
+        )
 
         # Rate map (only from speed-filtered spikes)
         spike_weights, _, _ = np.histogram2d(
@@ -344,9 +354,9 @@ def browse_place_cells(
         rate_map = np.zeros_like(occupancy_time)
         rate_map[valid_mask] = spike_weights[valid_mask] / occupancy_time[valid_mask]
         rate_map_smooth = gaussian_filter(rate_map, sigma=smooth_sigma)
-        
-        # Calculate 2-sigma threshold from active (speed-filtered) spikes
-        vis_thresh = unit_data["s"].mean() + 2 * unit_data["s"].std()
+
+        # Calculate sigma threshold from active (speed-filtered) spikes
+        vis_thresh = unit_data["s"].mean() + spike_threshold_sigma * unit_data["s"].std()
         total_time = np.sum(occupancy_time[valid_mask])
         total_spikes = np.sum(spike_weights[valid_mask])
 
@@ -404,7 +414,7 @@ def browse_place_cells(
 
         # For trajectory: only show speed-filtered spikes above 2-sigma
         vis_data_above = unit_data[unit_data["s"] > vis_thresh]
-        
+
         # For trace: get all spikes from spike_index if available
         vis_data_below = pd.DataFrame()  # Empty by default
         if df_all_spikes is not None:
@@ -441,34 +451,21 @@ def browse_place_cells(
 
     fig = plt.figure(figsize=(16, 9))
     current_idx = [0]  # Use list to allow modification in nested function
-    trace_time_window = 5 * 60  # 5 minutes in seconds
     trace_scroll_pos = [0.0]  # Current scroll position for trace
 
-    # Create axes - adjusted for slider at bottom, all top plots square
-    ax1 = fig.add_axes([0.02, 0.45, 0.22, 0.50])  # Max projection
-    ax2 = fig.add_axes([0.27, 0.45, 0.22, 0.50])  # Trajectory
-    ax3 = fig.add_axes([0.52, 0.45, 0.22, 0.50])  # Rate map
-    ax4 = fig.add_axes([0.77, 0.45, 0.22, 0.50])  # SI histogram (square)
-    ax5 = fig.add_axes([0.05, 0.15, 0.90, 0.20])  # Trace
-    ax_trace_slider = fig.add_axes([0.15, 0.10, 0.70, 0.02])  # Trace scrollbar
-    ax_slider = fig.add_axes([0.15, 0.02, 0.70, 0.03])  # Unit slider
-
-    # Create unit slider
+    # Unit info at top
     min_uid, max_uid = min(unique_units), max(unique_units)
-    slider = Slider(
-        ax_slider,
-        f"ID (units: {min_uid}-{max_uid})",
-        0,
-        n_units - 1,
-        valinit=0,
-        valstep=1,
-    )
-    slider.valtext.set_visible(False)  # Hide default value text
-    # Add text showing actual unit ID and position
-    unit_text = ax_slider.text(
-        1.02, 0.5, f"{unique_units[0]} ({1}/{n_units})", transform=ax_slider.transAxes, va="center"
-    )
-    
+
+    # Create axes - unit info at top, more space for trace
+    ax1 = fig.add_axes([0.02, 0.42, 0.22, 0.45])  # Max projection
+    ax2 = fig.add_axes([0.27, 0.42, 0.22, 0.45])  # Trajectory
+    ax3 = fig.add_axes([0.52, 0.42, 0.22, 0.45])  # Rate map
+    ax4 = fig.add_axes([0.77, 0.42, 0.22, 0.45])  # SI histogram (square)
+    ax5 = fig.add_axes([0.05, 0.20, 0.90, 0.20])  # Trace
+    ax_trace_slider = fig.add_axes(
+        [0.15, 0.12, 0.70, 0.02]
+    )  # Trace scrollbar (moved up to avoid x label)
+
     # Create trace scrollbar (will be initialized in render function)
     trace_slider = None
 
@@ -476,7 +473,7 @@ def browse_place_cells(
         nonlocal trace_slider
         unit_id = unique_units[idx]
         result = unit_results[unit_id]
-        
+
         # Reset trace scroll position when unit changes
         if idx != current_idx[0]:
             trace_scroll_pos[0] = 0.0
@@ -543,21 +540,21 @@ def browse_place_cells(
         if result["trace_data"] is not None and result["trace_times"] is not None:
             trace = result["trace_data"]
             t_full = result["trace_times"]
-            
+
             # Calculate visible window (5 minutes)
             t_max = t_full[-1] if len(t_full) > 0 else trace_time_window
             scroll_pos = trace_scroll_pos[0]
             t_start = max(0, scroll_pos)
             t_end = min(t_max, t_start + trace_time_window)
-            
+
             # Get indices for visible window
             mask = (t_full >= t_start) & (t_full <= t_end)
             t_visible = t_full[mask]
             trace_visible = trace[mask]
-            
+
             # Plot trace
             ax5.plot(t_visible, trace_visible, "b-", linewidth=0.5, label="Fluorescence")
-            
+
             # Plot spikes on trace (only in visible window)
             # Gray: all spikes from spike_index (if provided)
             vis_data_below = result["vis_data_below"]
@@ -569,9 +566,15 @@ def browse_place_cells(
                     spike_times_vis = spike_times[spike_mask]
                     spike_vals = trace[spike_frames[spike_mask].astype(int).clip(0, len(trace) - 1)]
                     ax5.scatter(
-                        spike_times_vis, spike_vals, c="gray", s=20, zorder=5, alpha=0.4, label="All spikes"
+                        spike_times_vis,
+                        spike_vals,
+                        c="gray",
+                        s=20,
+                        zorder=5,
+                        alpha=0.4,
+                        label=f"Spikes (< {min_speed:.1f} px/s)",
                     )
-            
+
             # Red: spikes from spike_place (above speed threshold)
             vis_data_above = result["vis_data_above"]
             if "frame" in vis_data_above.columns and not vis_data_above.empty:
@@ -582,14 +585,20 @@ def browse_place_cells(
                     spike_times_vis = spike_times[spike_mask]
                     spike_vals = trace[spike_frames[spike_mask].astype(int).clip(0, len(trace) - 1)]
                     ax5.scatter(
-                        spike_times_vis, spike_vals, c="red", s=20, zorder=6, alpha=0.6, label="Active spikes"
+                        spike_times_vis,
+                        spike_vals,
+                        c="red",
+                        s=20,
+                        zorder=6,
+                        alpha=0.6,
+                        label=f"Spikes (≥ {min_speed:.1f} px/s)",
                     )
-            
+
             ax5.set_xlim(t_start, t_end)
             ax5.set_xlabel("Time (s)")
             ax5.set_ylabel("Fluorescence")
             ax5.legend(loc="upper left", fontsize=8, framealpha=0.9)
-            
+
             # Update trace slider range if needed
             if trace_slider is None and t_max > trace_time_window:
                 trace_slider_max = max(0, t_max - trace_time_window)
@@ -601,11 +610,11 @@ def browse_place_cells(
                     valinit=0.0,
                     valfmt="%.0f s",
                 )
-                
+
                 def on_trace_slider(val: float) -> None:
                     trace_scroll_pos[0] = val
                     render(current_idx[0])
-                
+
                 trace_slider.on_changed(on_trace_slider)
             elif trace_slider is not None:
                 # Update slider range for new unit
@@ -623,26 +632,33 @@ def browse_place_cells(
             if trace_slider is not None:
                 trace_slider.ax.set_visible(False)
 
-        fig.suptitle(f"Unit {unit_id} ({idx + 1}/{n_units})", fontsize=12)
+        # Update unit info in suptitle
+        fig.suptitle(
+            f"Unit ID: {unit_id} ({idx + 1}/{n_units}) | Range: {min_uid}-{max_uid}"
+            f" | Use ←/→ keys to navigate",
+            fontsize=11,
+            y=0.98,
+        )
         fig.canvas.draw_idle()
 
-    def on_slider(val: float) -> None:
-        idx = int(val)
-        current_idx[0] = idx
-        unit_text.set_text(f"{unique_units[idx]} ({idx + 1}/{n_units})")
-        render(idx)
+    def change_unit(new_idx: int) -> None:
+        """Change to a new unit index."""
+        if 0 <= new_idx < n_units:
+            current_idx[0] = new_idx
+            render(new_idx)
 
     def on_key(event: Any) -> None:
+        """Keyboard navigation handler."""
         if event.key in ["right", "d"]:
             new_idx = (current_idx[0] + 1) % n_units
-            slider.set_val(new_idx)
+            change_unit(new_idx)
         elif event.key in ["left", "a"]:
             new_idx = (current_idx[0] - 1) % n_units
-            slider.set_val(new_idx)
+            change_unit(new_idx)
         elif event.key == "q":
             plt.close(fig)
 
-    slider.on_changed(on_slider)
+    # Connect keyboard
     fig.canvas.mpl_connect("key_press_event", on_key)
     render(0)
     plt.show()

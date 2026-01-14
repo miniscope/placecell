@@ -276,6 +276,7 @@ def visualize(
         neural_fps=cfg.neural.data.fps,
         n_shuffles=cfg.behavior.ratemap.n_shuffles,
         random_seed=cfg.behavior.ratemap.random_seed,
+        spike_threshold_sigma=cfg.behavior.ratemap.spike_threshold_sigma,
     )
 
 
@@ -332,4 +333,5 @@ def plot(
         neural_fps=cfg.neural.data.fps,
         n_shuffles=cfg.behavior.ratemap.n_shuffles,
         random_seed=cfg.behavior.ratemap.random_seed,
+        spike_threshold_sigma=cfg.behavior.ratemap.spike_threshold_sigma,
     )

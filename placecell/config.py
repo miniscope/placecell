@@ -48,6 +48,24 @@ class OasisConfig(MiniscopeConfig, ConfigYAMLMixin):
         ge=0.0,
         description="Sparsity penalty (L0 norm). Default 0 (no penalty).",
     )
+    optimize_g: int = Field(
+        0,
+        ge=0,
+        description=[
+            "Number of events to use for optimizing AR coefficients."
+            "Look into oasis documentation for more details."
+        ],
+    )
+    lambda_: float | None = Field(
+        None,
+        description=["Regularization parameter for OASIS." "If None, automatically determined."],
+    )
+    s_min: float | None = Field(
+        None,
+        description=[
+            "Minimum spike size threshold." "Look into oasis documentation for more details."
+        ],
+    )
 
 
 class NeuralConfig(MiniscopeConfig, ConfigYAMLMixin):
@@ -99,6 +117,11 @@ class RateMapConfig(MiniscopeConfig, ConfigYAMLMixin):
     random_seed: int | None = Field(
         None,
         description="Random seed for reproducible shuffling. If None, results vary between runs.",
+    )
+    spike_threshold_sigma: float = Field(
+        2.0,
+        ge=0.0,
+        description="Sigma multiplier for spike amplitude threshold in trajectory plot.",
     )
 
 
