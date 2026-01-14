@@ -8,10 +8,10 @@
    - DeepLabCut: position CSV and `behavior_timestamp.csv`
 
 ### Analysis config
-   - Copy `placecell/assets/example_config.yaml` and adjust
+   - Copy `placecell/assets/example_pcell_config.yaml` and adjust
 
 ### Run analysis
-Runs the full pipeline: deconvolution, spike-place matching, and generates the place browser HTML.
+Runs the full pipeline: deconvolution and spike-place matching.
 
 ```bash
 pcell workflow visualize \
@@ -22,7 +22,14 @@ pcell workflow visualize \
 ```
 
 ### Browse results
-- Open `output/<label>_place_browser.html` to view trajectory + spike locations per unit.
+Interactive matplotlib browser:
+
+```bash
+pcell plot \
+  --config your_config.yaml \
+  --spike-place output/spike_place_*.csv \
+  --neural-path /path/to/neural
+```
 
 ### Individual steps
 Run steps separately if needed:
@@ -30,5 +37,4 @@ Run steps separately if needed:
 ```bash
 pcell deconvolve --help
 pcell spike-place --help
-pcell generate-html --help
 ```

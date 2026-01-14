@@ -64,10 +64,6 @@ class NeuralConfig(MiniscopeConfig, ConfigYAMLMixin):
             "override is provided."
         ),
     )
-    s_threshold: float = Field(
-        0.0,
-        description="Minimum spike amplitude s to visualize in place browser.",
-    )
 
 
 class RateMapConfig(MiniscopeConfig, ConfigYAMLMixin):
