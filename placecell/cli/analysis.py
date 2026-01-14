@@ -275,6 +275,13 @@ def visualize(
     help="Spike-place CSV file.",
 )
 @click.option(
+    "--spike-index",
+    "spike_index_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Spike index CSV (optional, shows all spikes on trace plot).",
+)
+@click.option(
     "--neural-path",
     type=click.Path(exists=True, file_okay=False, path_type=Path),
     default=None,
@@ -283,6 +290,7 @@ def visualize(
 def plot(
     config: Path,
     spike_place_path: Path,
+    spike_index_path: Path | None,
     neural_path: Path | None,
 ) -> None:
     """Interactive matplotlib browser for place cells."""
@@ -295,6 +303,8 @@ def plot(
     browse_place_cells(
         spike_place_csv=spike_place_path,
         neural_path=neural_path,
+        spike_index_csv=spike_index_path,
+        trace_name=cfg.neural.trace_name,
         min_speed=cfg.behavior.speed_threshold,
         min_occupancy=cfg.behavior.ratemap.min_occupancy,
         bins=cfg.behavior.ratemap.bins,
