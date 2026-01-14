@@ -590,28 +590,31 @@ def browse_place_cells(
 
             # Plot trace
             ax5.plot(t_visible, trace_visible, "b-", linewidth=0.5, label="Fluorescence")
+            
+            # Get y-axis range for timing lines
+            y_min, y_max = ax5.get_ylim()
+            y_range = y_max - y_min
+            # Timing lines will be at the bottom, double height
+            line_bottom = y_min
+            line_height = 2 * (y_range * 0.02)  # Double the height (2% of y-range)
 
-            # Plot spikes on trace (only in visible window)
-            # Gray: all spikes from spike_index (if provided)
-            vis_data_below = result["vis_data_below"]
-            if "frame" in vis_data_below.columns and not vis_data_below.empty:
-                spike_frames = vis_data_below["frame"].values
-                spike_times = spike_frames / trace_fps
-                spike_mask = (spike_times >= t_start) & (spike_times <= t_end)
-                if np.any(spike_mask):
-                    spike_times_vis = spike_times[spike_mask]
-                    spike_vals = trace[spike_frames[spike_mask].astype(int).clip(0, len(trace) - 1)]
-                    ax5.scatter(
-                        spike_times_vis,
-                        spike_vals,
-                        c="gray",
-                        s=20,
-                        zorder=5,
-                        alpha=0.4,
-                        label=f"Spikes (< {min_speed:.1f} px/s)",
-                    )
+            # Collect all spike times with their colors
+            spike_times_list = []
+            spike_colors_list = []
 
-            # Red: spikes from spike_place (above speed threshold)
+            # Gray: all spikes from spike_index (no threshold filtering)
+            if df_all_spikes is not None:
+                unit_all_spikes = df_all_spikes[df_all_spikes["unit_id"] == unit_id]
+                if "frame" in unit_all_spikes.columns and not unit_all_spikes.empty:
+                    spike_frames = unit_all_spikes["frame"].values
+                    spike_times = spike_frames / trace_fps
+                    spike_mask = (spike_times >= t_start) & (spike_times <= t_end)
+                    if np.any(spike_mask):
+                        spike_times_vis = spike_times[spike_mask]
+                        spike_times_list.extend(spike_times_vis)
+                        spike_colors_list.extend(["gray"] * len(spike_times_vis))
+
+            # Red: spikes from spike_place (above speed threshold and spike_threshold_sigma)
             vis_data_above = result["vis_data_above"]
             if "frame" in vis_data_above.columns and not vis_data_above.empty:
                 spike_frames = vis_data_above["frame"].values
@@ -619,21 +622,47 @@ def browse_place_cells(
                 spike_mask = (spike_times >= t_start) & (spike_times <= t_end)
                 if np.any(spike_mask):
                     spike_times_vis = spike_times[spike_mask]
-                    spike_vals = trace[spike_frames[spike_mask].astype(int).clip(0, len(trace) - 1)]
-                    ax5.scatter(
-                        spike_times_vis,
-                        spike_vals,
-                        c="red",
-                        s=20,
-                        zorder=6,
-                        alpha=0.6,
-                        label=f"Spikes (≥ {min_speed:.1f} px/s)",
+                    spike_times_list.extend(spike_times_vis)
+                    spike_colors_list.extend(["red"] * len(spike_times_vis))
+
+            # Draw timing lines as short vertical lines at bottom of plot
+            if spike_times_list:
+                for spike_time, color in zip(spike_times_list, spike_colors_list):
+                    ax5.plot(
+                        [spike_time, spike_time],
+                        [line_bottom, line_bottom + line_height],
+                        color=color,
+                        linewidth=1.5,
                     )
 
             ax5.set_xlim(t_start, t_end)
             ax5.set_xlabel("Time (s)")
             ax5.set_ylabel(trace_name)
-            ax5.legend(loc="upper left", fontsize=8, framealpha=0.9)
+            
+            # Legend: trace and timing lines
+            from matplotlib.lines import Line2D
+            legend_elements = [
+                Line2D([0], [0], color="blue", linewidth=0.5, label="Fluorescence"),
+            ]
+            # Add timing line legend entries if we have spikes
+            if spike_times_list:
+                has_gray = "gray" in spike_colors_list
+                has_red = "red" in spike_colors_list
+                if has_gray:
+                    legend_elements.append(
+                        Line2D(
+                            [0], [0], color="gray", linewidth=1.5,
+                            label=f"All spikes (< {min_speed:.1f} px/s)"
+                        )
+                    )
+                if has_red:
+                    legend_elements.append(
+                        Line2D(
+                            [0], [0], color="red", linewidth=1.5,
+                            label=f"Spikes (≥ {min_speed:.1f} px/s)"
+                        )
+                    )
+            ax5.legend(handles=legend_elements, loc="upper left", fontsize=8, framealpha=0.9)
 
             # Update trace slider range if needed
             if trace_slider is None and t_max > trace_time_window:
