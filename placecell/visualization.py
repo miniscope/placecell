@@ -392,6 +392,13 @@ def browse_place_cells(
         rate_map = np.zeros_like(occupancy_time)
         rate_map[valid_mask] = spike_weights[valid_mask] / occupancy_time[valid_mask]
         rate_map_smooth = gaussian_filter(rate_map, sigma=smooth_sigma)
+        # Normalize to 0-1 range
+        valid_rate_values = rate_map_smooth[valid_mask]
+        if len(valid_rate_values) > 0 and np.nanmax(valid_rate_values) > 0:
+            rate_map_smooth[valid_mask] = (
+                (rate_map_smooth[valid_mask] - np.nanmin(valid_rate_values))
+                / (np.nanmax(valid_rate_values) - np.nanmin(valid_rate_values))
+            )
         # Set invalid bins (below min_occupancy) to NaN so they appear white
         rate_map_smooth[~valid_mask] = np.nan
 
@@ -505,7 +512,7 @@ def browse_place_cells(
     # Create figure
     from matplotlib.widgets import Slider
 
-    fig = plt.figure(figsize=(16, 9))
+    fig = plt.figure(figsize=(18, 9))
     current_idx = [0]  # Use list to allow modification in nested function
     trace_scroll_pos = [0.0]  # Current scroll position for trace
 
@@ -513,10 +520,10 @@ def browse_place_cells(
     min_uid, max_uid = min(unique_units), max(unique_units)
 
     # Create axes - unit info at top, more space for trace
-    ax1 = fig.add_axes([0.02, 0.42, 0.22, 0.45])  # Max projection
-    ax2 = fig.add_axes([0.27, 0.42, 0.22, 0.45])  # Trajectory
-    ax3 = fig.add_axes([0.52, 0.42, 0.22, 0.45])  # Rate map
-    ax4 = fig.add_axes([0.77, 0.42, 0.22, 0.45])  # SI histogram (square)
+    ax1 = fig.add_axes([0.03, 0.42, 0.18, 0.45])  # Max projection
+    ax2 = fig.add_axes([0.25, 0.42, 0.18, 0.45])  # Trajectory
+    ax3 = fig.add_axes([0.47, 0.42, 0.18, 0.45])  # Rate map
+    ax4 = fig.add_axes([0.74, 0.42, 0.18, 0.45])  # SI histogram (square)
     ax5 = fig.add_axes([0.05, 0.20, 0.90, 0.20])  # Trace
     ax_trace_slider = fig.add_axes(
         [0.15, 0.12, 0.70, 0.02]
@@ -527,6 +534,8 @@ def browse_place_cells(
 
     def render(idx: int) -> None:
         nonlocal trace_slider
+        # Clamp index to valid range
+        idx = max(0, min(idx, n_units - 1))
         unit_id = unique_units[idx]
         result = unit_results[unit_id]
 
@@ -575,8 +584,9 @@ def browse_place_cells(
         ax2.axis("off")
 
         # 3. Rate map (NaN values will appear white - bins below min_occupancy)
-        ax3.imshow(
-            result["rate_map"].T,
+        rate_map_data = result["rate_map"].T
+        im = ax3.imshow(
+            rate_map_data,
             origin="lower",
             extent=[x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]],
             aspect="equal",
@@ -584,6 +594,16 @@ def browse_place_cells(
         )
         ax3.set_title("Rate map")
         ax3.axis("off")
+        
+        # Add colorbar for rate map (normalized 0-1)
+        # Get valid (non-NaN) values for colorbar range
+        valid_rate_values = rate_map_data[~np.isnan(rate_map_data)]
+        if len(valid_rate_values) > 0:
+            # Normalized values should be 0-1
+            im.set_clim(0.0, 1.0)
+            # Colorbar outside the subplot
+            cbar = plt.colorbar(im, ax=ax3, fraction=0.046, pad=0.03)
+            cbar.set_label("Normalized spatial neural activity rate $S^{-1}$", rotation=270, labelpad=15)
 
         # 4. SI histogram
         ax4.hist(result["shuffled_sis"], bins=15, color="gray", alpha=0.7, edgecolor="black")
@@ -730,9 +750,12 @@ def browse_place_cells(
 
     def change_unit(new_idx: int) -> None:
         """Change to a new unit index."""
-        if 0 <= new_idx < n_units:
-            current_idx[0] = new_idx
-            render(new_idx)
+        # Clamp to valid range and loop
+        new_idx = new_idx % n_units
+        if new_idx < 0:
+            new_idx += n_units
+        current_idx[0] = new_idx
+        render(new_idx)
 
     def on_key(event: Any) -> None:
         """Keyboard navigation handler."""
