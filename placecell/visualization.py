@@ -1,7 +1,7 @@
 """Visualization functions for place cell data."""
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
@@ -346,7 +346,9 @@ def browse_place_cells(
             valid_si = (rate_map > 0) & valid_mask
             if np.any(valid_si):
                 si_term = (
-                    P_i[valid_si] * rate_map[valid_si] * np.log2(rate_map[valid_si] / overall_lambda)
+                    P_i[valid_si]
+                    * rate_map[valid_si]
+                    * np.log2(rate_map[valid_si] / overall_lambda)
                 )
                 actual_si = float(np.sum(si_term))
             else:
@@ -373,7 +375,9 @@ def browse_place_cells(
                 valid_s = (rate_shuf > 0) & valid_mask
                 if np.any(valid_s):
                     si_shuf = np.sum(
-                        P_i[valid_s] * rate_shuf[valid_s] * np.log2(rate_shuf[valid_s] / overall_lambda)
+                        P_i[valid_s]
+                        * rate_shuf[valid_s]
+                        * np.log2(rate_shuf[valid_s] / overall_lambda)
                     )
                 else:
                     si_shuf = 0.0
@@ -431,7 +435,7 @@ def browse_place_cells(
         1.02, 0.5, f"{unique_units[0]} ({1}/{n_units})", transform=ax_slider.transAxes, va="center"
     )
 
-    def render(idx):
+    def render(idx: int) -> None:
         unit_id = unique_units[idx]
         result = unit_results[unit_id]
 
@@ -446,12 +450,16 @@ def browse_place_cells(
                 try:
                     unit_fp = footprints.sel(unit_id=int(unit_id)).values
                     if unit_fp.max() > 0:
-                        ax1.contour(unit_fp, levels=[unit_fp.max() * 0.3], colors="red", linewidths=1.5)
+                        ax1.contour(
+                            unit_fp, levels=[unit_fp.max() * 0.3], colors="red", linewidths=1.5
+                        )
                 except Exception:
                     pass
             ax1.set_title(f"Unit {unit_id}")
         else:
-            ax1.text(0.5, 0.5, "No max projection", ha="center", va="center", transform=ax1.transAxes)
+            ax1.text(
+                0.5, 0.5, "No max projection", ha="center", va="center", transform=ax1.transAxes
+            )
             ax1.set_title(f"Unit {unit_id}")
         ax1.axis("off")
 
@@ -465,7 +473,7 @@ def browse_place_cells(
         ax2.axis("off")
 
         # 3. Rate map
-        im = ax3.imshow(
+        ax3.imshow(
             result["rate_map"].T,
             origin="lower",
             extent=[x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]],
@@ -500,20 +508,27 @@ def browse_place_cells(
                 ax5.set_xlabel("Time (s)")
                 ax5.set_ylabel("Fluorescence")
             except Exception:
-                ax5.text(0.5, 0.5, "Could not plot trace", ha="center", va="center", transform=ax5.transAxes)
+                ax5.text(
+                    0.5,
+                    0.5,
+                    "Could not plot trace",
+                    ha="center",
+                    va="center",
+                    transform=ax5.transAxes,
+                )
         else:
             ax5.text(0.5, 0.5, "No trace data", ha="center", va="center", transform=ax5.transAxes)
 
         fig.suptitle(f"Unit {unit_id} ({idx + 1}/{n_units})", fontsize=12)
         fig.canvas.draw_idle()
 
-    def on_slider(val):
+    def on_slider(val: float) -> None:
         idx = int(val)
         current_idx[0] = idx
         unit_text.set_text(f"{unique_units[idx]} ({idx + 1}/{n_units})")
         render(idx)
 
-    def on_key(event):
+    def on_key(event: Any) -> None:
         if event.key in ["right", "d"]:
             new_idx = (current_idx[0] + 1) % n_units
             slider.set_val(new_idx)
