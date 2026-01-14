@@ -211,6 +211,7 @@ def browse_place_cells(
     smooth_sigma: float = 1.0,
     behavior_fps: float = 20.0,
     neural_fps: float = 20.0,
+    speed_window_frames: int = 5,
     n_shuffles: int = 100,
     random_seed: int | None = None,
     trace_time_window: float = 600.0,
@@ -286,25 +287,46 @@ def browse_place_cells(
     # Load full behavior trajectory for plotting and occupancy calculation
     behavior_path = Path(behavior_path)
     behavior_position_path = behavior_path / "behavior_position.csv"
+    behavior_timestamp_path = behavior_path / "behavior_timestamp.csv"
     if not behavior_position_path.exists():
         raise FileNotFoundError(
             f"Behavior position file not found: {behavior_position_path}. "
             "This is required for full trajectory plotting and occupancy calculation."
         )
+    if not behavior_timestamp_path.exists():
+        raise FileNotFoundError(
+            f"Behavior timestamp file not found: {behavior_timestamp_path}. "
+            "This is required for speed calculation."
+        )
     
-    from placecell.analysis import _load_behavior_xy
+    from placecell.analysis import _load_behavior_xy, compute_behavior_speed
     
+    # Load full trajectory and compute speed
     full_trajectory = _load_behavior_xy(behavior_position_path, bodypart=bodypart)
+    behavior_timestamps = pd.read_csv(behavior_timestamp_path)  # frame_index, unix_time
+    
+    # Compute speed for all positions
+    trajectory_with_speed = compute_behavior_speed(
+        positions=full_trajectory,
+        timestamps=behavior_timestamps,
+        window_frames=speed_window_frames,
+    )
+    
+    # Filter by speed threshold
+    trajectory_df = trajectory_with_speed[
+        trajectory_with_speed["speed"] >= min_speed
+    ]
+    trajectory_df = trajectory_df.sort_values("frame_index")
+    
     # Rename frame_index to beh_frame_index for consistency
-    full_trajectory = full_trajectory.rename(columns={"frame_index": "beh_frame_index"})
-    trajectory_df = full_trajectory.sort_values("beh_frame_index")
+    trajectory_df = trajectory_df.rename(columns={"frame_index": "beh_frame_index"})
 
-    # Spatial grid
+    # Spatial grid (from speed-filtered trajectory)
     x_edges = np.linspace(trajectory_df["x"].min(), trajectory_df["x"].max(), bins + 1)
     y_edges = np.linspace(trajectory_df["y"].min(), trajectory_df["y"].max(), bins + 1)
     time_per_frame = 1.0 / behavior_fps
 
-    # Occupancy map (from full trajectory)
+    # Occupancy map (from speed-filtered trajectory)
     occupancy_counts, _, _ = np.histogram2d(
         trajectory_df["x"], trajectory_df["y"], bins=[x_edges, y_edges]
     )
@@ -540,7 +562,7 @@ def browse_place_cells(
 
         # 2. Trajectory + spikes (only above speed threshold)
         vis_data_above = result["vis_data_above"]
-        ax2.plot(trajectory_df["x"], trajectory_df["y"], "k-", alpha=1.0, linewidth=0.5, zorder=1)
+        ax2.plot(trajectory_df["x"], trajectory_df["y"], "k-", alpha=1.0, linewidth=1, zorder=1)
 
         # Plot above-threshold spikes in red (on top of trajectory)
         if not vis_data_above.empty:
