@@ -22,6 +22,44 @@ except ImportError:
 logger = init_logger(__name__)
 
 
+def _gaussian_filter_normalized(
+    data: np.ndarray,
+    sigma: float,
+) -> np.ndarray:
+    """
+    Apply Gaussian smoothing with adaptive normalization at boundaries.
+
+    Uses zero-padding and normalizes by the kernel weight sum so that
+    edge bins are not penalized. This seems to be the standard approach for
+    place cell rate map smoothing.
+
+
+    Parameters
+    ----------
+    data : np.ndarray
+        Input 2D array to smooth.
+    sigma : float
+        Gaussian smoothing sigma in bins.
+
+    Returns
+    -------
+    np.ndarray
+        Smoothed array with normalized edges.
+    """
+    from scipy.ndimage import gaussian_filter
+
+    if sigma <= 0:
+        return data.copy()
+
+    # Smooth data with zero padding
+    smoothed = gaussian_filter(data, sigma=sigma, mode="constant", cval=0)
+    # Smooth a mask of ones to get normalization weights
+    norm = gaussian_filter(np.ones_like(data), sigma=sigma, mode="constant", cval=0)
+    # Avoid division by zero
+    norm[norm == 0] = 1
+    return smoothed / norm
+
+
 def _load_behavior_data(
     behavior_path: Path,
     bodypart: str,
@@ -167,8 +205,6 @@ def _compute_occupancy_map(
     tuple
         (occupancy_time, valid_mask, x_edges, y_edges)
     """
-    from scipy.ndimage import gaussian_filter
-
     x_edges = np.linspace(trajectory_df["x"].min(), trajectory_df["x"].max(), bins + 1)
     y_edges = np.linspace(trajectory_df["y"].min(), trajectory_df["y"].max(), bins + 1)
     time_per_frame = 1.0 / behavior_fps
@@ -179,7 +215,7 @@ def _compute_occupancy_map(
     occupancy_time = occupancy_counts * time_per_frame
 
     if occupancy_sigma > 0:
-        occupancy_time = gaussian_filter(occupancy_time, sigma=occupancy_sigma)
+        occupancy_time = _gaussian_filter_normalized(occupancy_time, sigma=occupancy_sigma)
 
     valid_mask = occupancy_time >= min_occupancy
 
@@ -324,8 +360,6 @@ def _compute_unit_analysis(
     dict
         Unit analysis results including rate_map, si, p_val, etc.
     """
-    from scipy.ndimage import gaussian_filter
-
     unit_data = (
         df_filtered[df_filtered["unit_id"] == unit_id] if not df_filtered.empty else pd.DataFrame()
     )
@@ -339,7 +373,7 @@ def _compute_unit_analysis(
     )
     rate_map = np.zeros_like(occupancy_time)
     rate_map[valid_mask] = spike_weights[valid_mask] / occupancy_time[valid_mask]
-    rate_map_smooth = gaussian_filter(rate_map, sigma=activity_sigma)
+    rate_map_smooth = _gaussian_filter_normalized(rate_map, sigma=activity_sigma)
 
     # Normalize to 0-1 range
     valid_rate_values = rate_map_smooth[valid_mask]
