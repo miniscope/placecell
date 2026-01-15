@@ -927,48 +927,72 @@ def browse_place_cells(
             # Plot trace
             ax5.plot(t_visible, trace_visible, "b-", linewidth=0.5, label="Fluorescence")
 
-            # Get y-axis range for timing lines
-            y_min, y_max = ax5.get_ylim()
-            y_range = y_max - y_min
-            line_bottom = y_min
-            line_height = 2 * (y_range * 0.02)
+            # Collect deconvolved event data for plotting as dots
+            event_times_gray = []
+            event_amplitudes_gray = []
+            event_times_red = []
+            event_amplitudes_red = []
 
-            # Collect all spike times with their colors
-            spike_times_list = []
-            spike_colors_list = []
-
-            # Gray: all spikes from spike_index
+            # Gray: all deconvolved events from spike_index (below speed threshold)
             if df_all_spikes is not None:
                 unit_all_spikes = df_all_spikes[df_all_spikes["unit_id"] == unit_id]
-                if "frame" in unit_all_spikes.columns and not unit_all_spikes.empty:
+                has_frame = "frame" in unit_all_spikes.columns
+                has_amp = "s" in unit_all_spikes.columns
+                if has_frame and has_amp and not unit_all_spikes.empty:
                     spike_frames = unit_all_spikes["frame"].values
+                    spike_amplitudes = unit_all_spikes["s"].values
                     spike_times = spike_frames / trace_fps
                     spike_mask = (spike_times >= t_start) & (spike_times <= t_end)
                     if np.any(spike_mask):
-                        spike_times_vis = spike_times[spike_mask]
-                        spike_times_list.extend(spike_times_vis)
-                        spike_colors_list.extend(["gray"] * len(spike_times_vis))
+                        event_times_gray = spike_times[spike_mask]
+                        event_amplitudes_gray = spike_amplitudes[spike_mask]
 
-            # Red: spikes from spike_place (above speed threshold)
+            # Red: deconvolved events from spike_place (above speed threshold)
             vis_data_above = result["vis_data_above"]
-            if "frame" in vis_data_above.columns and not vis_data_above.empty:
+            has_required_cols = "frame" in vis_data_above.columns and "s" in vis_data_above.columns
+            if has_required_cols and not vis_data_above.empty:
                 spike_frames = vis_data_above["frame"].values
+                spike_amplitudes = vis_data_above["s"].values
                 spike_times = spike_frames / trace_fps
                 spike_mask = (spike_times >= t_start) & (spike_times <= t_end)
                 if np.any(spike_mask):
-                    spike_times_vis = spike_times[spike_mask]
-                    spike_times_list.extend(spike_times_vis)
-                    spike_colors_list.extend(["red"] * len(spike_times_vis))
+                    event_times_red = spike_times[spike_mask]
+                    event_amplitudes_red = spike_amplitudes[spike_mask]
 
-            # Draw timing lines
-            if spike_times_list:
-                for spike_time, color in zip(spike_times_list, spike_colors_list):
-                    ax5.plot(
-                        [spike_time, spike_time],
-                        [line_bottom, line_bottom + line_height],
-                        color=color,
-                        linewidth=1.5,
-                    )
+            # Plot deconvolved events as vertical spikes with height proportional to amplitude
+            y_min, y_max = ax5.get_ylim()
+            baseline = y_min  # Start spikes from bottom
+
+            # Combine all amplitudes for normalization
+            all_amps = np.concatenate([
+                event_amplitudes_gray if len(event_amplitudes_gray) > 0 else [],
+                event_amplitudes_red if len(event_amplitudes_red) > 0 else [],
+            ])
+            if len(all_amps) > 0:
+                amp_max = np.max(all_amps)
+            else:
+                amp_max = 1.0
+
+            # Scale spike heights to use ~30% of the y-axis range
+            y_range = y_max - y_min
+            max_spike_height = y_range * 0.3
+
+            def scale_height(amp: float) -> float:
+                if amp_max > 0:
+                    return (amp / amp_max) * max_spike_height
+                return 0.0
+
+            # Draw gray spikes (all events)
+            if len(event_times_gray) > 0:
+                for t, amp in zip(event_times_gray, event_amplitudes_gray):
+                    h = scale_height(amp)
+                    ax5.plot([t, t], [baseline, baseline + h], color="gray", lw=1.5)
+
+            # Draw red spikes (speed-filtered events) on top
+            if len(event_times_red) > 0:
+                for t, amp in zip(event_times_red, event_amplitudes_red):
+                    h = scale_height(amp)
+                    ax5.plot([t, t], [baseline, baseline + h], color="red", lw=1.5)
 
             ax5.set_xlim(t_start, t_end)
             ax5.set_xlabel("Time (s)")
@@ -980,29 +1004,28 @@ def browse_place_cells(
             legend_elements = [
                 Line2D([0], [0], color="blue", linewidth=0.5, label="Fluorescence"),
             ]
-            if spike_times_list:
-                has_gray = "gray" in spike_colors_list
-                has_red = "red" in spike_colors_list
-                if has_gray:
-                    legend_elements.append(
-                        Line2D(
-                            [0],
-                            [0],
-                            color="gray",
-                            linewidth=1.5,
-                            label=f"All spikes (< {speed_threshold:.1f} px/s)",
-                        )
+            has_gray = len(event_times_gray) > 0
+            has_red = len(event_times_red) > 0
+            if has_gray:
+                legend_elements.append(
+                    Line2D(
+                        [0],
+                        [0],
+                        color="gray",
+                        linewidth=1.5,
+                        label=f"Deconv events (< {speed_threshold:.1f} px/s)",
                     )
-                if has_red:
-                    legend_elements.append(
-                        Line2D(
-                            [0],
-                            [0],
-                            color="red",
-                            linewidth=1.5,
-                            label=f"Spikes (≥ {speed_threshold:.1f} px/s)",
-                        )
+                )
+            if has_red:
+                legend_elements.append(
+                    Line2D(
+                        [0],
+                        [0],
+                        color="red",
+                        linewidth=1.5,
+                        label=f"Deconv events (≥ {speed_threshold:.1f} px/s)",
                     )
+                )
             ax5.legend(handles=legend_elements, loc="upper left", fontsize=8, framealpha=0.9)
 
             # Update trace slider range if needed

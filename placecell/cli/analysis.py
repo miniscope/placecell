@@ -257,7 +257,6 @@ def visualize(
         raise click.ClickException(f"Behavior timestamp file not found: {behavior_timestamp}")
 
     # 1) Deconvolution
-    click.echo("=== Deconvolution ===")
     cmd1 = [
         "pcell",
         "deconvolve",
@@ -279,7 +278,6 @@ def visualize(
     subprocess.run(cmd1, check=True)
 
     # 2) Spike-place (internal function)
-    click.echo("=== Spike-place ===")
     _run_spike_place(
         spike_index=out_dir / f"spike_index_{label}.csv",
         neural_timestamp=neural_timestamp,
@@ -293,7 +291,6 @@ def visualize(
     )
 
     # 3) Interactive plot
-    click.echo("=== Interactive plot ===")
     _launch_browser(
         spike_place_csv=out_dir / f"spike_place_{label}.csv",
         behavior_path=behavior_path,
