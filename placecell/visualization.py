@@ -874,9 +874,20 @@ def browse_place_cells(
         vis_data_above = result["vis_data_above"]
         ax2.plot(trajectory_df["x"], trajectory_df["y"], "k-", alpha=1.0, linewidth=1, zorder=1)
 
-        # Plot above-threshold spikes in red (on top of trajectory)
+        # Plot above-threshold spikes with alpha proportional to amplitude
         if not vis_data_above.empty:
-            ax2.scatter(vis_data_above["x"], vis_data_above["y"], c="red", s=10, zorder=2)
+            amps = vis_data_above["s"].values
+            amp_max = np.max(amps) if len(amps) > 0 and np.max(amps) > 0 else 1.0
+            # Linear alpha from 0 to 1
+            alphas = amps / amp_max
+            ax2.scatter(
+                vis_data_above["x"],
+                vis_data_above["y"],
+                c="red",
+                s=30,
+                alpha=alphas,
+                zorder=2,
+            )
 
         ax2.set_title(f"Trajectory ({len(vis_data_above)} spikes)")
         ax2.set_aspect("equal")
