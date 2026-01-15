@@ -108,6 +108,12 @@ class RateMapConfig(MiniscopeConfig, ConfigYAMLMixin):
         ge=0.0,
         description="Gaussian smoothing sigma for rate map (default 1.0, 0 = no smoothing).",
     )
+    position_smooth_sigma: float = Field(
+        0.0,
+        ge=0.0,
+        description="Gaussian smoothing sigma (in bins) for the occupancy map (default 0.0 = no smoothing). "
+        "Smoothing the occupancy map spatially reduces noise from undersampled bins.",
+    )
     n_shuffles: int = Field(
         100,
         ge=1,

@@ -209,6 +209,7 @@ def browse_place_cells(
     min_occupancy: float = 0.1,
     bins: int = 30,
     smooth_sigma: float = 1.0,
+    position_smooth_sigma: float = 0.0,
     behavior_fps: float = 20.0,
     neural_fps: float = 20.0,
     speed_window_frames: int = 5,
@@ -317,7 +318,7 @@ def browse_place_cells(
         trajectory_with_speed["speed"] >= min_speed
     ]
     trajectory_df = trajectory_df.sort_values("frame_index")
-    
+
     # Rename frame_index to beh_frame_index for consistency
     trajectory_df = trajectory_df.rename(columns={"frame_index": "beh_frame_index"})
 
@@ -331,7 +332,42 @@ def browse_place_cells(
         trajectory_df["x"], trajectory_df["y"], bins=[x_edges, y_edges]
     )
     occupancy_time = occupancy_counts * time_per_frame
+
+    # Apply 2D Gaussian smoothing to occupancy map if requested (in bin units)
+    if position_smooth_sigma > 0:
+        occupancy_time = gaussian_filter(occupancy_time, sigma=position_smooth_sigma)
+
     valid_mask = occupancy_time >= min_occupancy
+
+    # Display occupancy map
+    fig_occ, axes_occ = plt.subplots(1, 2, figsize=(10, 4))
+    # Left: trajectory
+    axes_occ[0].plot(trajectory_df["x"], trajectory_df["y"], "k-", alpha=0.5, linewidth=0.5)
+    axes_occ[0].set_title("Trajectory")
+    axes_occ[0].set_aspect("equal")
+    axes_occ[0].axis("off")
+    # Right: occupancy map (show all values, contour excluded zones)
+    im = axes_occ[1].imshow(
+        occupancy_time.T,
+        origin="lower",
+        extent=[x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]],
+        cmap="hot",
+        aspect="equal",
+    )
+    # Add white contour around excluded zones (below min_occupancy)
+    axes_occ[1].contour(
+        valid_mask.T.astype(float),
+        levels=[0.5],
+        colors="white",
+        linewidths=1.5,
+        extent=[x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]],
+        origin="lower",
+    )
+    axes_occ[1].set_title(f"Occupancy Map (smooth={position_smooth_sigma}, min_occ={min_occupancy}s)")
+    plt.colorbar(im, ax=axes_occ[1], label="Time (s)")
+    fig_occ.tight_layout()
+    plt.show(block=False)
+    plt.pause(0.1)
 
     # Load traces if available
     traces = None
@@ -503,8 +539,9 @@ def browse_place_cells(
                 "Try adjusting the p_value_threshold or check your data."
             )
         unique_units = filtered_units
+        n_units = len(unique_units)  # Update n_units after filtering
         logger.info(
-            f"Filtered to {len(unique_units)} units with p-value < {p_value_threshold:.3f}"
+            f"Filtered to {n_units} units with p-value < {p_value_threshold:.3f}"
         )
 
     logger.info("Ready.")
@@ -522,7 +559,8 @@ def browse_place_cells(
     # Create axes - unit info at top, more space for trace
     ax1 = fig.add_axes([0.03, 0.42, 0.18, 0.45])  # Max projection
     ax2 = fig.add_axes([0.25, 0.42, 0.18, 0.45])  # Trajectory
-    ax3 = fig.add_axes([0.47, 0.42, 0.18, 0.45])  # Rate map
+    ax3 = fig.add_axes([0.47, 0.42, 0.16, 0.45])  # Rate map (slightly smaller for colorbar)
+    ax3_cbar = fig.add_axes([0.635, 0.42, 0.015, 0.45])  # Dedicated colorbar axes
     ax4 = fig.add_axes([0.74, 0.42, 0.18, 0.45])  # SI histogram (square)
     ax5 = fig.add_axes([0.05, 0.20, 0.90, 0.20])  # Trace
     ax_trace_slider = fig.add_axes(
@@ -546,7 +584,7 @@ def browse_place_cells(
                 trace_slider.set_val(0.0)
 
         # Clear all axes
-        for ax in [ax1, ax2, ax3, ax4, ax5]:
+        for ax in [ax1, ax2, ax3, ax3_cbar, ax4, ax5]:
             ax.clear()
 
         # 1. Max projection with neuron position
@@ -594,16 +632,11 @@ def browse_place_cells(
         )
         ax3.set_title("Rate map")
         ax3.axis("off")
-        
-        # Add colorbar for rate map (normalized 0-1)
-        # Get valid (non-NaN) values for colorbar range
-        valid_rate_values = rate_map_data[~np.isnan(rate_map_data)]
-        if len(valid_rate_values) > 0:
-            # Normalized values should be 0-1
-            im.set_clim(0.0, 1.0)
-            # Colorbar outside the subplot
-            cbar = plt.colorbar(im, ax=ax3, fraction=0.046, pad=0.03)
-            cbar.set_label("Normalized spatial neural activity rate $S^{-1}$", rotation=270, labelpad=15)
+
+        # Add colorbar for rate map using dedicated axes
+        im.set_clim(0.0, 1.0)
+        plt.colorbar(im, cax=ax3_cbar)
+        ax3_cbar.set_ylabel("Norm. rate", rotation=270, labelpad=10)
 
         # 4. SI histogram
         ax4.hist(result["shuffled_sis"], bins=15, color="gray", alpha=0.7, edgecolor="black")
@@ -614,12 +647,12 @@ def browse_place_cells(
         ax4.set_aspect("auto")
         ax4.set_box_aspect(1)  # Square
 
-        # 5. Trace (scrollable 5-minute window)
+        # 5. Trace (scrollable window)
         if result["trace_data"] is not None and result["trace_times"] is not None:
             trace = result["trace_data"]
             t_full = result["trace_times"]
 
-            # Calculate visible window (5 minutes)
+            # Calculate visible window
             t_max = t_full[-1] if len(t_full) > 0 else trace_time_window
             scroll_pos = trace_scroll_pos[0]
             t_start = max(0, scroll_pos)
@@ -632,19 +665,18 @@ def browse_place_cells(
 
             # Plot trace
             ax5.plot(t_visible, trace_visible, "b-", linewidth=0.5, label="Fluorescence")
-            
+
             # Get y-axis range for timing lines
             y_min, y_max = ax5.get_ylim()
             y_range = y_max - y_min
-            # Timing lines will be at the bottom, double height
             line_bottom = y_min
-            line_height = 2 * (y_range * 0.02)  # Double the height (2% of y-range)
+            line_height = 2 * (y_range * 0.02)
 
             # Collect all spike times with their colors
             spike_times_list = []
             spike_colors_list = []
 
-            # Gray: all spikes from spike_index (no threshold filtering)
+            # Gray: all spikes from spike_index
             if df_all_spikes is not None:
                 unit_all_spikes = df_all_spikes[df_all_spikes["unit_id"] == unit_id]
                 if "frame" in unit_all_spikes.columns and not unit_all_spikes.empty:
@@ -656,7 +688,7 @@ def browse_place_cells(
                         spike_times_list.extend(spike_times_vis)
                         spike_colors_list.extend(["gray"] * len(spike_times_vis))
 
-            # Red: spikes from spike_place (above speed threshold and spike_threshold_sigma)
+            # Red: spikes from spike_place (above speed threshold)
             vis_data_above = result["vis_data_above"]
             if "frame" in vis_data_above.columns and not vis_data_above.empty:
                 spike_frames = vis_data_above["frame"].values
@@ -667,7 +699,7 @@ def browse_place_cells(
                     spike_times_list.extend(spike_times_vis)
                     spike_colors_list.extend(["red"] * len(spike_times_vis))
 
-            # Draw timing lines as short vertical lines at bottom of plot
+            # Draw timing lines
             if spike_times_list:
                 for spike_time, color in zip(spike_times_list, spike_colors_list):
                     ax5.plot(
@@ -680,13 +712,13 @@ def browse_place_cells(
             ax5.set_xlim(t_start, t_end)
             ax5.set_xlabel("Time (s)")
             ax5.set_ylabel(trace_name)
-            
-            # Legend: trace and timing lines
+
+            # Legend
             from matplotlib.lines import Line2D
+
             legend_elements = [
                 Line2D([0], [0], color="blue", linewidth=0.5, label="Fluorescence"),
             ]
-            # Add timing line legend entries if we have spikes
             if spike_times_list:
                 has_gray = "gray" in spike_colors_list
                 has_red = "red" in spike_colors_list
@@ -724,7 +756,6 @@ def browse_place_cells(
 
                 trace_slider.on_changed(on_trace_slider)
             elif trace_slider is not None:
-                # Update slider range for new unit
                 if t_max > trace_time_window:
                     trace_slider_max = max(0, t_max - trace_time_window)
                     trace_slider.valmax = trace_slider_max
@@ -733,9 +764,10 @@ def browse_place_cells(
                 else:
                     trace_slider.ax.set_visible(False)
         else:
-            ax5.text(0.5, 0.5, "No trace data", ha="center", va="center", transform=ax5.transAxes)
+            ax5.text(
+                0.5, 0.5, "No trace data", ha="center", va="center", transform=ax5.transAxes
+            )
             ax5.set_xlabel("Time (s)")
-            # Hide trace slider if no trace
             if trace_slider is not None:
                 trace_slider.ax.set_visible(False)
 
@@ -750,20 +782,20 @@ def browse_place_cells(
 
     def change_unit(new_idx: int) -> None:
         """Change to a new unit index."""
-        # Clamp to valid range and loop
-        new_idx = new_idx % n_units
-        if new_idx < 0:
-            new_idx += n_units
+        # Loop around the list
+        num_units = len(unique_units)
+        new_idx = new_idx % num_units
         current_idx[0] = new_idx
         render(new_idx)
 
     def on_key(event: Any) -> None:
         """Keyboard navigation handler."""
+        num_units = len(unique_units)
         if event.key in ["right", "d"]:
-            new_idx = (current_idx[0] + 1) % n_units
+            new_idx = (current_idx[0] + 1) % num_units
             change_unit(new_idx)
         elif event.key in ["left", "a"]:
-            new_idx = (current_idx[0] - 1) % n_units
+            new_idx = (current_idx[0] - 1) % num_units
             change_unit(new_idx)
         elif event.key == "q":
             plt.close(fig)
