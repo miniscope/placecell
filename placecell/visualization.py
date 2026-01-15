@@ -975,14 +975,13 @@ def browse_place_cells(
             baseline = y_min  # Start spikes from bottom
 
             # Combine all amplitudes for normalization
-            all_amps = np.concatenate([
-                event_amplitudes_gray if len(event_amplitudes_gray) > 0 else [],
-                event_amplitudes_red if len(event_amplitudes_red) > 0 else [],
-            ])
-            if len(all_amps) > 0:
-                amp_max = np.max(all_amps)
-            else:
-                amp_max = 1.0
+            all_amps = np.concatenate(
+                [
+                    event_amplitudes_gray if len(event_amplitudes_gray) > 0 else [],
+                    event_amplitudes_red if len(event_amplitudes_red) > 0 else [],
+                ]
+            )
+            amp_max = np.max(all_amps) if len(all_amps) > 0 else 1.0
 
             # Scale spike heights to use ~30% of the y-axis range
             y_range = y_max - y_min
