@@ -43,6 +43,29 @@ class OasisConfig(MiniscopeConfig, ConfigYAMLMixin):
         "p10",
         description="Baseline mode: 'pXX' for percentile or numeric value.",
     )
+    penalty: float = Field(
+        0.0,
+        ge=0.0,
+        description="Sparsity penalty (L0 norm). Default 0 (no penalty).",
+    )
+    optimize_g: int = Field(
+        0,
+        ge=0,
+        description=[
+            "Number of events to use for optimizing AR coefficients."
+            "Look into oasis documentation for more details."
+        ],
+    )
+    lambda_: float | None = Field(
+        None,
+        description=["Regularization parameter for OASIS." "If None, automatically determined."],
+    )
+    s_min: float | None = Field(
+        None,
+        description=[
+            "Minimum spike size threshold." "Look into oasis documentation for more details."
+        ],
+    )
 
 
 class NeuralConfig(MiniscopeConfig, ConfigYAMLMixin):
@@ -66,34 +89,55 @@ class NeuralConfig(MiniscopeConfig, ConfigYAMLMixin):
     )
 
 
-class RateMapConfig(MiniscopeConfig, ConfigYAMLMixin):
-    """Rate map visualization configuration."""
+class SpatialMapConfig(MiniscopeConfig, ConfigYAMLMixin):
+    """Spatial map visualization configuration."""
 
     bins: int = Field(
-        30,
+        ...,
         ge=5,
         le=200,
-        description="Number of spatial bins for rate map (default 30).",
+        description="Number of spatial bins.",
     )
     min_occupancy: float = Field(
-        0.1,
+        ...,
         ge=0.0,
-        description="Minimum occupancy time (seconds) for a bin to be included (default 0.1).",
+        description="Minimum occupancy time (seconds) for a bin to be included.",
     )
-    smooth_sigma: float = Field(
-        1.0,
+    occupancy_sigma: float = Field(
+        ...,
         ge=0.0,
-        description="Gaussian smoothing sigma for rate map (default 1.0, 0 = no smoothing).",
+        description="Gaussian smoothing sigma (in bins) for the occupancy map. "
+        "Smoothing reduces noise from undersampled bins. Use 0 for no smoothing.",
+    )
+    activity_sigma: float = Field(
+        ...,
+        ge=0.0,
+        description="Gaussian smoothing sigma (in bins) for the spatial activity map. "
+        "Use 0 for no smoothing.",
     )
     n_shuffles: int = Field(
-        100,
+        ...,
         ge=1,
         le=10000,
-        description="Number of shuffles for spatial information significance test (default 100).",
+        description="Number of shuffles for spatial information significance test.",
     )
     random_seed: int | None = Field(
         None,
         description="Random seed for reproducible shuffling. If None, results vary between runs.",
+    )
+    spike_threshold_sigma: float = Field(
+        ...,
+        description="Sigma multiplier for spike amplitude threshold in trajectory plot. "
+        "Can be negative to include lower-amplitude spikes.",
+    )
+    p_value_threshold: float | None = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "P-value threshold for filtering units in visualization. "
+            "Only units with p-value < threshold are plotted. If None, plot all units."
+        ),
     )
 
 
@@ -122,9 +166,9 @@ class BehaviorConfig(MiniscopeConfig, ConfigYAMLMixin):
         ...,
         description="Body part name to use for position tracking (e.g. 'LED').",
     )
-    ratemap: RateMapConfig = Field(
-        default_factory=RateMapConfig,
-        description="Rate map visualization settings.",
+    spatial_map: SpatialMapConfig = Field(
+        default_factory=SpatialMapConfig,
+        description="Spatial map visualization settings.",
     )
 
 

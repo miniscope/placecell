@@ -89,6 +89,10 @@ def deconvolve(
     max_units = cfg.neural.max_units
     g = cfg.neural.oasis.g
     baseline = cfg.neural.oasis.baseline
+    penalty = cfg.neural.oasis.penalty
+    optimize_g = cfg.neural.oasis.optimize_g
+    lambda_ = cfg.neural.oasis.lambda_
+    s_min = cfg.neural.oasis.s_min
 
     neural_path = neural_path.resolve()
     out_dir = out_dir.resolve()
@@ -147,9 +151,18 @@ def deconvolve(
                     f"Could not interpret baseline={baseline!r} " "as 'pXX' or numeric value."
                 ) from None
 
-        kwargs: dict = {"penalty": 0}
+        kwargs: dict = {"penalty": penalty, "optimize_g": optimize_g}
         if g is not None:
-            kwargs["g"] = g
+            # Convert tuple to list if optimize_g is enabled
+            # (OASIS needs mutable list for optimization)
+            if optimize_g > 0:
+                kwargs["g"] = list(g)
+            else:
+                kwargs["g"] = g
+        if lambda_ is not None:
+            kwargs["lambda"] = lambda_
+        if s_min is not None:
+            kwargs["s_min"] = s_min
         try:
             c, s, b_est, g_est, lam = oasis_deconvolve(y - b, **kwargs)
         except Exception as exc:
@@ -161,7 +174,7 @@ def deconvolve(
         S_list.append(np.asarray(s, dtype=float))
 
     if not good_unit_ids:
-        raise click.ClickException("OASIS deconvolution failed for all units.")
+        raise click.ClickException(f"OASIS deconvolution failed for all {len(unit_ids)} units.")
 
     logger.info("OASIS finished; building xarray dataset.")
 
@@ -185,8 +198,11 @@ def deconvolve(
     ds.attrs.update(
         {
             "fps": float(fps),
-            "g": "estimated" if g is None else list(g),
             "baseline": baseline,
+            "penalty": float(penalty),
+            "optimize_g": int(optimize_g),
+            "lambda": float(lambda_) if lambda_ is not None else "auto",
+            "s_min": float(s_min) if s_min is not None else "auto",
         }
     )
 
