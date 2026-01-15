@@ -7,9 +7,42 @@ import click
 from mio.logging import init_logger
 
 from placecell.analysis import build_spike_place_dataframe
-from placecell.config import AppConfig
+from placecell.config import AppConfig, BehaviorConfig
 
 logger = init_logger(__name__)
+
+
+def _launch_browser(
+    spike_place_csv: Path,
+    behavior_path: Path,
+    cfg: AppConfig,
+    behavior_cfg: BehaviorConfig,
+    neural_path: Path | None = None,
+    spike_index_csv: Path | None = None,
+) -> None:
+    """Launch the interactive place cell browser with config settings."""
+    from placecell.visualization import browse_place_cells
+
+    browse_place_cells(
+        spike_place_csv=spike_place_csv,
+        behavior_path=behavior_path,
+        bodypart=behavior_cfg.bodypart,
+        neural_path=neural_path,
+        spike_index_csv=spike_index_csv,
+        trace_name=cfg.neural.trace_name,
+        speed_threshold=behavior_cfg.speed_threshold,
+        min_occupancy=behavior_cfg.spatial_map.min_occupancy,
+        bins=behavior_cfg.spatial_map.bins,
+        occupancy_sigma=behavior_cfg.spatial_map.occupancy_sigma,
+        activity_sigma=behavior_cfg.spatial_map.activity_sigma,
+        behavior_fps=behavior_cfg.behavior_fps,
+        neural_fps=cfg.neural.data.fps,
+        speed_window_frames=behavior_cfg.speed_window_frames,
+        n_shuffles=behavior_cfg.spatial_map.n_shuffles,
+        random_seed=behavior_cfg.spatial_map.random_seed,
+        spike_threshold_sigma=behavior_cfg.spatial_map.spike_threshold_sigma,
+        p_value_threshold=behavior_cfg.spatial_map.p_value_threshold,
+    )
 
 
 def _default_timestamp() -> str:
@@ -261,27 +294,13 @@ def visualize(
 
     # 3) Interactive plot
     click.echo("=== Interactive plot ===")
-    from placecell.visualization import browse_place_cells
-
-    browse_place_cells(
+    _launch_browser(
         spike_place_csv=out_dir / f"spike_place_{label}.csv",
         behavior_path=behavior_path,
-        bodypart=bodypart,
+        cfg=cfg,
+        behavior_cfg=cfg.behavior,
         neural_path=neural_path,
         spike_index_csv=out_dir / f"spike_index_{label}.csv",
-        trace_name=cfg.neural.trace_name,
-        min_speed=cfg.behavior.speed_threshold,
-        min_occupancy=cfg.behavior.spatial_map.min_occupancy,
-        bins=cfg.behavior.spatial_map.bins,
-        occupancy_sigma=cfg.behavior.spatial_map.occupancy_sigma,
-        activity_sigma=cfg.behavior.spatial_map.activity_sigma,
-        behavior_fps=cfg.behavior.behavior_fps,
-        neural_fps=cfg.neural.data.fps,
-        speed_window_frames=cfg.behavior.speed_window_frames,
-        n_shuffles=cfg.behavior.spatial_map.n_shuffles,
-        random_seed=cfg.behavior.spatial_map.random_seed,
-        spike_threshold_sigma=cfg.behavior.spatial_map.spike_threshold_sigma,
-        p_value_threshold=cfg.behavior.spatial_map.p_value_threshold,
     )
 
 
@@ -326,29 +345,15 @@ def plot(
     behavior_path: Path,
 ) -> None:
     """Interactive matplotlib browser for place cells."""
-    from placecell.visualization import browse_place_cells
-
     cfg = AppConfig.from_yaml(config)
     if cfg.behavior is None:
         raise click.ClickException("Config file must include a 'behavior' section.")
 
-    browse_place_cells(
+    _launch_browser(
         spike_place_csv=spike_place_path,
         behavior_path=behavior_path,
-        bodypart=cfg.behavior.bodypart,
+        cfg=cfg,
+        behavior_cfg=cfg.behavior,
         neural_path=neural_path,
         spike_index_csv=spike_index_path,
-        trace_name=cfg.neural.trace_name,
-        min_speed=cfg.behavior.speed_threshold,
-        min_occupancy=cfg.behavior.spatial_map.min_occupancy,
-        bins=cfg.behavior.spatial_map.bins,
-        occupancy_sigma=cfg.behavior.spatial_map.occupancy_sigma,
-        activity_sigma=cfg.behavior.spatial_map.activity_sigma,
-        behavior_fps=cfg.behavior.behavior_fps,
-        neural_fps=cfg.neural.data.fps,
-        speed_window_frames=cfg.behavior.speed_window_frames,
-        n_shuffles=cfg.behavior.spatial_map.n_shuffles,
-        random_seed=cfg.behavior.spatial_map.random_seed,
-        spike_threshold_sigma=cfg.behavior.spatial_map.spike_threshold_sigma,
-        p_value_threshold=cfg.behavior.spatial_map.p_value_threshold,
     )

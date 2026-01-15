@@ -188,7 +188,7 @@ def plot_max_projection_with_unit_footprint(
                 linewidths=2,
                 alpha=0.8,
             )
-    except Exception:
+    except (KeyError, IndexError, ValueError):
         # Unit not found or can't be loaded
         pass
 
@@ -205,7 +205,7 @@ def browse_place_cells(
     neural_path: str | Path | None = None,
     spike_index_csv: str | Path | None = None,
     trace_name: str = "C",
-    min_speed: float = 1.0,
+    speed_threshold: float = 1.0,
     min_occupancy: float = 0.1,
     bins: int = 30,
     occupancy_sigma: float = 0.0,
@@ -244,7 +244,7 @@ def browse_place_cells(
         Path to spike_index CSV (all spikes). If provided, shows all spikes on trace plot (gray).
     trace_name : str
         Name of trace zarr to load (default "C").
-    min_speed : float
+    speed_threshold : float
         Minimum speed threshold (default 1.0).
     min_occupancy : float
         Minimum occupancy time in seconds (default 0.1).
@@ -280,7 +280,7 @@ def browse_place_cells(
 
     # Load spike data
     df = pd.read_csv(spike_place_csv)
-    df_filtered = df[df["speed"] > min_speed].copy()
+    df_filtered = df[df["speed"] > speed_threshold].copy()
 
     # Load all spikes from spike_index if provided (for trace plot only)
     df_all_spikes = None
@@ -301,24 +301,22 @@ def browse_place_cells(
             f"Behavior timestamp file not found: {behavior_timestamp_path}. "
             "This is required for speed calculation."
         )
-    
+
     from placecell.analysis import _load_behavior_xy, compute_behavior_speed
-    
+
     # Load full trajectory and compute speed
     full_trajectory = _load_behavior_xy(behavior_position_path, bodypart=bodypart)
     behavior_timestamps = pd.read_csv(behavior_timestamp_path)  # frame_index, unix_time
-    
+
     # Compute speed for all positions
     trajectory_with_speed = compute_behavior_speed(
         positions=full_trajectory,
         timestamps=behavior_timestamps,
         window_frames=speed_window_frames,
     )
-    
+
     # Filter by speed threshold
-    trajectory_df = trajectory_with_speed[
-        trajectory_with_speed["speed"] >= min_speed
-    ]
+    trajectory_df = trajectory_with_speed[trajectory_with_speed["speed"] >= speed_threshold]
     trajectory_df = trajectory_df.sort_values("frame_index")
 
     # Rename frame_index to beh_frame_index for consistency
@@ -374,7 +372,13 @@ def browse_place_cells(
     axes_occ[2].hist(
         all_speeds.clip(upper=speed_max), bins=50, color="gray", edgecolor="black", alpha=0.7
     )
-    axes_occ[2].axvline(min_speed, color="red", linestyle="--", linewidth=2, label=f"Threshold: {min_speed}")
+    axes_occ[2].axvline(
+        speed_threshold,
+        color="red",
+        linestyle="--",
+        linewidth=2,
+        label=f"Threshold: {speed_threshold}",
+    )
     axes_occ[2].set_xlim(0, speed_max)
     axes_occ[2].set_xlabel("Speed (px/s)")
     axes_occ[2].set_ylabel("Count")
@@ -394,7 +398,7 @@ def browse_place_cells(
 
             C = load_traces(neural_path, trace_name=trace_name)
             traces = C
-        except Exception:
+        except (FileNotFoundError, KeyError, ValueError):
             pass
 
     # Load max projection if available
@@ -417,7 +421,7 @@ def browse_place_cells(
             if a_path.exists():
                 A_ds = xr.open_zarr(a_path, consolidated=False)
                 footprints = A_ds["A"] if "A" in A_ds else A_ds[list(A_ds.data_vars)[0]]
-        except Exception:
+        except (FileNotFoundError, KeyError, ValueError, OSError):
             pass
 
     # Get unique units
@@ -447,9 +451,8 @@ def browse_place_cells(
         valid_rate_values = rate_map_smooth[valid_mask]
         if len(valid_rate_values) > 0 and np.nanmax(valid_rate_values) > 0:
             rate_map_smooth[valid_mask] = (
-                (rate_map_smooth[valid_mask] - np.nanmin(valid_rate_values))
-                / (np.nanmax(valid_rate_values) - np.nanmin(valid_rate_values))
-            )
+                rate_map_smooth[valid_mask] - np.nanmin(valid_rate_values)
+            ) / (np.nanmax(valid_rate_values) - np.nanmin(valid_rate_values))
         # Set invalid bins (below min_occupancy) to NaN so they appear white
         rate_map_smooth[~valid_mask] = np.nan
 
@@ -527,7 +530,7 @@ def browse_place_cells(
             try:
                 trace_data = traces.sel(unit_id=int(unit_id)).values
                 trace_times = np.arange(len(trace_data)) / trace_fps
-            except Exception:
+            except (KeyError, IndexError):
                 pass
 
         unit_results[unit_id] = {
@@ -541,12 +544,11 @@ def browse_place_cells(
             "trace_data": trace_data,
             "trace_times": trace_times,
         }
-    
+
     # Filter units by p-value threshold if specified
     if p_value_threshold is not None and p_value_threshold < 1.0:
         filtered_units = [
-            uid for uid in unique_units
-            if unit_results[uid]["p_val"] < p_value_threshold
+            uid for uid in unique_units if unit_results[uid]["p_val"] < p_value_threshold
         ]
         if len(filtered_units) == 0:
             raise ValueError(
@@ -555,9 +557,7 @@ def browse_place_cells(
             )
         unique_units = filtered_units
         n_units = len(unique_units)  # Update n_units after filtering
-        logger.info(
-            f"Filtered to {n_units} units with p-value < {p_value_threshold:.3f}"
-        )
+        logger.info(f"Filtered to {n_units} units with p-value < {p_value_threshold:.3f}")
 
     logger.info("Ready.")
 
@@ -612,7 +612,7 @@ def browse_place_cells(
                         ax1.contour(
                             unit_fp, levels=[unit_fp.max() * 0.3], colors="red", linewidths=1.5
                         )
-                except Exception:
+                except (KeyError, IndexError):
                     pass
             ax1.set_title(f"Unit {unit_id}")
         else:
@@ -628,9 +628,7 @@ def browse_place_cells(
 
         # Plot above-threshold spikes in red (on top of trajectory)
         if not vis_data_above.empty:
-            ax2.scatter(
-                vis_data_above["x"], vis_data_above["y"], c="red", s=10, zorder=2
-            )
+            ax2.scatter(vis_data_above["x"], vis_data_above["y"], c="red", s=10, zorder=2)
 
         ax2.set_title(f"Trajectory ({len(vis_data_above)} spikes)")
         ax2.set_aspect("equal")
@@ -740,15 +738,21 @@ def browse_place_cells(
                 if has_gray:
                     legend_elements.append(
                         Line2D(
-                            [0], [0], color="gray", linewidth=1.5,
-                            label=f"All spikes (< {min_speed:.1f} px/s)"
+                            [0],
+                            [0],
+                            color="gray",
+                            linewidth=1.5,
+                            label=f"All spikes (< {speed_threshold:.1f} px/s)",
                         )
                     )
                 if has_red:
                     legend_elements.append(
                         Line2D(
-                            [0], [0], color="red", linewidth=1.5,
-                            label=f"Spikes (≥ {min_speed:.1f} px/s)"
+                            [0],
+                            [0],
+                            color="red",
+                            linewidth=1.5,
+                            label=f"Spikes (≥ {speed_threshold:.1f} px/s)",
                         )
                     )
             ax5.legend(handles=legend_elements, loc="upper left", fontsize=8, framealpha=0.9)
@@ -779,9 +783,7 @@ def browse_place_cells(
                 else:
                     trace_slider.ax.set_visible(False)
         else:
-            ax5.text(
-                0.5, 0.5, "No trace data", ha="center", va="center", transform=ax5.transAxes
-            )
+            ax5.text(0.5, 0.5, "No trace data", ha="center", va="center", transform=ax5.transAxes)
             ax5.set_xlabel("Time (s)")
             if trace_slider is not None:
                 trace_slider.ax.set_visible(False)

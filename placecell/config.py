@@ -112,7 +112,8 @@ class SpatialMapConfig(MiniscopeConfig, ConfigYAMLMixin):
     activity_sigma: float = Field(
         ...,
         ge=0.0,
-        description="Gaussian smoothing sigma (in bins) for the spatial activity map. Use 0 for no smoothing.",
+        description="Gaussian smoothing sigma (in bins) for the spatial activity map. "
+        "Use 0 for no smoothing.",
     )
     n_shuffles: int = Field(
         ...,
@@ -126,7 +127,8 @@ class SpatialMapConfig(MiniscopeConfig, ConfigYAMLMixin):
     )
     spike_threshold_sigma: float = Field(
         ...,
-        description="Sigma multiplier for spike amplitude threshold in trajectory plot. Can be negative to include lower-amplitude spikes.",
+        description="Sigma multiplier for spike amplitude threshold in trajectory plot. "
+        "Can be negative to include lower-amplitude spikes.",
     )
     p_value_threshold: float | None = Field(
         None,
