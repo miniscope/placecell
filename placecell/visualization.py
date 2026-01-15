@@ -339,14 +339,14 @@ def browse_place_cells(
 
     valid_mask = occupancy_time >= min_occupancy
 
-    # Display occupancy map
-    fig_occ, axes_occ = plt.subplots(1, 2, figsize=(10, 4))
+    # Display occupancy map and speed histogram
+    fig_occ, axes_occ = plt.subplots(1, 3, figsize=(14, 4))
     # Left: trajectory
     axes_occ[0].plot(trajectory_df["x"], trajectory_df["y"], "k-", alpha=0.5, linewidth=0.5)
-    axes_occ[0].set_title("Trajectory")
+    axes_occ[0].set_title("Trajectory (filtered)")
     axes_occ[0].set_aspect("equal")
     axes_occ[0].axis("off")
-    # Right: occupancy map (show all values, contour excluded zones)
+    # Middle: occupancy map (show all values, contour excluded zones)
     im = axes_occ[1].imshow(
         occupancy_time.T,
         origin="lower",
@@ -363,8 +363,21 @@ def browse_place_cells(
         extent=[x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]],
         origin="lower",
     )
-    axes_occ[1].set_title(f"Occupancy Map (smooth={position_smooth_sigma}, min_occ={min_occupancy}s)")
+    axes_occ[1].set_title(f"Occupancy (smooth={position_smooth_sigma}, min={min_occupancy}s)")
     plt.colorbar(im, ax=axes_occ[1], label="Time (s)")
+    # Right: speed histogram (before filtering) with auto-range
+    all_speeds = trajectory_with_speed["speed"].dropna()
+    # Auto-range: clip to 99th percentile to avoid outliers stretching the axis
+    speed_max = np.percentile(all_speeds, 99)
+    axes_occ[2].hist(
+        all_speeds.clip(upper=speed_max), bins=50, color="gray", edgecolor="black", alpha=0.7
+    )
+    axes_occ[2].axvline(min_speed, color="red", linestyle="--", linewidth=2, label=f"Threshold: {min_speed}")
+    axes_occ[2].set_xlim(0, speed_max)
+    axes_occ[2].set_xlabel("Speed (px/s)")
+    axes_occ[2].set_ylabel("Count")
+    axes_occ[2].set_title("Speed Distribution")
+    axes_occ[2].legend()
     fig_occ.tight_layout()
     plt.show(block=False)
     plt.pause(0.1)
