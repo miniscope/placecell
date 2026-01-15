@@ -208,8 +208,8 @@ def browse_place_cells(
     min_speed: float = 1.0,
     min_occupancy: float = 0.1,
     bins: int = 30,
-    smooth_sigma: float = 1.0,
-    position_smooth_sigma: float = 0.0,
+    occupancy_sigma: float = 0.0,
+    activity_sigma: float = 1.0,
     behavior_fps: float = 20.0,
     neural_fps: float = 20.0,
     speed_window_frames: int = 5,
@@ -250,8 +250,10 @@ def browse_place_cells(
         Minimum occupancy time in seconds (default 0.1).
     bins : int
         Number of spatial bins (default 30).
-    smooth_sigma : float
-        Gaussian smoothing sigma (default 1.0).
+    occupancy_sigma : float
+        Gaussian smoothing sigma for occupancy map (default 0.0 = no smoothing).
+    activity_sigma : float
+        Gaussian smoothing sigma for spatial activity map (default 1.0).
     behavior_fps : float
         Behavior sampling rate (default 20.0).
     neural_fps : float
@@ -334,8 +336,8 @@ def browse_place_cells(
     occupancy_time = occupancy_counts * time_per_frame
 
     # Apply 2D Gaussian smoothing to occupancy map if requested (in bin units)
-    if position_smooth_sigma > 0:
-        occupancy_time = gaussian_filter(occupancy_time, sigma=position_smooth_sigma)
+    if occupancy_sigma > 0:
+        occupancy_time = gaussian_filter(occupancy_time, sigma=occupancy_sigma)
 
     valid_mask = occupancy_time >= min_occupancy
 
@@ -363,7 +365,7 @@ def browse_place_cells(
         extent=[x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]],
         origin="lower",
     )
-    axes_occ[1].set_title(f"Occupancy (smooth={position_smooth_sigma}, min={min_occupancy}s)")
+    axes_occ[1].set_title(f"Occupancy (sigma={occupancy_sigma}, min={min_occupancy}s)")
     plt.colorbar(im, ax=axes_occ[1], label="Time (s)")
     # Right: speed histogram (before filtering) with auto-range
     all_speeds = trajectory_with_speed["speed"].dropna()
@@ -440,7 +442,7 @@ def browse_place_cells(
         )
         rate_map = np.zeros_like(occupancy_time)
         rate_map[valid_mask] = spike_weights[valid_mask] / occupancy_time[valid_mask]
-        rate_map_smooth = gaussian_filter(rate_map, sigma=smooth_sigma)
+        rate_map_smooth = gaussian_filter(rate_map, sigma=activity_sigma)
         # Normalize to 0-1 range
         valid_rate_values = rate_map_smooth[valid_mask]
         if len(valid_rate_values) > 0 and np.nanmax(valid_rate_values) > 0:
