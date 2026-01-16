@@ -172,6 +172,27 @@ class BehaviorConfig(MiniscopeConfig, ConfigYAMLMixin):
     )
 
 
+class DataPathsConfig(MiniscopeConfig, ConfigYAMLMixin):
+    """Bundle of data file paths for neural and behavior data."""
+
+    neural_path: str = Field(
+        ...,
+        description="Directory containing neural data (C.zarr, max_proj.zarr, A.zarr).",
+    )
+    neural_timestamp: str = Field(
+        ...,
+        description="Path to neural timestamp CSV file (neural_timestamp.csv).",
+    )
+    behavior_position: str = Field(
+        ...,
+        description="Path to behavior position CSV file (behavior_position.csv).",
+    )
+    behavior_timestamp: str = Field(
+        ...,
+        description="Path to behavior timestamp CSV file (behavior_timestamp.csv).",
+    )
+
+
 class AppConfig(MiniscopeConfig, ConfigYAMLMixin):
     """Top-level application configuration."""
 

@@ -61,7 +61,8 @@ def _gaussian_filter_normalized(
 
 
 def _load_behavior_data(
-    behavior_path: Path,
+    behavior_position: Path,
+    behavior_timestamp: Path,
     bodypart: str,
     speed_window_frames: int,
     speed_threshold: float,
@@ -71,8 +72,10 @@ def _load_behavior_data(
 
     Parameters
     ----------
-    behavior_path : Path
-        Path to behavior data directory.
+    behavior_position : Path
+        Path to behavior position CSV file.
+    behavior_timestamp : Path
+        Path to behavior timestamp CSV file.
     bodypart : str
         Body part name to use for trajectory.
     speed_window_frames : int
@@ -88,22 +91,19 @@ def _load_behavior_data(
     """
     from placecell.analysis import _load_behavior_xy, compute_behavior_speed
 
-    behavior_position_path = behavior_path / "behavior_position.csv"
-    behavior_timestamp_path = behavior_path / "behavior_timestamp.csv"
-
-    if not behavior_position_path.exists():
+    if not behavior_position.exists():
         raise FileNotFoundError(
-            f"Behavior position file not found: {behavior_position_path}. "
+            f"Behavior position file not found: {behavior_position}. "
             "This is required for full trajectory plotting and occupancy calculation."
         )
-    if not behavior_timestamp_path.exists():
+    if not behavior_timestamp.exists():
         raise FileNotFoundError(
-            f"Behavior timestamp file not found: {behavior_timestamp_path}. "
+            f"Behavior timestamp file not found: {behavior_timestamp}. "
             "This is required for speed calculation."
         )
 
-    full_trajectory = _load_behavior_xy(behavior_position_path, bodypart=bodypart)
-    behavior_timestamps = pd.read_csv(behavior_timestamp_path)
+    full_trajectory = _load_behavior_xy(behavior_position, bodypart=bodypart)
+    behavior_timestamps = pd.read_csv(behavior_timestamp)
 
     trajectory_with_speed = compute_behavior_speed(
         positions=full_trajectory,
@@ -647,7 +647,8 @@ def plot_max_projection_with_unit_footprint(
 
 def browse_place_cells(
     spike_place_csv: str | Path,
-    behavior_path: str | Path,
+    behavior_position: str | Path,
+    behavior_timestamp: str | Path,
     bodypart: str,
     neural_path: str | Path | None = None,
     spike_index_csv: str | Path | None = None,
@@ -681,8 +682,10 @@ def browse_place_cells(
     ----------
     spike_place_csv : str or Path
         Path to spike_place CSV file (speed-filtered).
-    behavior_path : str or Path
-        Path to behavior data directory (must contain behavior_position.csv).
+    behavior_position : str or Path
+        Path to behavior position CSV file (behavior_position.csv).
+    behavior_timestamp : str or Path
+        Path to behavior timestamp CSV file (behavior_timestamp.csv).
     bodypart : str
         Body part name to use for trajectory (e.g. "LED").
     neural_path : str or Path, optional
@@ -733,9 +736,9 @@ def browse_place_cells(
         df_all_spikes = pd.read_csv(spike_index_csv)
 
     # Load behavior data
-    behavior_path = Path(behavior_path)
     trajectory_with_speed, trajectory_df = _load_behavior_data(
-        behavior_path=behavior_path,
+        behavior_position=Path(behavior_position),
+        behavior_timestamp=Path(behavior_timestamp),
         bodypart=bodypart,
         speed_window_frames=speed_window_frames,
         speed_threshold=speed_threshold,
