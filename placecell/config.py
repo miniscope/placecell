@@ -5,33 +5,6 @@ from mio.models.mixins import ConfigYAMLMixin
 from pydantic import Field
 
 
-class LpfConfig(MiniscopeConfig, ConfigYAMLMixin):
-    """Low-pass filter configuration."""
-
-    enabled: bool = Field(
-        False,
-        description="Whether to apply low-pass filtering to traces before visualization.",
-    )
-    cutoff_hz: float = Field(
-        1.0,
-        description="Cutoff frequency for the Butterworth low-pass filter (Hz).",
-    )
-    order: int = Field(
-        4,
-        ge=1,
-        description="Filter order for the Butterworth low-pass filter.",
-    )
-
-
-class DataConfig(MiniscopeConfig, ConfigYAMLMixin):
-    """Source data configuration (Minian output)."""
-
-    fps: float = Field(
-        20.0,
-        description="Sampling rate in frames per second.",
-    )
-
-
 class OasisConfig(MiniscopeConfig, ConfigYAMLMixin):
     """OASIS deconvolution parameters."""
 
@@ -71,8 +44,10 @@ class OasisConfig(MiniscopeConfig, ConfigYAMLMixin):
 class NeuralConfig(MiniscopeConfig, ConfigYAMLMixin):
     """Neural data configuration."""
 
-    data: DataConfig
-    lpf: LpfConfig = Field(default_factory=LpfConfig)
+    fps: float = Field(
+        20.0,
+        description="Sampling rate in frames per second.",
+    )
     oasis: OasisConfig = Field(default_factory=OasisConfig)
     trace_name: str = Field(
         "C",
@@ -190,6 +165,13 @@ class DataPathsConfig(MiniscopeConfig, ConfigYAMLMixin):
     behavior_timestamp: str = Field(
         ...,
         description="Path to behavior timestamp CSV file (behavior_timestamp.csv).",
+    )
+    curation_csv: str | None = Field(
+        None,
+        description=(
+            "Path to curation results CSV file with columns 'unit_id' and 'keep'. "
+            "Only units with keep=1 will be processed. If None, all units are used."
+        ),
     )
 
 

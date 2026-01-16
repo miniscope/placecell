@@ -38,7 +38,7 @@ def _launch_browser(
         occupancy_sigma=behavior_cfg.spatial_map.occupancy_sigma,
         activity_sigma=behavior_cfg.spatial_map.activity_sigma,
         behavior_fps=behavior_cfg.behavior_fps,
-        neural_fps=cfg.neural.data.fps,
+        neural_fps=cfg.neural.fps,
         speed_window_frames=behavior_cfg.speed_window_frames,
         n_shuffles=behavior_cfg.spatial_map.n_shuffles,
         random_seed=behavior_cfg.spatial_map.random_seed,
@@ -288,6 +288,7 @@ def visualize(
         raise click.ClickException(
             "Cannot use --data with individual path options. Use one or the other."
         )
+    curation_csv = None
     if data_config:
         paths = DataPathsConfig.from_yaml(data_config)
         yaml_dir = data_config.parent
@@ -295,6 +296,8 @@ def visualize(
         neural_timestamp = (yaml_dir / paths.neural_timestamp).resolve()
         behavior_position = (yaml_dir / paths.behavior_position).resolve()
         behavior_timestamp = (yaml_dir / paths.behavior_timestamp).resolve()
+        if paths.curation_csv is not None:
+            curation_csv = (yaml_dir / paths.curation_csv).resolve()
 
     cfg = AppConfig.from_yaml(config)
     if cfg.behavior is None:
@@ -329,6 +332,8 @@ def visualize(
     ]
     if end_idx is not None:
         cmd1.extend(["--end-idx", str(end_idx)])
+    if curation_csv is not None:
+        cmd1.extend(["--curation-csv", str(curation_csv)])
     subprocess.run(cmd1, check=True)
 
     # 2) Spike-place (internal function)

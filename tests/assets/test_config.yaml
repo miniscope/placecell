@@ -3,14 +3,7 @@ mio_model: pcell.config.AppConfig
 mio_version: 0.8.1
 neural:
   id: neural
-  data:
-    id: data
-    fps: 20.0
-  lpf:
-    id: lpf
-    enabled: false
-    cutoff_hz: 1.0
-    order: 4
+  fps: 20.0
   oasis:
     id: oasis
     baseline: p10

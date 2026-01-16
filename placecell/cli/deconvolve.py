@@ -9,7 +9,7 @@ import xarray as xr
 from mio.logging import init_logger
 from tqdm import tqdm
 
-from placecell.analysis import load_traces
+from placecell.analysis import load_curated_unit_ids, load_traces
 from placecell.config import AppConfig
 
 logger = init_logger(__name__)
@@ -64,6 +64,12 @@ def _default_label() -> str:
     default=None,
     help="End unit index (inclusive). Defaults to last unit.",
 )
+@click.option(
+    "--curation-csv",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="CSV file with 'unit_id' and 'keep' columns. Only units with keep=1 are processed.",
+)
 def deconvolve(
     config: Path,
     neural_path: Path,
@@ -72,6 +78,7 @@ def deconvolve(
     spike_index_out: Path | None,
     start_idx: int,
     end_idx: int | None,
+    curation_csv: Path | None,
 ) -> None:
     """Run OASIS deconvolution using settings from config file."""
 
@@ -85,7 +92,7 @@ def deconvolve(
 
     cfg = AppConfig.from_yaml(config)
     trace_name = cfg.neural.trace_name
-    fps = cfg.neural.data.fps
+    fps = cfg.neural.fps
     max_units = cfg.neural.max_units
     g = cfg.neural.oasis.g
     baseline = cfg.neural.oasis.baseline
@@ -108,6 +115,19 @@ def deconvolve(
     C_da = load_traces(neural_path, trace_name=trace_name)
 
     all_unit_ids = list(map(int, C_da["unit_id"].values))
+
+    # Filter by curation CSV if provided
+    if curation_csv is not None:
+        curated_ids = set(load_curated_unit_ids(curation_csv))
+        available_ids = [uid for uid in all_unit_ids if uid in curated_ids]
+        logger.info(
+            f"Curation filter: {len(available_ids)}/{len(all_unit_ids)} units kept "
+            f"(from {curation_csv.name})"
+        )
+        all_unit_ids = available_ids
+
+    if not all_unit_ids:
+        raise click.ClickException("No units available after filtering.")
 
     if end_idx is None:
         end_idx = len(all_unit_ids) - 1

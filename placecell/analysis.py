@@ -7,6 +7,29 @@ import pandas as pd
 import xarray as xr
 
 
+def load_curated_unit_ids(curation_csv: Path) -> list[int]:
+    """Load curated unit IDs from a curation results CSV.
+
+    Parameters
+    ----------
+    curation_csv:
+        Path to CSV file with columns 'unit_id' and 'keep'.
+        Units with keep=1 are included.
+
+    Returns
+    -------
+    List of unit IDs to keep, sorted.
+    """
+    df = pd.read_csv(curation_csv)
+    if "unit_id" not in df.columns or "keep" not in df.columns:
+        raise ValueError(
+            f"Curation CSV must have 'unit_id' and 'keep' columns, "
+            f"got: {list(df.columns)}"
+        )
+    keep_ids = df.loc[df["keep"] == 1, "unit_id"].tolist()
+    return sorted(int(uid) for uid in keep_ids)
+
+
 def _load_behavior_xy(csv_path: Path, bodypart: str) -> pd.DataFrame:
     """Load DeepLabCut-style behavior CSV and return x/y coordinates per frame.
 

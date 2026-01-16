@@ -3,30 +3,23 @@ mio_model: pcell.config.AppConfig
 mio_version: 0.8.1
 neural:
   id: neural
-  data:
-    id: data
-    fps: 20.0
-  lpf:
-    id: lpf
-    enabled: true
-    cutoff_hz: 1.0
-    order: 4
+  fps: 20.0
   oasis:
     id: oasis
     g: [1.60, -0.63]  # AR(2) coefficients, null to estimate from data
     baseline: p10
-    penalty: 1  # Sparsity penalty (higher = fewer spikes). Default 0.
+    penalty: 0  # Sparsity penalty (higher = fewer spikes). Default 0.
     optimize_g: 0  # Number of events to use for optimizing AR coefficients. 0 = no optimization (default).
     lambda_: null  # Regularization parameter. null = auto-determined.
     s_min: null  # Minimum spike size. Positive = direct threshold, negative = calculated, 0 = auto, null = default.
-  trace_name: C_lowpass
+  trace_name: C_lp
   max_units: null  # Max units to process. null = process all units.
 behavior:
   id: behavior
   behavior_fps: 20.0
   speed_threshold: 10.0
   speed_window_frames: 5
-  bodypart: LED
+  bodypart: LED_clean
   spatial_map:
     id: spatial_map
     bins: 50
@@ -35,5 +28,5 @@ behavior:
     activity_sigma: 3  # Gaussian smoothing (in bins) for spatial activity map
     n_shuffles: 500
     random_seed: 1
-    spike_threshold_sigma: -3  # Sigma multiplier for spike amplitude threshold in trajectory visualization
+    spike_threshold_sigma: 0  # Sigma multiplier for spike amplitude threshold in trajectory visualization
     p_value_threshold: 0.05  # P-value threshold. Only units with p < threshold are plotted.
