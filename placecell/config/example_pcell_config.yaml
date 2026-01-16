@@ -19,7 +19,7 @@ neural:
     optimize_g: 0  # Number of events to use for optimizing AR coefficients. 0 = no optimization (default).
     lambda_: null  # Regularization parameter. null = auto-determined.
     s_min: null  # Minimum spike size. Positive = direct threshold, negative = calculated, 0 = auto, null = default.
-  trace_name: YrA
+  trace_name: C_lowpass
   max_units: null  # Max units to process. null = process all units.
 behavior:
   id: behavior

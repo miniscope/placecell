@@ -254,4 +254,13 @@ def load_traces(
     if "unit_id" not in C.dims or "frame" not in C.dims:
         raise ValueError(f"Expected dims ('unit_id','frame'), got {C.dims}")
 
+    # Validate coordinates are unique
+    unit_ids = C.coords["unit_id"].values
+    if len(unit_ids) != len(np.unique(unit_ids)):
+        raise ValueError(
+            f"unit_id coordinates must be unique, but found {len(np.unique(unit_ids))} "
+            f"unique values for {len(unit_ids)} units. "
+            f"The zarr file has corrupted coordinates."
+        )
+
     return C
