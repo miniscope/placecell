@@ -27,6 +27,7 @@ dev = [
     "ruff>=0.2.0",
     "pre-commit>=3.7.1",
     "sphinxcontrib-mermaid>=2.0.0",
+    "sphinx-design>=0.6.1",
 ]
 tests = [
     "pytest>=9.0.2",

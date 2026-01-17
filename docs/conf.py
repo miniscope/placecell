@@ -11,6 +11,7 @@ extensions = [
     "sphinx.ext.autosummary",
     "sphinx.ext.napoleon",
     "sphinxcontrib.mermaid",
+    "sphinx_design",
 ]
 
 source_suffix = {
@@ -20,6 +21,7 @@ source_suffix = {
 
 myst_enable_extensions = [
     "colon_fence",
+    "html_admonition",
 ]
 
 myst_fence_as_directive = ["mermaid"]
