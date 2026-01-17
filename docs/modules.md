@@ -7,7 +7,6 @@
 
    placecell.analysis
    placecell.config
-   placecell.events
-   placecell.filters
+   placecell.io
    placecell.visualization
 ```
