@@ -10,6 +10,7 @@ extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.autosummary",
     "sphinx.ext.napoleon",
+    "sphinxcontrib.mermaid",
 ]
 
 source_suffix = {
@@ -20,6 +21,8 @@ source_suffix = {
 myst_enable_extensions = [
     "colon_fence",
 ]
+
+myst_fence_as_directive = ["mermaid"]
 
 html_theme = "sphinx_book_theme"
 html_title = "placecell"

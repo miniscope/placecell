@@ -1,7 +1,7 @@
 # CLI
 
 ```{eval-rst}
-.. click:: placecell.cli:placecell
+.. click:: placecell.cli.main:placecell
    :prog: pcell
    :nested: full
 ```

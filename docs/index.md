@@ -8,6 +8,7 @@ Package for analyzing place cells.
 
 installation
 cli
+visualization_workflow
 ```
 
 ## Modules
