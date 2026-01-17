@@ -10,7 +10,9 @@ Note: This pipeline uses OASIS deconvolution to extract neural events from calci
 ```mermaid
 flowchart LR
     subgraph Input
-        A[(C.zarr)]
+        A[("{trace_name}.zarr")]
+        A2[("A.zarr (optional)")]
+        A3[("max_proj.zarr (optional)")]
         B[(neural_timestamp.csv)]
         C[(behavior_position.csv)]
         D[(behavior_timestamp.csv)]
@@ -32,6 +34,8 @@ flowchart LR
 
     subgraph pcell plot
         A --> O
+        A2 --> O
+        A3 --> O
         F --> O
         Q --> P
         H --> P
@@ -61,15 +65,19 @@ flowchart LR
 
 ## Data Files
 
-**Input files:**
-- `{trace_name}.zarr`: calcium traces (frames × units), located in `neural_path` directory with name specified by `trace_name` in config
+**Input files (in `neural_path` directory):**
+- `{trace_name}.zarr`: calcium traces (frames × units), name specified by `trace_name` in config (e.g., `C.zarr` or `C_lp.zarr`)
+- `A.zarr`: spatial footprints for cell contour overlay (optional)
+- `max_proj.zarr`: max projection image for visualization background (optional)
+
+**Other input files:**
 - `neural_timestamp.csv`: neural frame timestamps
-- `behavior_position.csv`: animal position (x, y per frame, with bodypart columns)
+- `behavior_position.csv`: animal position (x, y per frame, DeepLabCut format with bodypart columns)
 - `behavior_timestamp.csv`: behavior frame timestamps
 
 **Intermediate files:**
-- `spike_index.csv`: deconvolved neural events (frame, unit_id, amplitude)
-- `spike_place.csv`: events matched to position with speed (frame, unit_id, x, y, speed) - only includes events during movement above speed threshold
+- `event_index.csv`: deconvolved neural events (frame, unit_id, amplitude)
+- `event_place.csv`: events matched to position with speed (frame, unit_id, x, y, speed) - only includes events during movement above speed threshold
 
 ## Processing Steps
 
