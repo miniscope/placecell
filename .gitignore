@@ -2,6 +2,9 @@ export/
 output/
 user_data/
 
+# hatch-vcs generated version file
+placecell/_version.py
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
