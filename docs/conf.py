@@ -1,8 +1,12 @@
 # Configuration file for the Sphinx documentation builder.
 
+from importlib.metadata import version as get_version
+
 project = "placecell"
 copyright = "2025, Takuya Sasatani"
 author = "t-sasatani"
+release = get_version("placecell")
+version = ".".join(release.split(".")[:2])
 
 extensions = [
     "myst_parser",
