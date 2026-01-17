@@ -13,8 +13,8 @@ pcell workflow visualize --config config.yaml --data data_paths.yaml
 
 :::{dropdown} Pipeline Flowchart
 ```mermaid
-flowchart TD
-    subgraph Input Files
+flowchart LR
+    subgraph Input
         A[(C.zarr)]
         B[(neural_timestamp.csv)]
         C[(behavior_position.csv)]
@@ -31,25 +31,52 @@ flowchart TD
         B --> G
         C --> G
         D --> G
-        G --> H[(spike_place.csv)]
+        G --> R(Speed Filter)
+        R --> H[(spike_place.csv)]
     end
 
-    subgraph Place Cell Viewer - pcell plot
-        H --> I(Speed Filter)
-        C --> I
-        D --> I
-        I --> J(Occupancy Map)
-        J --> K(Rate Map)
-        K --> L(Spatial Information)
-        L --> N(P-value Filter)
-        N --> M(Display)
-        A --> M
-        F --> M
+    subgraph pcell plot
+        A --> O
+        F --> O
+        Q --> P
+        H --> P
+        J --> P
+        K --> P
+        L --> P
+        N --> P
+        subgraph Spatial Analysis
+            C --> I(Speed Filter)
+            D --> I
+            I --> Q[(Filtered Trajectory)]
+            Q --> J(Occupancy Map)
+            H --> K(Rate Map)
+            J --> K
+            K --> L(Spatial Information)
+            L --> N(P-value Filter)
+        end
+
+        subgraph Display
+            O[[Neural Data]] --> M(Place Cell Viewer)
+            P[[Spatial Maps]] --> M
+        end
+
     end
 ```
 :::
 
-## Key Parameters
+### Data Files
+
+**Input files:**
+- `{trace_name}.zarr`: calcium traces (frames × units), located in `neural_path` directory with name specified by `trace_name` in config
+- `neural_timestamp.csv`: neural frame timestamps
+- `behavior_position.csv`: animal position (x, y per frame, with bodypart columns)
+- `behavior_timestamp.csv`: behavior frame timestamps
+
+**Intermediate files:**
+- `spike_index.csv`: deconvolved spike events (frame, unit_id, amplitude)
+- `spike_place.csv`: spikes matched to position with speed (frame, unit_id, x, y, speed) - only includes spikes during movement above speed threshold
+
+### Key Parameters
 
 - `speed_threshold`: minimum speed to include data (filters both trajectory and spikes)
 - `min_occupancy`: minimum time per bin to be valid
