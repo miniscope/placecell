@@ -2,8 +2,6 @@
 
 This document explains how the spatial neural activity analysis pipeline works.
 
-Note: This pipeline uses OASIS deconvolution to extract neural events from calcium traces. These are inferred events based on calcium dynamics, not directly recorded action potentials.
-
 ## Overview
 
 :::{dropdown} Pipeline Flowchart
