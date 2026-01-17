@@ -284,9 +284,8 @@ def plot_max_projection_with_unit_footprint(
                 linewidths=2,
                 alpha=0.8,
             )
-    except (KeyError, IndexError, ValueError):
-        # Unit not found or can't be loaded
-        pass
+    except (KeyError, IndexError, ValueError) as e:
+        logger.warning(f"Failed to load footprint for unit {unit_id} from A.zarr: {e}")
 
     ax.axis("off")
 
@@ -459,8 +458,8 @@ def browse_place_cells(
             try:
                 trace_data = traces.sel(unit_id=int(unit_id)).values
                 trace_times = np.arange(len(trace_data)) / trace_fps
-            except (KeyError, IndexError):
-                pass
+            except (KeyError, IndexError) as e:
+                logger.warning(f"Failed to load trace for unit {unit_id}: {e}")
 
         unit_results[unit_id] = {
             "rate_map": result["rate_map"],
@@ -536,13 +535,13 @@ def browse_place_cells(
             ax1.imshow(max_proj, cmap="gray", aspect="equal")
             if footprints is not None:
                 try:
-                    unit_fp = footprints.sel(unit_id=int(unit_id)).values
+                    unit_fp = footprints.sel(unit_id=unit_id).values
                     if unit_fp.max() > 0:
                         ax1.contour(
                             unit_fp, levels=[unit_fp.max() * 0.3], colors="red", linewidths=1.5
                         )
-                except (KeyError, IndexError):
-                    pass
+                except (KeyError, IndexError, ValueError) as e:
+                    logger.warning(f"Failed to load footprint for unit {unit_id}: {e}")
             ax1.set_title(f"Unit {unit_id}")
         else:
             ax1.text(

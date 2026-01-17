@@ -1,14 +1,16 @@
 """I/O functions for loading behavior and neural data."""
 
-import contextlib
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
 import xarray as xr
+from mio.logging import init_logger
 
 from placecell.analysis import _load_behavior_xy, compute_behavior_speed, load_traces
+
+logger = init_logger(__name__)
 
 
 def load_behavior_data(
@@ -94,8 +96,12 @@ def load_neural_data(
     neural_path = Path(neural_path)
 
     # Load traces
-    with contextlib.suppress(FileNotFoundError, KeyError, ValueError):
+    try:
         traces = load_traces(neural_path, trace_name=trace_name)
+    except FileNotFoundError:
+        logger.warning(f"{trace_name}.zarr not found at {neural_path}. Trace display disabled.")
+    except (KeyError, ValueError) as e:
+        logger.warning(f"Failed to load traces from {trace_name}.zarr: {e}")
 
     # Load max projection and footprints
     try:
@@ -109,12 +115,28 @@ def load_neural_data(
             if "quantile" in mp.dims:
                 mp = mp.isel(quantile=0)
             max_proj = np.asarray(mp.values, dtype=float)
+        else:
+            logger.warning(
+                f"max_proj.zarr not found at {neural_path}. Cell footprint overlay disabled."
+            )
 
         a_path = neural_path / "A.zarr"
         if a_path.exists():
             A_ds = xr.open_zarr(a_path, consolidated=False)
             footprints = A_ds["A"] if "A" in A_ds else A_ds[list(A_ds.data_vars)[0]]
-    except (FileNotFoundError, KeyError, ValueError, OSError):
-        pass
+
+            # Validate unit_id coordinates
+            if "unit_id" in footprints.coords:
+                unit_ids = footprints.coords["unit_id"].values
+                if len(set(unit_ids)) == 1:
+                    logger.warning(
+                        f"A.zarr has corrupted unit_id coordinates (all values are {unit_ids[0]}). "
+                        "Cell footprint overlay disabled. Re-export A.zarr with valid coordinates."
+                    )
+                    footprints = None
+        else:
+            logger.warning(f"A.zarr not found at {neural_path}. Cell footprint overlay disabled.")
+    except (FileNotFoundError, KeyError, ValueError, OSError) as e:
+        logger.warning(f"Failed to load neural visualization data: {e}")
 
     return traces, max_proj, footprints
