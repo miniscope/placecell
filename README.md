@@ -1,5 +1,7 @@
 # placecell
 
+[![Tests](https://github.com/miniscope/placecell/actions/workflows/test.yml/badge.svg)](https://github.com/miniscope/placecell/actions/workflows/test.yml)
+
 Place cell analysis toolkit for calcium imaging data.
 
 ## Documentation
