@@ -293,6 +293,113 @@ def plot_max_projection_with_unit_footprint(
     return fig
 
 
+def plot_significance_stability_scatter(
+    unit_results: dict,
+    p_value_threshold: float = 0.05,
+    stability_threshold: float = 0.5,
+) -> "Figure":
+    """Create a 2D scatter plot of p-value significance vs stability correlation.
+
+    Parameters
+    ----------
+    unit_results : dict
+        Dictionary mapping unit_id to analysis results containing 'p_val' and 'stability_corr'.
+    p_value_threshold : float
+        Threshold for significance test (default 0.05).
+    stability_threshold : float
+        Threshold for stability test (default 0.5).
+
+    Returns
+    -------
+    Figure
+        Matplotlib figure with the scatter plot.
+    """
+    if plt is None:
+        raise ImportError("matplotlib is required for plotting.")
+
+    unit_ids = list(unit_results.keys())
+    p_vals = [unit_results[uid]["p_val"] for uid in unit_ids]
+    stab_corrs = [unit_results[uid]["stability_corr"] for uid in unit_ids]
+
+    # Determine colors based on pass/fail both tests
+    colors = []
+    for p, s in zip(p_vals, stab_corrs):
+        sig_pass = p < p_value_threshold
+        stab_pass = not np.isnan(s) and s >= stability_threshold
+        if sig_pass and stab_pass:
+            colors.append("green")  # Both pass
+        elif sig_pass and not stab_pass:
+            colors.append("orange")  # Only significance passes
+        elif not sig_pass and stab_pass:
+            colors.append("blue")  # Only stability passes
+        else:
+            colors.append("red")  # Both fail
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    # Plot scatter
+    ax.scatter(p_vals, stab_corrs, c=colors, s=50, alpha=0.7, edgecolors="black", linewidths=0.5)
+
+    # Add threshold lines
+    ax.axvline(
+        p_value_threshold,
+        color="gray",
+        linestyle="--",
+        linewidth=1.5,
+        label=f"p={p_value_threshold}",
+    )
+    ax.axhline(
+        stability_threshold,
+        color="gray",
+        linestyle=":",
+        linewidth=1.5,
+        label=f"r={stability_threshold}",
+    )
+
+    # Shade quadrants
+    xlim = ax.get_xlim()
+    ylim = ax.get_ylim()
+    # Top-left (sig pass, stab pass) - green
+    ax.fill_between([0, p_value_threshold], stability_threshold, ylim[1], alpha=0.1, color="green")
+    # Top-right (sig fail, stab pass) - blue
+    ax.fill_between(
+        [p_value_threshold, xlim[1]], stability_threshold, ylim[1], alpha=0.1, color="blue"
+    )
+    # Bottom-left (sig pass, stab fail) - orange
+    ax.fill_between([0, p_value_threshold], ylim[0], stability_threshold, alpha=0.1, color="orange")
+    # Bottom-right (sig fail, stab fail) - red
+    ax.fill_between(
+        [p_value_threshold, xlim[1]], ylim[0], stability_threshold, alpha=0.1, color="red"
+    )
+
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
+
+    ax.set_xlabel("P-value (significance test)", fontsize=12)
+    ax.set_ylabel("Correlation (stability test)", fontsize=12)
+    ax.set_title("Significance vs Stability", fontsize=14, fontweight="bold")
+
+    # Count units in each quadrant
+    n_both = sum(1 for c in colors if c == "green")
+    n_sig_only = sum(1 for c in colors if c == "orange")
+    n_stab_only = sum(1 for c in colors if c == "blue")
+    n_neither = sum(1 for c in colors if c == "red")
+
+    # Add legend with counts
+    from matplotlib.patches import Patch
+
+    legend_elements = [
+        Patch(facecolor="green", edgecolor="black", label=f"Both pass: {n_both}"),
+        Patch(facecolor="orange", edgecolor="black", label=f"Sig only: {n_sig_only}"),
+        Patch(facecolor="blue", edgecolor="black", label=f"Stab only: {n_stab_only}"),
+        Patch(facecolor="red", edgecolor="black", label=f"Neither: {n_neither}"),
+    ]
+    ax.legend(handles=legend_elements, loc="upper right", fontsize=10)
+
+    plt.tight_layout()
+    return fig
+
+
 def browse_place_cells(
     event_place_csv: str | Path,
     behavior_position: str | Path,
@@ -314,6 +421,7 @@ def browse_place_cells(
     trace_time_window: float = 600.0,
     event_threshold_sigma: float = 2.0,
     p_value_threshold: float | None = None,
+    stability_threshold: float = 0.5,
 ) -> None:
     """
     Interactive browser for place cell analysis with keyboard navigation.
@@ -440,6 +548,9 @@ def browse_place_cells(
             activity_sigma=activity_sigma,
             event_threshold_sigma=event_threshold_sigma,
             n_shuffles=n_shuffles,
+            behavior_fps=behavior_fps,
+            min_occupancy=min_occupancy,
+            stability_threshold=stability_threshold,
         )
 
         # Visualization-specific: events above threshold for this unit
@@ -466,6 +577,10 @@ def browse_place_cells(
             "si": result["si"],
             "shuffled_sis": result["shuffled_sis"],
             "p_val": result["p_val"],
+            "stability_corr": result["stability_corr"],
+            "stability_z": result["stability_z"],
+            "rate_map_first": result["rate_map_first"],
+            "rate_map_second": result["rate_map_second"],
             "vis_data_above": vis_data_above,
             "vis_data_below": vis_data_below,
             "unit_data": result["unit_data"],
@@ -473,19 +588,17 @@ def browse_place_cells(
             "trace_times": trace_times,
         }
 
-    # Filter units by p-value threshold if specified
-    if p_value_threshold is not None and p_value_threshold < 1.0:
-        filtered_units = [
-            uid for uid in unique_units if unit_results[uid]["p_val"] < p_value_threshold
-        ]
-        if len(filtered_units) == 0:
-            raise ValueError(
-                f"No units found with p-value < {p_value_threshold:.3f}. "
-                "Try adjusting the p_value_threshold or check your data."
-            )
-        unique_units = filtered_units
-        n_units = len(unique_units)  # Update n_units after filtering
-        logger.info(f"Filtered to {n_units} units with p-value < {p_value_threshold:.3f}")
+    # p_value_threshold is used to determine pass/fail status (not for filtering)
+    # All units are shown, with significance test result displayed
+
+    # Show summary scatter plot of significance vs stability
+    threshold_p = p_value_threshold if p_value_threshold is not None else 0.05
+    fig_scatter = plot_significance_stability_scatter(
+        unit_results,
+        p_value_threshold=threshold_p,
+        stability_threshold=stability_threshold,
+    )
+    fig_scatter.show()
 
     logger.info("Ready.")
 
@@ -503,7 +616,7 @@ def browse_place_cells(
     ax1 = fig.add_axes([0.03, 0.42, 0.18, 0.45])  # Max projection
     ax2 = fig.add_axes([0.25, 0.42, 0.18, 0.45])  # Trajectory
     ax3 = fig.add_axes([0.47, 0.42, 0.16, 0.45])  # Rate map (slightly smaller for colorbar)
-    ax3_cbar = fig.add_axes([0.635, 0.42, 0.015, 0.45])  # Dedicated colorbar axes
+    ax3_cbar = fig.add_axes([0.635, 0.49, 0.015, 0.315])  # Colorbar (70% height, centered)
     ax4 = fig.add_axes([0.74, 0.42, 0.18, 0.45])  # SI histogram (square)
     ax5 = fig.add_axes([0.05, 0.20, 0.90, 0.20])  # Trace
     ax_trace_slider = fig.add_axes(
@@ -749,13 +862,99 @@ def browse_place_cells(
             if trace_slider is not None:
                 trace_slider.ax.set_visible(False)
 
-        # Update unit info in suptitle
-        fig.suptitle(
-            f"Unit ID: {unit_id} ({idx + 1}/{n_units}) | Range: {min_uid}-{max_uid}"
-            f" | Use ←/→ keys to navigate",
+        # Determine significance test pass/fail
+        p_val = result["p_val"]
+        threshold = p_value_threshold if p_value_threshold is not None else 0.05
+        sig_pass = p_val < threshold
+        sig_text = "pass" if sig_pass else "fail"
+        sig_color = "green" if sig_pass else "red"
+
+        # Determine stability test pass/fail
+        stab_corr = result["stability_corr"]
+        if np.isnan(stab_corr):
+            stab_pass = None  # N/A
+            stab_text = "N/A"
+            stab_color = "gray"
+        else:
+            stab_pass = stab_corr >= stability_threshold
+            stab_text = "pass" if stab_pass else "fail"
+            stab_color = "green" if stab_pass else "red"
+
+        # Clear any existing text annotations for test results
+        for txt in fig.texts[:]:
+            if hasattr(txt, "_is_test_status"):
+                txt.remove()
+
+        # Get event count for this unit
+        n_events = len(result["unit_data"]) if not result["unit_data"].empty else 0
+
+        # Unit info at top left (with event count)
+        unit_info = fig.text(
+            0.02,
+            0.98,
+            (
+                f"Unit ID: {unit_id} ({idx + 1}/{n_units}) | N={n_events} events | "
+                f"Range: {min_uid}-{max_uid} | Use ←/→ keys"
+            ),
+            ha="left",
+            va="top",
             fontsize=11,
-            y=0.98,
+            fontweight="bold",
+            transform=fig.transFigure,
         )
+        unit_info._is_test_status = True
+
+        # Significance test (stacked below unit info)
+        sig_label = fig.text(
+            0.02,
+            0.95,
+            f"Significance test (p={p_val:.3f}): ",
+            ha="left",
+            va="top",
+            fontsize=10,
+            transform=fig.transFigure,
+        )
+        sig_label._is_test_status = True
+
+        sig_status = fig.text(
+            0.185,
+            0.95,
+            sig_text,
+            ha="left",
+            va="top",
+            fontsize=10,
+            fontweight="bold",
+            color=sig_color,
+            transform=fig.transFigure,
+        )
+        sig_status._is_test_status = True
+
+        # Stability test (stacked below significance test)
+        stab_corr_str = f"r={stab_corr:.2f}" if not np.isnan(stab_corr) else ""
+        stab_label = fig.text(
+            0.02,
+            0.92,
+            f"Stability test ({stab_corr_str}): ",
+            ha="left",
+            va="top",
+            fontsize=10,
+            transform=fig.transFigure,
+        )
+        stab_label._is_test_status = True
+
+        stab_status = fig.text(
+            0.175,
+            0.92,
+            stab_text,
+            ha="left",
+            va="top",
+            fontsize=10,
+            fontweight="bold",
+            color=stab_color,
+            transform=fig.transFigure,
+        )
+        stab_status._is_test_status = True
+
         fig.canvas.draw_idle()
 
     def change_unit(new_idx: int) -> None:
