@@ -1,26 +1,28 @@
 # placecell
 
-Package for analyzing place cells.
+Place cell analysis toolkit for calcium imaging data.
 
+## Getting Started
 
 ```{toctree}
-:maxdepth: 2
+:maxdepth: 1
 
 installation
-cli
-visualization_workflow
 ```
 
-## Modules
+## User Guide
 
-```{eval-rst}
-.. autosummary::
-   :toctree: _generated
-   :recursive:
+```{toctree}
+:maxdepth: 1
 
-   placecell.analysis
-   placecell.config
-   placecell.events
-   placecell.filters
-   placecell.visualization
+Spatial neural activity analysis <spatial_analysis>
+cli
+```
+
+## API Reference
+
+```{toctree}
+:maxdepth: 1
+
+modules
 ```

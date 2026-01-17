@@ -32,6 +32,8 @@ html_title = "placecell"
 html_theme_options = {
     "show_toc_level": 2,
     "toc_title": "On this page",
+    "repository_url": "https://github.com/miniscope/placecell",
+    "use_repository_button": True,
 }
 
 # Autodoc settings
