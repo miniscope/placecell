@@ -116,3 +116,9 @@ ignore = [
 target-version = ['py311', 'py312']
 include = "placecell/.*\\.py$"
 line-length = 100
+
+[tool.coverage.run]
+omit = [
+    "placecell/visualization.py",
+    "placecell/cli/*",
+]
