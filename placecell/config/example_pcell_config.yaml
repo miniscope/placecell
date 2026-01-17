@@ -23,10 +23,10 @@ behavior:
   spatial_map:
     id: spatial_map
     bins: 50
-    min_occupancy: 0.05
+    min_occupancy: 0.05 # Minimum occupancy (in seconds) to include a bin in spatial map
     occupancy_sigma: 3  # Gaussian smoothing (in bins) for occupancy map (0 = no smoothing)
     activity_sigma: 3  # Gaussian smoothing (in bins) for spatial activity map
     n_shuffles: 500
     random_seed: 1
     spike_threshold_sigma: 0  # Sigma multiplier for spike amplitude threshold in trajectory visualization
-    p_value_threshold: 0.05  # P-value threshold. Only units with p < threshold are plotted.
+    p_value_threshold: 0.05 # P-value threshold. Only units with p < threshold are plotted.

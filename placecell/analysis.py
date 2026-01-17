@@ -23,8 +23,7 @@ def load_curated_unit_ids(curation_csv: Path) -> list[int]:
     df = pd.read_csv(curation_csv)
     if "unit_id" not in df.columns or "keep" not in df.columns:
         raise ValueError(
-            f"Curation CSV must have 'unit_id' and 'keep' columns, "
-            f"got: {list(df.columns)}"
+            f"Curation CSV must have 'unit_id' and 'keep' columns, " f"got: {list(df.columns)}"
         )
     keep_ids = df.loc[df["keep"] == 1, "unit_id"].tolist()
     return sorted(int(uid) for uid in keep_ids)
