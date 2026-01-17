@@ -8,10 +8,14 @@ pcell workflow visualize --config config.yaml --data data_paths.yaml
 
 ## Required Files
 
-**Input data:**
-- `{trace_name}.zarr`: calcium traces from your neural data directory
+**Neural data directory** (e.g., `minian/` output):
+- `{trace_name}.zarr`: calcium traces (e.g., `C.zarr` or `C_lp.zarr`)
+- `A.zarr`: spatial footprints for cell overlay (optional)
+- `max_proj.zarr`: max projection image for visualization (optional)
+
+**Timestamp and position files:**
 - `neural_timestamp.csv`: neural frame timestamps
-- `behavior_position.csv`: animal position with bodypart columns
+- `behavior_position.csv`: animal position with bodypart columns (DeepLabCut format)
 - `behavior_timestamp.csv`: behavior frame timestamps
 
 **Configuration files:**
@@ -29,11 +33,12 @@ Create `data_paths.yaml` with paths relative to this file:
 id: your_data
 mio_model: placecell.config.DataPathsConfig
 mio_version: 0.8.1
-neural_path: directory/including/zarr_neural_files
+# Directory containing zarr files (C.zarr, A.zarr, max_proj.zarr)
+neural_path: path/to/minian_output
 neural_timestamp: path/to/neural_timestamp.csv
 behavior_position: path/to/behavior_position.csv
 behavior_timestamp: path/to/behavior_timestamp.csv
-curation_csv: path/to/curation.csv  # optional
+curation_csv: path/to/curation.csv  # optional: filter units by curation
 ```
 :::
 
