@@ -41,7 +41,7 @@ myst_enable_extensions = [
 myst_fence_as_directive = ["mermaid"]
 
 html_theme = "sphinx_book_theme"
-html_title = f"placecell<br><small>v{short_release}</small>"
+html_title = "placecell"
 
 html_theme_options = {
     "show_toc_level": 2,
@@ -49,6 +49,7 @@ html_theme_options = {
     "repository_url": "https://github.com/miniscope/placecell",
     "use_repository_button": True,
     "show_navbar_depth": 1,
+    "announcement": f"Version: v{short_release}",
 }
 
 # Autodoc settings
