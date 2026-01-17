@@ -26,8 +26,6 @@ dev = [
     "black>=24.1.1",
     "ruff>=0.2.0",
     "pre-commit>=3.7.1",
-    "sphinxcontrib-mermaid>=2.0.0",
-    "sphinx-design>=0.6.1",
 ]
 tests = [
     "pytest>=9.0.2",
@@ -40,6 +38,8 @@ docs = [
     "sphinx-book-theme>=1.1.0",
     "myst-parser>=3.0.0",
     "autodoc-pydantic>=2.0.1",
+    "sphinxcontrib-mermaid>=2.0.0",
+    "sphinx-design>=0.6.1",
 ]
 all = [
     "placecell[dev,tests,docs]",
