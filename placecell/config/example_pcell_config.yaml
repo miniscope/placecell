@@ -6,12 +6,10 @@ neural:
   fps: 20.0
   oasis:
     id: oasis
-    g: [1.60, -0.63]  # AR(2) coefficients, null to estimate from data
-    baseline: p10
+    g: [1.60, -0.63]  # AR(2) coefficients (required)
+    baseline: 0
     penalty: 0  # Sparsity penalty (higher = fewer events). Default 0.
-    optimize_g: 0  # Number of events to use for optimizing AR coefficients. 0 = no optimization (default).
-    lambda_: null  # Regularization parameter. null = auto-determined.
-    s_min: null  # Minimum event size. Positive = direct threshold, negative = calculated, 0 = auto, null = default.
+    s_min: 0  # Minimum event size threshold. Default 0.
   trace_name: C_lp
   max_units: null  # Max units to process. null = process all units.
 behavior:

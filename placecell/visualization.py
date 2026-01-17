@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from mio.logging import init_logger
+from tqdm import tqdm
 
 try:
     import matplotlib.pyplot as plt
@@ -779,7 +780,7 @@ def browse_place_cells(
     logger.info(f"Loaded {n_units} units, computing analysis...")
 
     unit_results = {}
-    for unit_id in unique_units:
+    for unit_id in tqdm(unique_units, desc="Computing unit analysis", unit="unit"):
         unit_results[unit_id] = _compute_unit_analysis(
             unit_id=unit_id,
             df_filtered=df_filtered,

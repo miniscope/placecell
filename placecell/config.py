@@ -8,36 +8,23 @@ from pydantic import Field
 class OasisConfig(MiniscopeConfig, ConfigYAMLMixin):
     """OASIS deconvolution parameters."""
 
-    g: tuple[float, float] | None = Field(
-        None,
-        description="AR(2) coefficients (g1, g2). If None, estimated from data.",
+    g: tuple[float, float] = Field(
+        ...,
+        description="AR(2) coefficients (g1, g2). Required - must be provided in config.",
     )
-    baseline: str = Field(
+    baseline: str | float = Field(
         "p10",
-        description="Baseline mode: 'pXX' for percentile or numeric value.",
+        description="Baseline mode: 'pXX' for percentile, or numeric value (0 = no baseline).",
     )
     penalty: float = Field(
         0.0,
         ge=0.0,
         description="Sparsity penalty (L0 norm). Default 0 (no penalty).",
     )
-    optimize_g: int = Field(
-        0,
-        ge=0,
-        description=[
-            "Number of events to use for optimizing AR coefficients."
-            "Look into oasis documentation for more details."
-        ],
-    )
-    lambda_: float | None = Field(
-        None,
-        description=["Regularization parameter for OASIS." "If None, automatically determined."],
-    )
-    s_min: float | None = Field(
-        None,
-        description=[
-            "Minimum event size threshold." "Look into oasis documentation for more details."
-        ],
+    s_min: float = Field(
+        0.0,
+        ge=0.0,
+        description="Minimum event size threshold. Default 0 (no minimum).",
     )
 
 

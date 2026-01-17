@@ -83,7 +83,7 @@ def deconvolve(
     """Run OASIS deconvolution using settings from config file."""
 
     try:
-        from oasis.functions import deconvolve as oasis_deconvolve  # type: ignore
+        from oasis.oasis_methods import oasisAR2  # type: ignore
     except Exception as exc:
         raise click.ClickException(f"Could not import oasis-deconv: {exc}") from exc
 
@@ -97,8 +97,6 @@ def deconvolve(
     g = cfg.neural.oasis.g
     baseline = cfg.neural.oasis.baseline
     penalty = cfg.neural.oasis.penalty
-    optimize_g = cfg.neural.oasis.optimize_g
-    lambda_ = cfg.neural.oasis.lambda_
     s_min = cfg.neural.oasis.s_min
 
     neural_path = neural_path.resolve()
@@ -147,10 +145,7 @@ def deconvolve(
     if max_units is not None and len(unit_ids) > max_units:
         unit_ids = unit_ids[:max_units]
         logger.info(f"Limiting to first {max_units} units due to max_units config.")
-    if g is not None:
-        logger.info(f"Running OASIS on {len(unit_ids)} units (g={g})")
-    else:
-        logger.info(f"Running OASIS on {len(unit_ids)} units (estimating AR params)")
+    logger.info(f"Running OASIS on {len(unit_ids)} units (g={g})")
 
     good_unit_ids: list[int] = []
     C_list: list[np.ndarray] = []
@@ -171,20 +166,12 @@ def deconvolve(
                     f"Could not interpret baseline={baseline!r} " "as 'pXX' or numeric value."
                 ) from None
 
-        kwargs: dict = {"penalty": penalty, "optimize_g": optimize_g}
-        if g is not None:
-            # Convert tuple to list if optimize_g is enabled
-            # (OASIS needs mutable list for optimization)
-            if optimize_g > 0:
-                kwargs["g"] = list(g)
-            else:
-                kwargs["g"] = g
-        if lambda_ is not None:
-            kwargs["lambda"] = lambda_
-        if s_min is not None:
-            kwargs["s_min"] = s_min
+        y_corrected = y - b
+
         try:
-            c, s, b_est, g_est, lam = oasis_deconvolve(y - b, **kwargs)
+            # Use oasisAR2 directly - more reliable with newer scipy
+            # lam in oasisAR2 is the sparsity penalty (same as 'penalty' in config)
+            c, s = oasisAR2(y_corrected, g1=g[0], g2=g[1], lam=penalty, s_min=s_min)
         except Exception as exc:
             logger.warning(f"Skipping unit {uid} due to oasis-deconv error: {exc}")
             continue
@@ -220,9 +207,9 @@ def deconvolve(
             "fps": float(fps),
             "baseline": baseline,
             "penalty": float(penalty),
-            "optimize_g": int(optimize_g),
-            "lambda": float(lambda_) if lambda_ is not None else "auto",
-            "s_min": float(s_min) if s_min is not None else "auto",
+            "s_min": float(s_min),
+            "g1": float(g[0]),
+            "g2": float(g[1]),
         }
     )
 
