@@ -312,9 +312,7 @@ def compute_stability_score(
             occ = np.zeros_like(occupancy_time)
             mask = np.zeros_like(valid_mask, dtype=bool)
             return occ, mask
-        counts, _, _ = np.histogram2d(
-            traj_half["x"], traj_half["y"], bins=[x_edges, y_edges]
-        )
+        counts, _, _ = np.histogram2d(traj_half["x"], traj_half["y"], bins=[x_edges, y_edges])
         occ = counts * time_per_frame
         occ_smooth = gaussian_filter_normalized(occ, sigma=activity_sigma)
         mask = occ_smooth >= min_occupancy
@@ -332,7 +330,8 @@ def compute_stability_score(
         if events.empty or not np.any(mask):
             return rate_map
         event_weights, _, _ = np.histogram2d(
-            events["x"], events["y"],
+            events["x"],
+            events["y"],
             bins=[x_edges, y_edges],
             weights=events["s"],
         )

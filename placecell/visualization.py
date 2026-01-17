@@ -341,8 +341,20 @@ def plot_significance_stability_scatter(
     ax.scatter(p_vals, stab_corrs, c=colors, s=50, alpha=0.7, edgecolors="black", linewidths=0.5)
 
     # Add threshold lines
-    ax.axvline(p_value_threshold, color="gray", linestyle="--", linewidth=1.5, label=f"p={p_value_threshold}")
-    ax.axhline(stability_threshold, color="gray", linestyle=":", linewidth=1.5, label=f"r={stability_threshold}")
+    ax.axvline(
+        p_value_threshold,
+        color="gray",
+        linestyle="--",
+        linewidth=1.5,
+        label=f"p={p_value_threshold}",
+    )
+    ax.axhline(
+        stability_threshold,
+        color="gray",
+        linestyle=":",
+        linewidth=1.5,
+        label=f"r={stability_threshold}",
+    )
 
     # Shade quadrants
     xlim = ax.get_xlim()
@@ -350,11 +362,15 @@ def plot_significance_stability_scatter(
     # Top-left (sig pass, stab pass) - green
     ax.fill_between([0, p_value_threshold], stability_threshold, ylim[1], alpha=0.1, color="green")
     # Top-right (sig fail, stab pass) - blue
-    ax.fill_between([p_value_threshold, xlim[1]], stability_threshold, ylim[1], alpha=0.1, color="blue")
+    ax.fill_between(
+        [p_value_threshold, xlim[1]], stability_threshold, ylim[1], alpha=0.1, color="blue"
+    )
     # Bottom-left (sig pass, stab fail) - orange
     ax.fill_between([0, p_value_threshold], ylim[0], stability_threshold, alpha=0.1, color="orange")
     # Bottom-right (sig fail, stab fail) - red
-    ax.fill_between([p_value_threshold, xlim[1]], ylim[0], stability_threshold, alpha=0.1, color="red")
+    ax.fill_between(
+        [p_value_threshold, xlim[1]], ylim[0], stability_threshold, alpha=0.1, color="red"
+    )
 
     ax.set_xlim(xlim)
     ax.set_ylim(ylim)
@@ -371,6 +387,7 @@ def plot_significance_stability_scatter(
 
     # Add legend with counts
     from matplotlib.patches import Patch
+
     legend_elements = [
         Patch(facecolor="green", edgecolor="black", label=f"Both pass: {n_both}"),
         Patch(facecolor="orange", edgecolor="black", label=f"Sig only: {n_sig_only}"),
@@ -865,7 +882,7 @@ def browse_place_cells(
 
         # Clear any existing text annotations for test results
         for txt in fig.texts[:]:
-            if hasattr(txt, '_is_test_status'):
+            if hasattr(txt, "_is_test_status"):
                 txt.remove()
 
         # Get event count for this unit
@@ -873,26 +890,40 @@ def browse_place_cells(
 
         # Unit info at top left (with event count)
         unit_info = fig.text(
-            0.02, 0.98,
-            f"Unit ID: {unit_id} ({idx + 1}/{n_units}) | N={n_events} events | Range: {min_uid}-{max_uid} | Use ←/→ keys",
-            ha="left", va="top", fontsize=11, fontweight="bold",
+            0.02,
+            0.98,
+            (
+                f"Unit ID: {unit_id} ({idx + 1}/{n_units}) | N={n_events} events | "
+                f"Range: {min_uid}-{max_uid} | Use ←/→ keys"
+            ),
+            ha="left",
+            va="top",
+            fontsize=11,
+            fontweight="bold",
             transform=fig.transFigure,
         )
         unit_info._is_test_status = True
 
         # Significance test (stacked below unit info)
         sig_label = fig.text(
-            0.02, 0.95,
+            0.02,
+            0.95,
             f"Significance test (p={p_val:.3f}): ",
-            ha="left", va="top", fontsize=10,
+            ha="left",
+            va="top",
+            fontsize=10,
             transform=fig.transFigure,
         )
         sig_label._is_test_status = True
 
         sig_status = fig.text(
-            0.185, 0.95,
+            0.185,
+            0.95,
             sig_text,
-            ha="left", va="top", fontsize=10, fontweight="bold",
+            ha="left",
+            va="top",
+            fontsize=10,
+            fontweight="bold",
             color=sig_color,
             transform=fig.transFigure,
         )
@@ -901,17 +932,24 @@ def browse_place_cells(
         # Stability test (stacked below significance test)
         stab_corr_str = f"r={stab_corr:.2f}" if not np.isnan(stab_corr) else ""
         stab_label = fig.text(
-            0.02, 0.92,
+            0.02,
+            0.92,
             f"Stability test ({stab_corr_str}): ",
-            ha="left", va="top", fontsize=10,
+            ha="left",
+            va="top",
+            fontsize=10,
             transform=fig.transFigure,
         )
         stab_label._is_test_status = True
 
         stab_status = fig.text(
-            0.175, 0.92,
+            0.175,
+            0.92,
             stab_text,
-            ha="left", va="top", fontsize=10, fontweight="bold",
+            ha="left",
+            va="top",
+            fontsize=10,
+            fontweight="bold",
             color=stab_color,
             transform=fig.transFigure,
         )
