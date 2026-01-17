@@ -97,8 +97,17 @@ class SpatialMapConfig(MiniscopeConfig, ConfigYAMLMixin):
         ge=0.0,
         le=1.0,
         description=(
-            "P-value threshold for filtering units in visualization. "
-            "Only units with p-value < threshold are plotted. If None, plot all units."
+            "P-value threshold for significance test pass/fail. "
+            "Units with p-value < threshold pass. Default 0.05 if None."
+        ),
+    )
+    stability_threshold: float = Field(
+        0.5,
+        ge=-1.0,
+        le=1.0,
+        description=(
+            "Correlation threshold for stability test pass/fail. "
+            "Units with first/second half rate map correlation >= threshold pass."
         ),
     )
 

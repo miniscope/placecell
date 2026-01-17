@@ -89,9 +89,13 @@ The workflow displays an occupancy preview:
 
 ![Occupancy Preview](assets/Figure_1.png)
 
-Then launches the interactive place cell viewer:
+Then displays the stability vs significance plot:
 
-![Place Cell Viewer](assets/Figure_2.png)
+![Stability vs Significance](assets/Figure_2.png)
+
+And finally launches the interactive place cell viewer:
+
+![Place Cell Viewer](assets/Figure_3.png)
 
 ## CLI Options
 

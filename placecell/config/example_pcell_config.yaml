@@ -27,4 +27,5 @@ behavior:
     n_shuffles: 500
     random_seed: 1
     event_threshold_sigma: 0  # Sigma multiplier for event amplitude threshold in trajectory visualization
-    p_value_threshold: 0.05 # P-value threshold. Only units with p < threshold are plotted.
+    p_value_threshold: 0.05 # P-value threshold. Units with p < threshold pass.
+    stability_threshold: 0.5 # Correlation threshold. Units with r >= threshold pass.

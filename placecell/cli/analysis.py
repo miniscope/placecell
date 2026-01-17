@@ -44,6 +44,7 @@ def _launch_browser(
         random_seed=behavior_cfg.spatial_map.random_seed,
         event_threshold_sigma=behavior_cfg.spatial_map.event_threshold_sigma,
         p_value_threshold=behavior_cfg.spatial_map.p_value_threshold,
+        stability_threshold=behavior_cfg.spatial_map.stability_threshold,
     )
 
 

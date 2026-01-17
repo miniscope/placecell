@@ -240,6 +240,137 @@ def compute_spatial_information(
     return actual_si, p_val, shuffled_sis
 
 
+def compute_stability_score(
+    unit_events: pd.DataFrame,
+    trajectory_df: pd.DataFrame,
+    occupancy_time: np.ndarray,
+    valid_mask: np.ndarray,
+    x_edges: np.ndarray,
+    y_edges: np.ndarray,
+    activity_sigma: float = 1.0,
+    behavior_fps: float = 20.0,
+    min_occupancy: float = 0.1,
+    split_method: str = "half",
+) -> tuple[float, float, np.ndarray, np.ndarray]:
+    """Compute stability score by comparing rate maps from split data.
+
+    Splits the recording into two halves based on behavior frame index,
+    computes rate maps for each half, and returns the Pearson correlation
+    between them (using valid bins in both halves).
+
+    Parameters
+    ----------
+    unit_events:
+        DataFrame with x, y, s, beh_frame_index columns for a single unit.
+    trajectory_df:
+        Speed-filtered trajectory with beh_frame_index column.
+    occupancy_time:
+        Occupancy time map (full session, for reference).
+    valid_mask:
+        Valid occupancy mask (full session).
+    x_edges, y_edges:
+        Spatial bin edges.
+    activity_sigma:
+        Gaussian smoothing sigma for rate maps.
+    behavior_fps:
+        Behavior sampling rate.
+    min_occupancy:
+        Minimum occupancy time in seconds for a bin to be valid.
+    split_method:
+        Splitting method. Currently only "half" is supported.
+        Future options: "odd_even", "thirds", etc.
+
+    Returns
+    -------
+    tuple
+        (correlation, fisher_z, rate_map_first, rate_map_second)
+        correlation: Pearson correlation between the two rate maps
+        fisher_z: Fisher z-transformed correlation
+        rate_map_first: Rate map from first half
+        rate_map_second: Rate map from second half
+    """
+    if unit_events.empty or trajectory_df.empty:
+        nan_map = np.full_like(occupancy_time, np.nan)
+        return np.nan, np.nan, nan_map, nan_map
+
+    # Split trajectory by frame index
+    all_frames = trajectory_df["beh_frame_index"].values
+    mid_frame = np.median(all_frames)
+
+    traj_first = trajectory_df[trajectory_df["beh_frame_index"] <= mid_frame]
+    traj_second = trajectory_df[trajectory_df["beh_frame_index"] > mid_frame]
+
+    events_first = unit_events[unit_events["beh_frame_index"] <= mid_frame]
+    events_second = unit_events[unit_events["beh_frame_index"] > mid_frame]
+
+    # Compute occupancy maps for each half
+    time_per_frame = 1.0 / behavior_fps
+
+    def compute_half_occupancy(traj_half: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+        """Compute occupancy and valid mask for a trajectory half."""
+        if traj_half.empty:
+            occ = np.zeros_like(occupancy_time)
+            mask = np.zeros_like(valid_mask, dtype=bool)
+            return occ, mask
+        counts, _, _ = np.histogram2d(
+            traj_half["x"], traj_half["y"], bins=[x_edges, y_edges]
+        )
+        occ = counts * time_per_frame
+        occ_smooth = gaussian_filter_normalized(occ, sigma=activity_sigma)
+        mask = occ_smooth >= min_occupancy
+        return occ_smooth, mask
+
+    occ_first, valid_first = compute_half_occupancy(traj_first)
+    occ_second, valid_second = compute_half_occupancy(traj_second)
+
+    # Compute rate maps for each half (unnormalized for fair comparison)
+    def compute_half_rate_map(
+        events: pd.DataFrame, occ: np.ndarray, mask: np.ndarray
+    ) -> np.ndarray:
+        """Compute rate map for a half."""
+        rate_map = np.full_like(occ, np.nan)
+        if events.empty or not np.any(mask):
+            return rate_map
+        event_weights, _, _ = np.histogram2d(
+            events["x"], events["y"],
+            bins=[x_edges, y_edges],
+            weights=events["s"],
+        )
+        rate_map[mask] = event_weights[mask] / occ[mask]
+        rate_map_smooth = gaussian_filter_normalized(rate_map, sigma=activity_sigma)
+        rate_map_smooth[~mask] = np.nan
+        return rate_map_smooth
+
+    rate_map_first = compute_half_rate_map(events_first, occ_first, valid_first)
+    rate_map_second = compute_half_rate_map(events_second, occ_second, valid_second)
+
+    # Compute correlation only on bins valid in both halves
+    both_valid = valid_first & valid_second
+    if not np.any(both_valid):
+        return np.nan, np.nan, rate_map_first, rate_map_second
+
+    vals_first = rate_map_first[both_valid]
+    vals_second = rate_map_second[both_valid]
+
+    # Remove any remaining NaN values
+    finite_mask = np.isfinite(vals_first) & np.isfinite(vals_second)
+    if np.sum(finite_mask) < 3:  # Need at least 3 points for correlation
+        return np.nan, np.nan, rate_map_first, rate_map_second
+
+    vals_first = vals_first[finite_mask]
+    vals_second = vals_second[finite_mask]
+
+    # Pearson correlation
+    corr = np.corrcoef(vals_first, vals_second)[0, 1]
+
+    # Fisher z-transform: z = 0.5 * ln((1+r)/(1-r)) = arctanh(r)
+    # Clip to avoid infinity at r=1 or r=-1
+    corr_clipped = np.clip(corr, -0.9999, 0.9999)
+    fisher_z = np.arctanh(corr_clipped)
+
+    return corr, fisher_z, rate_map_first, rate_map_second
+
+
 def compute_unit_analysis(
     unit_id: int,
     df_filtered: pd.DataFrame,
@@ -252,8 +383,11 @@ def compute_unit_analysis(
     event_threshold_sigma: float = 2.0,
     n_shuffles: int = 100,
     random_seed: int | None = None,
+    behavior_fps: float = 20.0,
+    min_occupancy: float = 0.1,
+    stability_threshold: float = 0.5,
 ) -> dict:
-    """Compute rate map, spatial information, and thresholded events for a unit.
+    """Compute rate map, spatial information, stability, and thresholded events for a unit.
 
     Parameters
     ----------
@@ -277,12 +411,19 @@ def compute_unit_analysis(
         Number of shuffles for significance test.
     random_seed:
         Random seed for reproducibility.
+    behavior_fps:
+        Behavior sampling rate for stability computation.
+    min_occupancy:
+        Minimum occupancy time for stability computation.
+    stability_threshold:
+        Correlation threshold for stability test pass/fail.
 
     Returns
     -------
     dict
         Analysis results with keys: rate_map, si, p_val, shuffled_sis,
-        events_above_threshold, vis_threshold.
+        events_above_threshold, vis_threshold, stability_corr, stability_z,
+        rate_map_first, rate_map_second.
     """
     unit_data = (
         df_filtered[df_filtered["unit_id"] == unit_id] if not df_filtered.empty else pd.DataFrame()
@@ -313,6 +454,19 @@ def compute_unit_analysis(
         vis_threshold = 0.0
         events_above = pd.DataFrame()
 
+    # Stability test
+    stability_corr, stability_z, rate_map_first, rate_map_second = compute_stability_score(
+        unit_data,
+        trajectory_df,
+        occupancy_time,
+        valid_mask,
+        x_edges,
+        y_edges,
+        activity_sigma=activity_sigma,
+        behavior_fps=behavior_fps,
+        min_occupancy=min_occupancy,
+    )
+
     return {
         "rate_map": rate_map,
         "si": si,
@@ -321,6 +475,10 @@ def compute_unit_analysis(
         "events_above_threshold": events_above,
         "vis_threshold": vis_threshold,
         "unit_data": unit_data,
+        "stability_corr": stability_corr,
+        "stability_z": stability_z,
+        "rate_map_first": rate_map_first,
+        "rate_map_second": rate_map_second,
     }
 
 
