@@ -9,6 +9,12 @@ import xarray as xr
 from mio.logging import init_logger
 from tqdm import tqdm
 
+from placecell.analysis import (
+    compute_occupancy_map,
+    compute_unit_analysis,
+)
+from placecell.io import load_behavior_data, load_neural_data
+
 try:
     import matplotlib.pyplot as plt
 
@@ -21,206 +27,6 @@ except ImportError:
     Figure = None
 
 logger = init_logger(__name__)
-
-
-def _gaussian_filter_normalized(
-    data: np.ndarray,
-    sigma: float,
-) -> np.ndarray:
-    """
-    Apply Gaussian smoothing with adaptive normalization at boundaries.
-
-    Uses zero-padding and normalizes by the kernel weight sum so that
-    edge bins are not penalized. This seems to be the standard approach for
-    place cell rate map smoothing.
-
-
-    Parameters
-    ----------
-    data : np.ndarray
-        Input 2D array to smooth.
-    sigma : float
-        Gaussian smoothing sigma in bins.
-
-    Returns
-    -------
-    np.ndarray
-        Smoothed array with normalized edges.
-    """
-    from scipy.ndimage import gaussian_filter
-
-    if sigma <= 0:
-        return data.copy()
-
-    # Smooth data with zero padding
-    smoothed = gaussian_filter(data, sigma=sigma, mode="constant", cval=0)
-    # Smooth a mask of ones to get normalization weights
-    norm = gaussian_filter(np.ones_like(data), sigma=sigma, mode="constant", cval=0)
-    # Avoid division by zero
-    norm[norm == 0] = 1
-    return smoothed / norm
-
-
-def _load_behavior_data(
-    behavior_position: Path,
-    behavior_timestamp: Path,
-    bodypart: str,
-    speed_window_frames: int,
-    speed_threshold: float,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Load behavior data and compute speed-filtered trajectory.
-
-    Parameters
-    ----------
-    behavior_position : Path
-        Path to behavior position CSV file.
-    behavior_timestamp : Path
-        Path to behavior timestamp CSV file.
-    bodypart : str
-        Body part name to use for trajectory.
-    speed_window_frames : int
-        Window size for speed computation.
-    speed_threshold : float
-        Minimum speed threshold.
-
-    Returns
-    -------
-    tuple[pd.DataFrame, pd.DataFrame]
-        (trajectory_with_speed, trajectory_filtered) - full trajectory with speed
-        and speed-filtered trajectory.
-    """
-    from placecell.analysis import _load_behavior_xy, compute_behavior_speed
-
-    if not behavior_position.exists():
-        raise FileNotFoundError(
-            f"Behavior position file not found: {behavior_position}. "
-            "This is required for full trajectory plotting and occupancy calculation."
-        )
-    if not behavior_timestamp.exists():
-        raise FileNotFoundError(
-            f"Behavior timestamp file not found: {behavior_timestamp}. "
-            "This is required for speed calculation."
-        )
-
-    full_trajectory = _load_behavior_xy(behavior_position, bodypart=bodypart)
-    behavior_timestamps = pd.read_csv(behavior_timestamp)
-
-    trajectory_with_speed = compute_behavior_speed(
-        positions=full_trajectory,
-        timestamps=behavior_timestamps,
-        window_frames=speed_window_frames,
-    )
-
-    trajectory_filtered = trajectory_with_speed[trajectory_with_speed["speed"] >= speed_threshold]
-    trajectory_filtered = trajectory_filtered.sort_values("frame_index")
-    trajectory_filtered = trajectory_filtered.rename(columns={"frame_index": "beh_frame_index"})
-
-    return trajectory_with_speed, trajectory_filtered
-
-
-def _load_neural_data(
-    neural_path: Path | None,
-    trace_name: str,
-) -> tuple[Any, np.ndarray | None, Any]:
-    """
-    Load neural data including traces, max projection, and footprints.
-
-    Parameters
-    ----------
-    neural_path : Path or None
-        Path to neural data directory.
-    trace_name : str
-        Name of trace zarr to load.
-
-    Returns
-    -------
-    tuple
-        (traces, max_proj, footprints) - xarray DataArray or None for each.
-    """
-    traces = None
-    max_proj = None
-    footprints = None
-
-    if neural_path is None:
-        return traces, max_proj, footprints
-
-    neural_path = Path(neural_path)
-
-    # Load traces
-    try:
-        from placecell.analysis import load_traces
-
-        traces = load_traces(neural_path, trace_name=trace_name)
-    except (FileNotFoundError, KeyError, ValueError):
-        pass
-
-    # Load max projection and footprints
-    try:
-        max_proj_path = neural_path / "max_proj.zarr"
-        if max_proj_path.exists():
-            max_proj_ds = xr.open_zarr(max_proj_path, consolidated=False)
-            if "max_proj" in max_proj_ds:
-                mp = max_proj_ds["max_proj"]
-            else:
-                mp = max_proj_ds[list(max_proj_ds.data_vars)[0]]
-            if "quantile" in mp.dims:
-                mp = mp.isel(quantile=0)
-            max_proj = np.asarray(mp.values, dtype=float)
-
-        a_path = neural_path / "A.zarr"
-        if a_path.exists():
-            A_ds = xr.open_zarr(a_path, consolidated=False)
-            footprints = A_ds["A"] if "A" in A_ds else A_ds[list(A_ds.data_vars)[0]]
-    except (FileNotFoundError, KeyError, ValueError, OSError):
-        pass
-
-    return traces, max_proj, footprints
-
-
-def _compute_occupancy_map(
-    trajectory_df: pd.DataFrame,
-    bins: int,
-    behavior_fps: float,
-    occupancy_sigma: float,
-    min_occupancy: float,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Compute occupancy map from speed-filtered trajectory.
-
-    Parameters
-    ----------
-    trajectory_df : pd.DataFrame
-        Speed-filtered trajectory with x, y columns.
-    bins : int
-        Number of spatial bins.
-    behavior_fps : float
-        Behavior sampling rate.
-    occupancy_sigma : float
-        Gaussian smoothing sigma for occupancy map.
-    min_occupancy : float
-        Minimum occupancy time in seconds.
-
-    Returns
-    -------
-    tuple
-        (occupancy_time, valid_mask, x_edges, y_edges)
-    """
-    x_edges = np.linspace(trajectory_df["x"].min(), trajectory_df["x"].max(), bins + 1)
-    y_edges = np.linspace(trajectory_df["y"].min(), trajectory_df["y"].max(), bins + 1)
-    time_per_frame = 1.0 / behavior_fps
-
-    occupancy_counts, _, _ = np.histogram2d(
-        trajectory_df["x"], trajectory_df["y"], bins=[x_edges, y_edges]
-    )
-    occupancy_time = occupancy_counts * time_per_frame
-
-    if occupancy_sigma > 0:
-        occupancy_time = _gaussian_filter_normalized(occupancy_time, sigma=occupancy_sigma)
-
-    valid_mask = occupancy_time >= min_occupancy
-
-    return occupancy_time, valid_mask, x_edges, y_edges
 
 
 def _display_occupancy_preview(
@@ -309,164 +115,6 @@ def _display_occupancy_preview(
     fig_occ.tight_layout()
     plt.show(block=False)
     plt.pause(0.1)
-
-
-def _compute_unit_analysis(
-    unit_id: int,
-    df_filtered: pd.DataFrame,
-    df_all_events: pd.DataFrame | None,
-    trajectory_df: pd.DataFrame,
-    occupancy_time: np.ndarray,
-    valid_mask: np.ndarray,
-    x_edges: np.ndarray,
-    y_edges: np.ndarray,
-    activity_sigma: float,
-    event_threshold_sigma: float,
-    n_shuffles: int,
-    traces: Any,
-    trace_fps: float,
-) -> dict:
-    """
-    Compute rate map and spatial information for a single unit.
-
-    Parameters
-    ----------
-    unit_id : int
-        Unit identifier.
-    df_filtered : pd.DataFrame
-        Speed-filtered event data.
-    df_all_events : pd.DataFrame or None
-        All events data (for trace visualization).
-    trajectory_df : pd.DataFrame
-        Speed-filtered trajectory.
-    occupancy_time : np.ndarray
-        Occupancy time map.
-    valid_mask : np.ndarray
-        Valid occupancy mask.
-    x_edges, y_edges : np.ndarray
-        Spatial bin edges.
-    activity_sigma : float
-        Gaussian smoothing sigma for rate map.
-    event_threshold_sigma : float
-        Sigma multiplier for visualization threshold.
-    n_shuffles : int
-        Number of shuffles for significance test.
-    traces : xarray.DataArray or None
-        Neural traces.
-    trace_fps : float
-        Trace sampling rate.
-
-    Returns
-    -------
-    dict
-        Unit analysis results including rate_map, si, p_val, etc.
-    """
-    unit_data = (
-        df_filtered[df_filtered["unit_id"] == unit_id] if not df_filtered.empty else pd.DataFrame()
-    )
-
-    # Rate map
-    event_weights, _, _ = np.histogram2d(
-        unit_data["x"],
-        unit_data["y"],
-        bins=[x_edges, y_edges],
-        weights=unit_data["s"],
-    )
-    rate_map = np.zeros_like(occupancy_time)
-    rate_map[valid_mask] = event_weights[valid_mask] / occupancy_time[valid_mask]
-    rate_map_smooth = _gaussian_filter_normalized(rate_map, sigma=activity_sigma)
-
-    # Normalize to 0-1 range
-    valid_rate_values = rate_map_smooth[valid_mask]
-    if len(valid_rate_values) > 0 and np.nanmax(valid_rate_values) > 0:
-        rate_map_smooth[valid_mask] = (
-            rate_map_smooth[valid_mask] - np.nanmin(valid_rate_values)
-        ) / (np.nanmax(valid_rate_values) - np.nanmin(valid_rate_values))
-    rate_map_smooth[~valid_mask] = np.nan
-
-    # Visualization threshold
-    vis_thresh = unit_data["s"].mean() + event_threshold_sigma * unit_data["s"].std()
-    total_time = np.sum(occupancy_time[valid_mask])
-    total_events = np.sum(event_weights[valid_mask])
-
-    # Spatial information calculation
-    if total_time > 0 and total_events > 0:
-        overall_lambda = total_events / total_time
-        P_i = np.zeros_like(occupancy_time)
-        P_i[valid_mask] = occupancy_time[valid_mask] / total_time
-
-        valid_si = (rate_map > 0) & valid_mask
-        if np.any(valid_si):
-            si_term = (
-                P_i[valid_si] * rate_map[valid_si] * np.log2(rate_map[valid_si] / overall_lambda)
-            )
-            actual_si = float(np.sum(si_term))
-        else:
-            actual_si = 0.0
-
-        # Shuffling test
-        traj_frames = trajectory_df["beh_frame_index"].values
-        u_grouped = unit_data.groupby("beh_frame_index")["s"].sum()
-        aligned_events = u_grouped.reindex(traj_frames, fill_value=0).values
-
-        shuffled_sis = []
-        for _ in range(n_shuffles):
-            shift = np.random.randint(len(aligned_events))
-            s_shuffled = np.roll(aligned_events, shift)
-
-            event_w_shuf, _, _ = np.histogram2d(
-                trajectory_df["x"],
-                trajectory_df["y"],
-                bins=[x_edges, y_edges],
-                weights=s_shuffled,
-            )
-            rate_shuf = np.zeros_like(occupancy_time)
-            rate_shuf[valid_mask] = event_w_shuf[valid_mask] / occupancy_time[valid_mask]
-
-            valid_s = (rate_shuf > 0) & valid_mask
-            if np.any(valid_s):
-                si_shuf = np.sum(
-                    P_i[valid_s] * rate_shuf[valid_s] * np.log2(rate_shuf[valid_s] / overall_lambda)
-                )
-            else:
-                si_shuf = 0.0
-            shuffled_sis.append(si_shuf)
-
-        shuffled_sis = np.array(shuffled_sis)
-        p_val = np.sum(shuffled_sis >= actual_si) / n_shuffles
-    else:
-        actual_si = 0.0
-        shuffled_sis = np.zeros(n_shuffles)
-        p_val = 1.0
-
-    # Visualization data
-    vis_data_above = unit_data[unit_data["s"] > vis_thresh]
-    vis_data_below = pd.DataFrame()
-    if df_all_events is not None:
-        unit_all_events = df_all_events[df_all_events["unit_id"] == unit_id]
-        vis_data_below = unit_all_events[unit_all_events["s"] > vis_thresh]
-
-    # Trace data
-    trace_data = None
-    trace_times = None
-    if traces is not None:
-        try:
-            trace_data = traces.sel(unit_id=int(unit_id)).values
-            trace_times = np.arange(len(trace_data)) / trace_fps
-        except (KeyError, IndexError):
-            pass
-
-    return {
-        "rate_map": rate_map_smooth,
-        "si": actual_si,
-        "shuffled_sis": shuffled_sis,
-        "p_val": p_val,
-        "vis_data_above": vis_data_above,
-        "vis_data_below": vis_data_below,
-        "unit_data": unit_data,
-        "trace_data": trace_data,
-        "trace_times": trace_times,
-    }
 
 
 def plot_trajectory(
@@ -737,7 +385,7 @@ def browse_place_cells(
         df_all_events = pd.read_csv(event_index_csv)
 
     # Load behavior data
-    trajectory_with_speed, trajectory_df = _load_behavior_data(
+    trajectory_with_speed, trajectory_df = load_behavior_data(
         behavior_position=Path(behavior_position),
         behavior_timestamp=Path(behavior_timestamp),
         bodypart=bodypart,
@@ -746,7 +394,7 @@ def browse_place_cells(
     )
 
     # Compute occupancy map
-    occupancy_time, valid_mask, x_edges, y_edges = _compute_occupancy_map(
+    occupancy_time, valid_mask, x_edges, y_edges = compute_occupancy_map(
         trajectory_df=trajectory_df,
         bins=bins,
         behavior_fps=behavior_fps,
@@ -768,7 +416,7 @@ def browse_place_cells(
     )
 
     # Load neural data
-    traces, max_proj, footprints = _load_neural_data(
+    traces, max_proj, footprints = load_neural_data(
         neural_path=Path(neural_path) if neural_path else None,
         trace_name=trace_name,
     )
@@ -781,10 +429,10 @@ def browse_place_cells(
 
     unit_results = {}
     for unit_id in tqdm(unique_units, desc="Computing unit analysis", unit="unit"):
-        unit_results[unit_id] = _compute_unit_analysis(
+        # Core analysis from analysis module
+        result = compute_unit_analysis(
             unit_id=unit_id,
             df_filtered=df_filtered,
-            df_all_events=df_all_events,
             trajectory_df=trajectory_df,
             occupancy_time=occupancy_time,
             valid_mask=valid_mask,
@@ -793,9 +441,38 @@ def browse_place_cells(
             activity_sigma=activity_sigma,
             event_threshold_sigma=event_threshold_sigma,
             n_shuffles=n_shuffles,
-            traces=traces,
-            trace_fps=trace_fps,
         )
+
+        # Visualization-specific: events above threshold for this unit
+        vis_data_above = result["events_above_threshold"]
+
+        # Visualization-specific: below-threshold events from all events (non-speed-filtered)
+        vis_data_below = pd.DataFrame()
+        if df_all_events is not None:
+            unit_all_events = df_all_events[df_all_events["unit_id"] == unit_id]
+            vis_data_below = unit_all_events[unit_all_events["s"] > result["vis_threshold"]]
+
+        # Visualization-specific: trace data
+        trace_data = None
+        trace_times = None
+        if traces is not None:
+            try:
+                trace_data = traces.sel(unit_id=int(unit_id)).values
+                trace_times = np.arange(len(trace_data)) / trace_fps
+            except (KeyError, IndexError):
+                pass
+
+        unit_results[unit_id] = {
+            "rate_map": result["rate_map"],
+            "si": result["si"],
+            "shuffled_sis": result["shuffled_sis"],
+            "p_val": result["p_val"],
+            "vis_data_above": vis_data_above,
+            "vis_data_below": vis_data_below,
+            "unit_data": result["unit_data"],
+            "trace_data": trace_data,
+            "trace_times": trace_times,
+        }
 
     # Filter units by p-value threshold if specified
     if p_value_threshold is not None and p_value_threshold < 1.0:

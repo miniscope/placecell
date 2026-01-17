@@ -5,6 +5,323 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import xarray as xr
+from scipy.ndimage import gaussian_filter
+
+
+def gaussian_filter_normalized(
+    data: np.ndarray,
+    sigma: float,
+) -> np.ndarray:
+    """Apply Gaussian smoothing with adaptive normalization at boundaries.
+
+    Uses zero-padding and normalizes by the kernel weight sum so that
+    edge bins are not penalized. This is the standard approach for
+    place cell rate map smoothing.
+
+    Parameters
+    ----------
+    data:
+        Input 2D array to smooth.
+    sigma:
+        Gaussian smoothing sigma in bins.
+
+    Returns
+    -------
+    np.ndarray
+        Smoothed array with normalized edges.
+    """
+    if sigma <= 0:
+        return data.copy()
+
+    # Smooth data with zero padding
+    smoothed = gaussian_filter(data, sigma=sigma, mode="constant", cval=0)
+    # Smooth a mask of ones to get normalization weights
+    norm = gaussian_filter(np.ones_like(data), sigma=sigma, mode="constant", cval=0)
+    # Avoid division by zero
+    norm[norm == 0] = 1
+    return smoothed / norm
+
+
+def compute_occupancy_map(
+    trajectory_df: pd.DataFrame,
+    bins: int,
+    behavior_fps: float,
+    occupancy_sigma: float = 1.0,
+    min_occupancy: float = 0.1,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Compute occupancy map from speed-filtered trajectory.
+
+    Parameters
+    ----------
+    trajectory_df:
+        Speed-filtered trajectory with x, y columns.
+    bins:
+        Number of spatial bins.
+    behavior_fps:
+        Behavior sampling rate.
+    occupancy_sigma:
+        Gaussian smoothing sigma for occupancy map.
+    min_occupancy:
+        Minimum occupancy time in seconds.
+
+    Returns
+    -------
+    tuple
+        (occupancy_time, valid_mask, x_edges, y_edges)
+    """
+    x_edges = np.linspace(trajectory_df["x"].min(), trajectory_df["x"].max(), bins + 1)
+    y_edges = np.linspace(trajectory_df["y"].min(), trajectory_df["y"].max(), bins + 1)
+    time_per_frame = 1.0 / behavior_fps
+
+    occupancy_counts, _, _ = np.histogram2d(
+        trajectory_df["x"], trajectory_df["y"], bins=[x_edges, y_edges]
+    )
+    occupancy_time = occupancy_counts * time_per_frame
+
+    if occupancy_sigma > 0:
+        occupancy_time = gaussian_filter_normalized(occupancy_time, sigma=occupancy_sigma)
+
+    valid_mask = occupancy_time >= min_occupancy
+
+    return occupancy_time, valid_mask, x_edges, y_edges
+
+
+def compute_rate_map(
+    unit_events: pd.DataFrame,
+    occupancy_time: np.ndarray,
+    valid_mask: np.ndarray,
+    x_edges: np.ndarray,
+    y_edges: np.ndarray,
+    activity_sigma: float = 1.0,
+) -> np.ndarray:
+    """Compute smoothed and normalized rate map for a unit.
+
+    Parameters
+    ----------
+    unit_events:
+        DataFrame with x, y, s columns for a single unit.
+    occupancy_time:
+        Occupancy time map.
+    valid_mask:
+        Valid occupancy mask.
+    x_edges, y_edges:
+        Spatial bin edges.
+    activity_sigma:
+        Gaussian smoothing sigma for rate map.
+
+    Returns
+    -------
+    np.ndarray
+        Smoothed rate map normalized to 0-1 range.
+    """
+    if unit_events.empty:
+        rate_map = np.full_like(occupancy_time, np.nan)
+        return rate_map
+
+    event_weights, _, _ = np.histogram2d(
+        unit_events["x"],
+        unit_events["y"],
+        bins=[x_edges, y_edges],
+        weights=unit_events["s"],
+    )
+    rate_map = np.zeros_like(occupancy_time)
+    rate_map[valid_mask] = event_weights[valid_mask] / occupancy_time[valid_mask]
+    rate_map_smooth = gaussian_filter_normalized(rate_map, sigma=activity_sigma)
+
+    # Normalize to 0-1 range
+    valid_rate_values = rate_map_smooth[valid_mask]
+    if len(valid_rate_values) > 0 and np.nanmax(valid_rate_values) > 0:
+        rate_map_smooth[valid_mask] = (
+            rate_map_smooth[valid_mask] - np.nanmin(valid_rate_values)
+        ) / (np.nanmax(valid_rate_values) - np.nanmin(valid_rate_values))
+    rate_map_smooth[~valid_mask] = np.nan
+
+    return rate_map_smooth
+
+
+def compute_spatial_information(
+    unit_events: pd.DataFrame,
+    trajectory_df: pd.DataFrame,
+    occupancy_time: np.ndarray,
+    valid_mask: np.ndarray,
+    x_edges: np.ndarray,
+    y_edges: np.ndarray,
+    n_shuffles: int = 100,
+    random_seed: int | None = None,
+) -> tuple[float, float, np.ndarray]:
+    """Compute spatial information and significance via shuffling.
+
+    Parameters
+    ----------
+    unit_events:
+        DataFrame with x, y, s, beh_frame_index columns for a single unit.
+    trajectory_df:
+        Speed-filtered trajectory with beh_frame_index column.
+    occupancy_time:
+        Occupancy time map.
+    valid_mask:
+        Valid occupancy mask.
+    x_edges, y_edges:
+        Spatial bin edges.
+    n_shuffles:
+        Number of shuffles for significance test.
+    random_seed:
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    tuple
+        (spatial_info, p_value, shuffled_sis)
+    """
+    if random_seed is not None:
+        np.random.seed(random_seed)
+
+    # Compute rate map (unsmoothed for SI calculation)
+    if unit_events.empty:
+        return 0.0, 1.0, np.zeros(n_shuffles)
+
+    event_weights, _, _ = np.histogram2d(
+        unit_events["x"],
+        unit_events["y"],
+        bins=[x_edges, y_edges],
+        weights=unit_events["s"],
+    )
+    rate_map = np.zeros_like(occupancy_time)
+    rate_map[valid_mask] = event_weights[valid_mask] / occupancy_time[valid_mask]
+
+    total_time = np.sum(occupancy_time[valid_mask])
+    total_events = np.sum(event_weights[valid_mask])
+
+    if total_time <= 0 or total_events <= 0:
+        return 0.0, 1.0, np.zeros(n_shuffles)
+
+    overall_lambda = total_events / total_time
+    P_i = np.zeros_like(occupancy_time)
+    P_i[valid_mask] = occupancy_time[valid_mask] / total_time
+
+    valid_si = (rate_map > 0) & valid_mask
+    if np.any(valid_si):
+        si_term = P_i[valid_si] * rate_map[valid_si] * np.log2(rate_map[valid_si] / overall_lambda)
+        actual_si = float(np.sum(si_term))
+    else:
+        actual_si = 0.0
+
+    # Shuffling test
+    traj_frames = trajectory_df["beh_frame_index"].values
+    u_grouped = unit_events.groupby("beh_frame_index")["s"].sum()
+    aligned_events = u_grouped.reindex(traj_frames, fill_value=0).values
+
+    shuffled_sis = []
+    for _ in range(n_shuffles):
+        shift = np.random.randint(len(aligned_events))
+        s_shuffled = np.roll(aligned_events, shift)
+
+        event_w_shuf, _, _ = np.histogram2d(
+            trajectory_df["x"],
+            trajectory_df["y"],
+            bins=[x_edges, y_edges],
+            weights=s_shuffled,
+        )
+        rate_shuf = np.zeros_like(occupancy_time)
+        rate_shuf[valid_mask] = event_w_shuf[valid_mask] / occupancy_time[valid_mask]
+
+        valid_s = (rate_shuf > 0) & valid_mask
+        if np.any(valid_s):
+            si_shuf = np.sum(
+                P_i[valid_s] * rate_shuf[valid_s] * np.log2(rate_shuf[valid_s] / overall_lambda)
+            )
+        else:
+            si_shuf = 0.0
+        shuffled_sis.append(si_shuf)
+
+    shuffled_sis = np.array(shuffled_sis)
+    p_val = np.sum(shuffled_sis >= actual_si) / n_shuffles
+
+    return actual_si, p_val, shuffled_sis
+
+
+def compute_unit_analysis(
+    unit_id: int,
+    df_filtered: pd.DataFrame,
+    trajectory_df: pd.DataFrame,
+    occupancy_time: np.ndarray,
+    valid_mask: np.ndarray,
+    x_edges: np.ndarray,
+    y_edges: np.ndarray,
+    activity_sigma: float = 1.0,
+    event_threshold_sigma: float = 2.0,
+    n_shuffles: int = 100,
+    random_seed: int | None = None,
+) -> dict:
+    """Compute rate map, spatial information, and thresholded events for a unit.
+
+    Parameters
+    ----------
+    unit_id:
+        Unit identifier.
+    df_filtered:
+        Speed-filtered event data with columns unit_id, x, y, s, beh_frame_index.
+    trajectory_df:
+        Speed-filtered trajectory with beh_frame_index column.
+    occupancy_time:
+        Occupancy time map.
+    valid_mask:
+        Valid occupancy mask.
+    x_edges, y_edges:
+        Spatial bin edges.
+    activity_sigma:
+        Gaussian smoothing sigma for rate map.
+    event_threshold_sigma:
+        Sigma multiplier for event amplitude threshold.
+    n_shuffles:
+        Number of shuffles for significance test.
+    random_seed:
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    dict
+        Analysis results with keys: rate_map, si, p_val, shuffled_sis,
+        events_above_threshold, vis_threshold.
+    """
+    unit_data = (
+        df_filtered[df_filtered["unit_id"] == unit_id] if not df_filtered.empty else pd.DataFrame()
+    )
+
+    # Rate map
+    rate_map = compute_rate_map(
+        unit_data, occupancy_time, valid_mask, x_edges, y_edges, activity_sigma
+    )
+
+    # Spatial information
+    si, p_val, shuffled_sis = compute_spatial_information(
+        unit_data,
+        trajectory_df,
+        occupancy_time,
+        valid_mask,
+        x_edges,
+        y_edges,
+        n_shuffles,
+        random_seed=random_seed,
+    )
+
+    # Event threshold for visualization
+    if not unit_data.empty and len(unit_data) > 1:
+        vis_threshold = unit_data["s"].mean() + event_threshold_sigma * unit_data["s"].std()
+        events_above = unit_data[unit_data["s"] > vis_threshold]
+    else:
+        vis_threshold = 0.0
+        events_above = pd.DataFrame()
+
+    return {
+        "rate_map": rate_map,
+        "si": si,
+        "p_val": p_val,
+        "shuffled_sis": shuffled_sis,
+        "events_above_threshold": events_above,
+        "vis_threshold": vis_threshold,
+        "unit_data": unit_data,
+    }
 
 
 def load_curated_unit_ids(curation_csv: Path) -> list[int]:
