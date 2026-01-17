@@ -43,6 +43,7 @@ flowchart LR
         K --> P
         L --> P
         N --> P
+        S --> P
         subgraph Spatial Analysis
             C --> I(Speed Filter)
             D --> I
@@ -51,7 +52,8 @@ flowchart LR
             H --> K(Rate Map)
             J --> K
             K --> L(Spatial Information)
-            L --> N(P-value Filter)
+            K --> S(Stability Test)
+            L --> N(Significance Test)
         end
 
         subgraph Display
@@ -115,6 +117,7 @@ Launches `pcell plot` with the processed data.
 - **Occupancy Map**: 2D histogram of time spent in each spatial bin
 - **Rate Map**: event counts / occupancy time, smoothed with `activity_sigma`
 - **Spatial Information**: bits/event using Skaggs formula with shuffle test
+- **Stability Test**: split-half correlation comparing first and second half rate maps
 - **P-value Filter**: if `p_value_threshold` is set, filter to significant units
 
 **Display:**
@@ -122,6 +125,7 @@ Launches `pcell plot` with the processed data.
 - Trajectory with event locations (only events above speed threshold)
 - Rate map (normalized event rate)
 - SI histogram (actual SI vs shuffle distribution)
+- Stability correlation with first/second half rate maps
 - Scrollable trace view at bottom
 
 ## Key Parameters
@@ -133,6 +137,7 @@ Launches `pcell plot` with the processed data.
 - `activity_sigma`: Gaussian smoothing sigma for rate map (in bins)
 - `n_shuffles`: number of shuffle iterations for p-value calculation
 - `p_value_threshold`: filter units by spatial information significance
+- `stability_threshold`: correlation threshold for stability test (compares first/second half rate maps)
 
 ## Configuration Reference
 
@@ -187,5 +192,6 @@ behavior:
     random_seed: 1
     event_threshold_sigma: 0  # Sigma multiplier for event amplitude threshold in trajectory visualization
     p_value_threshold: 0.05  # P-value threshold. Only units with p < threshold are plotted.
+    stability_threshold: 0.5  # Correlation threshold for stability test (first/second half rate maps)
 ```
 :::

@@ -74,6 +74,7 @@ behavior:
     activity_sigma: 3
     n_shuffles: 500
     p_value_threshold: 0.05
+    stability_threshold: 0.5
 ```
 :::
 
