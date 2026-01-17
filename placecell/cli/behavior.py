@@ -29,10 +29,10 @@ def behavior() -> None:
     help="YAML config file (full AppConfig or BehaviorConfig).",
 )
 @click.option(
-    "--behavior-path",
-    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
+    "--behavior-position",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
     required=True,
-    help="Directory containing behavior data (behavior_position.csv).",
+    help="Behavior position CSV file (behavior_position.csv).",
 )
 @click.option(
     "--output",
@@ -42,7 +42,7 @@ def behavior() -> None:
 )
 def trajectory(
     config: Path,
-    behavior_path: Path,
+    behavior_position: Path,
     output: Path | None,
 ) -> None:
     """Plot trajectory from behavior position data using config settings."""
@@ -62,8 +62,7 @@ def trajectory(
                 f"Failed to load config. Must be AppConfig or BehaviorConfig: {exc}"
             ) from exc
 
-    # Construct behavior position path
-    behavior_position = behavior_path / "behavior_position.csv"
+    # Verify file exists
     if not behavior_position.exists():
         raise click.ClickException(f"Behavior position file not found: {behavior_position}")
 

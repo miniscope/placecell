@@ -7,14 +7,15 @@ import click
 from mio.logging import init_logger
 
 from placecell.analysis import build_spike_place_dataframe
-from placecell.config import AppConfig, BehaviorConfig
+from placecell.config import AppConfig, BehaviorConfig, DataPathsConfig
 
 logger = init_logger(__name__)
 
 
 def _launch_browser(
     spike_place_csv: Path,
-    behavior_path: Path,
+    behavior_position: Path,
+    behavior_timestamp: Path,
     cfg: AppConfig,
     behavior_cfg: BehaviorConfig,
     neural_path: Path | None = None,
@@ -25,7 +26,8 @@ def _launch_browser(
 
     browse_place_cells(
         spike_place_csv=spike_place_csv,
-        behavior_path=behavior_path,
+        behavior_position=behavior_position,
+        behavior_timestamp=behavior_timestamp,
         bodypart=behavior_cfg.bodypart,
         neural_path=neural_path,
         spike_index_csv=spike_index_csv,
@@ -36,7 +38,7 @@ def _launch_browser(
         occupancy_sigma=behavior_cfg.spatial_map.occupancy_sigma,
         activity_sigma=behavior_cfg.spatial_map.activity_sigma,
         behavior_fps=behavior_cfg.behavior_fps,
-        neural_fps=cfg.neural.data.fps,
+        neural_fps=cfg.neural.fps,
         speed_window_frames=behavior_cfg.speed_window_frames,
         n_shuffles=behavior_cfg.spatial_map.n_shuffles,
         random_seed=behavior_cfg.spatial_map.random_seed,
@@ -103,16 +105,29 @@ def _run_spike_place(
     help="Spike index CSV from deconvolve step.",
 )
 @click.option(
-    "--neural-path",
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
-    required=True,
-    help="Directory containing neural_timestamp.csv.",
+    "--data",
+    "data_config",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="YAML file with data paths. Mutually exclusive with individual path options.",
 )
 @click.option(
-    "--behavior-path",
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
-    required=True,
-    help="Directory containing behavior_position.csv and behavior_timestamp.csv.",
+    "--neural-timestamp",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Neural timestamp CSV file (neural_timestamp.csv).",
+)
+@click.option(
+    "--behavior-position",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Behavior position CSV file (behavior_position.csv).",
+)
+@click.option(
+    "--behavior-timestamp",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Behavior timestamp CSV file (behavior_timestamp.csv).",
 )
 @click.option(
     "--out",
@@ -136,13 +151,27 @@ def _run_spike_place(
 def spike_place(
     config: Path,
     spike_index: Path,
-    neural_path: Path,
-    behavior_path: Path,
+    data_config: Path | None,
+    neural_timestamp: Path | None,
+    behavior_position: Path | None,
+    behavior_timestamp: Path | None,
     out: Path | None,
     start_idx: int,
     end_idx: int | None,
 ) -> None:
     """Match spikes to behavior positions."""
+    # --data and individual path options are mutually exclusive
+    if data_config and (neural_timestamp or behavior_position or behavior_timestamp):
+        raise click.ClickException(
+            "Cannot use --data with individual path options. Use one or the other."
+        )
+    if data_config:
+        paths = DataPathsConfig.from_yaml(data_config)
+        yaml_dir = data_config.parent
+        neural_timestamp = (yaml_dir / paths.neural_timestamp).resolve()
+        behavior_position = (yaml_dir / paths.behavior_position).resolve()
+        behavior_timestamp = (yaml_dir / paths.behavior_timestamp).resolve()
+
     if out is None:
         out = Path(f"output/spike_place_{_default_timestamp()}.csv")
 
@@ -152,9 +181,9 @@ def spike_place(
 
     _run_spike_place(
         spike_index=spike_index,
-        neural_timestamp=neural_path / "neural_timestamp.csv",
-        behavior_position=behavior_path / "behavior_position.csv",
-        behavior_timestamp=behavior_path / "behavior_timestamp.csv",
+        neural_timestamp=neural_timestamp,
+        behavior_position=behavior_position,
+        behavior_timestamp=behavior_timestamp,
         bodypart=cfg.behavior.bodypart,
         behavior_fps=cfg.behavior.behavior_fps,
         speed_threshold=cfg.behavior.speed_threshold,
@@ -179,16 +208,38 @@ def workflow() -> None:
     help="YAML config file defining analysis settings.",
 )
 @click.option(
-    "--neural-path",
-    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
-    required=True,
-    help="Directory containing neural data (C.zarr, neural_timestamp.csv).",
+    "--data",
+    "data_config",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help=(
+        "YAML file with data paths (neural_path, neural_timestamp, "
+        "behavior_position, behavior_timestamp). Mutually exclusive with individual path options."
+    ),
 )
 @click.option(
-    "--behavior-path",
+    "--neural-path",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
-    required=True,
-    help="Directory containing behavior data (behavior_position.csv, behavior_timestamp.csv).",
+    default=None,
+    help="Directory containing neural data (C.zarr, max_proj.zarr, A.zarr).",
+)
+@click.option(
+    "--neural-timestamp",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Neural timestamp CSV file (neural_timestamp.csv).",
+)
+@click.option(
+    "--behavior-position",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Behavior position CSV file (behavior_position.csv).",
+)
+@click.option(
+    "--behavior-timestamp",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Behavior timestamp CSV file (behavior_timestamp.csv).",
 )
 @click.option(
     "--out-dir",
@@ -218,8 +269,11 @@ def workflow() -> None:
 )
 def visualize(
     config: Path,
-    neural_path: Path,
-    behavior_path: Path,
+    data_config: Path | None,
+    neural_path: Path | None,
+    neural_timestamp: Path | None,
+    behavior_position: Path | None,
+    behavior_timestamp: Path | None,
     out_dir: Path,
     label: str | None,
     start_idx: int,
@@ -228,6 +282,22 @@ def visualize(
     """Run deconvolution, spike-place matching, and launch interactive plot."""
 
     import subprocess
+
+    # --data and individual path options are mutually exclusive
+    if data_config and (neural_path or neural_timestamp or behavior_position or behavior_timestamp):
+        raise click.ClickException(
+            "Cannot use --data with individual path options. Use one or the other."
+        )
+    curation_csv = None
+    if data_config:
+        paths = DataPathsConfig.from_yaml(data_config)
+        yaml_dir = data_config.parent
+        neural_path = (yaml_dir / paths.neural_path).resolve()
+        neural_timestamp = (yaml_dir / paths.neural_timestamp).resolve()
+        behavior_position = (yaml_dir / paths.behavior_position).resolve()
+        behavior_timestamp = (yaml_dir / paths.behavior_timestamp).resolve()
+        if paths.curation_csv is not None:
+            curation_csv = (yaml_dir / paths.curation_csv).resolve()
 
     cfg = AppConfig.from_yaml(config)
     if cfg.behavior is None:
@@ -242,19 +312,6 @@ def visualize(
     # Ensure output directory exists
     out_dir = out_dir.resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
-
-    # Construct paths from directories
-    neural_timestamp = neural_path / "neural_timestamp.csv"
-    behavior_position = behavior_path / "behavior_position.csv"
-    behavior_timestamp = behavior_path / "behavior_timestamp.csv"
-
-    # Verify files exist
-    if not neural_timestamp.exists():
-        raise click.ClickException(f"Neural timestamp file not found: {neural_timestamp}")
-    if not behavior_position.exists():
-        raise click.ClickException(f"Behavior position file not found: {behavior_position}")
-    if not behavior_timestamp.exists():
-        raise click.ClickException(f"Behavior timestamp file not found: {behavior_timestamp}")
 
     # 1) Deconvolution
     cmd1 = [
@@ -275,6 +332,8 @@ def visualize(
     ]
     if end_idx is not None:
         cmd1.extend(["--end-idx", str(end_idx)])
+    if curation_csv is not None:
+        cmd1.extend(["--curation-csv", str(curation_csv)])
     subprocess.run(cmd1, check=True)
 
     # 2) Spike-place (internal function)
@@ -293,7 +352,8 @@ def visualize(
     # 3) Interactive plot
     _launch_browser(
         spike_place_csv=out_dir / f"spike_place_{label}.csv",
-        behavior_path=behavior_path,
+        behavior_position=behavior_position,
+        behavior_timestamp=behavior_timestamp,
         cfg=cfg,
         behavior_cfg=cfg.behavior,
         neural_path=neural_path,
@@ -323,32 +383,60 @@ def visualize(
     help="Spike index CSV (optional, shows all spikes on trace plot).",
 )
 @click.option(
+    "--data",
+    "data_config",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="YAML file with data paths. Mutually exclusive with individual path options.",
+)
+@click.option(
     "--neural-path",
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
     default=None,
     help="Directory containing neural data (for traces and max projection).",
 )
 @click.option(
-    "--behavior-path",
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
-    required=True,
-    help="Directory containing behavior data (behavior_position.csv).",
+    "--behavior-position",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Behavior position CSV file (behavior_position.csv).",
+)
+@click.option(
+    "--behavior-timestamp",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Behavior timestamp CSV file (behavior_timestamp.csv).",
 )
 def plot(
     config: Path,
     spike_place_path: Path,
     spike_index_path: Path | None,
+    data_config: Path | None,
     neural_path: Path | None,
-    behavior_path: Path,
+    behavior_position: Path | None,
+    behavior_timestamp: Path | None,
 ) -> None:
     """Interactive matplotlib browser for place cells."""
+    # --data and individual path options are mutually exclusive
+    if data_config and (neural_path or behavior_position or behavior_timestamp):
+        raise click.ClickException(
+            "Cannot use --data with individual path options. Use one or the other."
+        )
+    if data_config:
+        paths = DataPathsConfig.from_yaml(data_config)
+        yaml_dir = data_config.parent
+        neural_path = (yaml_dir / paths.neural_path).resolve()
+        behavior_position = (yaml_dir / paths.behavior_position).resolve()
+        behavior_timestamp = (yaml_dir / paths.behavior_timestamp).resolve()
+
     cfg = AppConfig.from_yaml(config)
     if cfg.behavior is None:
         raise click.ClickException("Config file must include a 'behavior' section.")
 
     _launch_browser(
         spike_place_csv=spike_place_path,
-        behavior_path=behavior_path,
+        behavior_position=behavior_position,
+        behavior_timestamp=behavior_timestamp,
         cfg=cfg,
         behavior_cfg=cfg.behavior,
         neural_path=neural_path,

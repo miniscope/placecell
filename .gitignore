@@ -1,7 +1,6 @@
 export/
 output/
 user_data/
-placecell/assets/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
