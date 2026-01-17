@@ -1,9 +1,11 @@
 {
   "attributes": {
     "fps": 20.0,
-    "g": "estimated",
-    "s_min": 1.0,
-    "baseline": "p10"
+    "baseline": "p10",
+    "penalty": 0.0,
+    "s_min": 0.0,
+    "g1": 1.6,
+    "g2": -0.63
   },
   "zarr_format": 3,
   "consolidated_metadata": {

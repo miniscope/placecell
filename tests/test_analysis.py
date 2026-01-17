@@ -2,10 +2,17 @@
 
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+import pytest
 import xarray as xr
 
-from placecell.analysis import build_event_place_dataframe, load_traces
+from placecell.analysis import (
+    build_event_place_dataframe,
+    compute_behavior_speed,
+    load_curated_unit_ids,
+    load_traces,
+)
 
 
 def test_event_place_regression(assets_dir: Path) -> None:
@@ -15,8 +22,8 @@ def test_event_place_regression(assets_dir: Path) -> None:
         neural_timestamp_path=assets_dir / "neural_data" / "neural_timestamp.csv",
         behavior_position_path=assets_dir / "behavior" / "behavior_position.csv",
         behavior_timestamp_path=assets_dir / "behavior" / "behavior_timestamp.csv",
-        bodypart="LED",
-        behavior_fps=30.0,
+        bodypart="LED_clean",
+        behavior_fps=20.0,
         speed_threshold=0.0,
         speed_window_frames=5,
     )
@@ -47,3 +54,44 @@ def test_deconv_zarr_structure(assets_dir: Path) -> None:
     assert "C_deconv" in ds
     assert "S" in ds
     assert ds.attrs["fps"] == 20.0
+
+
+def test_compute_behavior_speed_shape(assets_dir: Path) -> None:
+    """compute_behavior_speed should return DataFrame with speed column."""
+    positions = pd.DataFrame({
+        "frame_index": [0, 1, 2, 3, 4],
+        "x": [0.0, 10.0, 20.0, 30.0, 40.0],
+        "y": [0.0, 0.0, 0.0, 0.0, 0.0],
+    })
+    timestamps = pd.DataFrame({
+        "frame_index": [0, 1, 2, 3, 4],
+        "unix_time": [0.0, 0.1, 0.2, 0.3, 0.4],
+    })
+
+    result = compute_behavior_speed(positions, timestamps, window_frames=2)
+
+    assert "speed" in result.columns
+    assert len(result) == 5
+    # Speed should be ~100 pixels/s (10 pixels / 0.1 s)
+    assert result["speed"].iloc[0] == pytest.approx(100.0, rel=0.01)
+
+
+def test_load_curated_unit_ids(assets_dir: Path) -> None:
+    """load_curated_unit_ids should filter and sort unit IDs."""
+    # Create a temporary curation CSV
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        f.write("unit_id,keep\n")
+        f.write("5,1\n")
+        f.write("2,0\n")
+        f.write("3,1\n")
+        f.write("1,1\n")
+        f.write("4,0\n")
+        temp_path = Path(f.name)
+
+    try:
+        result = load_curated_unit_ids(temp_path)
+        assert result == [1, 3, 5]  # Sorted, only keep=1
+    finally:
+        temp_path.unlink()
