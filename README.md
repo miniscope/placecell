@@ -1,40 +1,11 @@
 # placecell
 
-## Typical workflow
+Place cell analysis toolkit for calcium imaging data.
 
-### Needed data
-   - Minian: Calcium traces (`C.zarr`)
-   - mio: neural timestamp and behavior timestamp CSVs
-   - DeepLabCut: position CSV and `behavior_timestamp.csv`
+## Documentation
 
-### Analysis config
-   - Copy `placecell/assets/example_pcell_config.yaml` and adjust
+Full documentation available at: https://miniscope.github.io/placecell/
 
-### Run analysis
-Runs the full pipeline: deconvolution and spike-place matching.
-
-```bash
-pcell workflow visualize \
-  --config your_config.yaml \
-  --neural-path /path/to/neural \
-  --behavior-path /path/to/behavior \
-  --out-dir output
-```
-
-### Browse results
-Interactive matplotlib browser:
-
-```bash
-pcell plot \
-  --config your_config.yaml \
-  --spike-place output/spike_place_*.csv \
-  --neural-path /path/to/neural
-```
-
-### Individual steps
-Run steps separately if needed:
-
-```bash
-pcell deconvolve --help
-pcell spike-place --help
-```
+- [Installation](https://miniscope.github.io/placecell/installation.html)
+- [CLI Reference](https://miniscope.github.io/placecell/cli.html)
+- [Spatial Neural Activity Analysis](https://miniscope.github.io/placecell/visualization_workflow.html)
