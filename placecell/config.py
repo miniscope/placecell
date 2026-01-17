@@ -36,7 +36,7 @@ class OasisConfig(MiniscopeConfig, ConfigYAMLMixin):
     s_min: float | None = Field(
         None,
         description=[
-            "Minimum spike size threshold." "Look into oasis documentation for more details."
+            "Minimum event size threshold." "Look into oasis documentation for more details."
         ],
     )
 
@@ -100,10 +100,10 @@ class SpatialMapConfig(MiniscopeConfig, ConfigYAMLMixin):
         None,
         description="Random seed for reproducible shuffling. If None, results vary between runs.",
     )
-    spike_threshold_sigma: float = Field(
+    event_threshold_sigma: float = Field(
         ...,
-        description="Sigma multiplier for spike amplitude threshold in trajectory plot. "
-        "Can be negative to include lower-amplitude spikes.",
+        description="Sigma multiplier for event amplitude threshold in trajectory plot. "
+        "Can be negative to include lower-amplitude events.",
     )
     p_value_threshold: float | None = Field(
         None,
@@ -124,12 +124,12 @@ class BehaviorConfig(MiniscopeConfig, ConfigYAMLMixin):
         gt=0.0,
         description=(
             "Behavior data sampling rate in frames per second. "
-            "Required for spike-place matching."
+            "Required for event-place matching."
         ),
     )
     speed_threshold: float = Field(
         50.0,
-        description="Minimum running speed to keep spikes (pixels/s or cm/s).",
+        description="Minimum running speed to keep events (pixels/s or cm/s).",
     )
     speed_window_frames: int = Field(
         5,

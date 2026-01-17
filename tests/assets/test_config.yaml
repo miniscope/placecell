@@ -23,5 +23,5 @@ behavior:
     activity_sigma: 1.0
     n_shuffles: 100
     random_seed: null
-    spike_threshold_sigma: 2.0
+    event_threshold_sigma: 2.0
     p_value_threshold: 0.05

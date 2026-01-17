@@ -313,14 +313,14 @@ def _display_occupancy_preview(
 def _compute_unit_analysis(
     unit_id: int,
     df_filtered: pd.DataFrame,
-    df_all_spikes: pd.DataFrame | None,
+    df_all_events: pd.DataFrame | None,
     trajectory_df: pd.DataFrame,
     occupancy_time: np.ndarray,
     valid_mask: np.ndarray,
     x_edges: np.ndarray,
     y_edges: np.ndarray,
     activity_sigma: float,
-    spike_threshold_sigma: float,
+    event_threshold_sigma: float,
     n_shuffles: int,
     traces: Any,
     trace_fps: float,
@@ -333,9 +333,9 @@ def _compute_unit_analysis(
     unit_id : int
         Unit identifier.
     df_filtered : pd.DataFrame
-        Speed-filtered spike data.
-    df_all_spikes : pd.DataFrame or None
-        All spikes data (for trace visualization).
+        Speed-filtered event data.
+    df_all_events : pd.DataFrame or None
+        All events data (for trace visualization).
     trajectory_df : pd.DataFrame
         Speed-filtered trajectory.
     occupancy_time : np.ndarray
@@ -346,7 +346,7 @@ def _compute_unit_analysis(
         Spatial bin edges.
     activity_sigma : float
         Gaussian smoothing sigma for rate map.
-    spike_threshold_sigma : float
+    event_threshold_sigma : float
         Sigma multiplier for visualization threshold.
     n_shuffles : int
         Number of shuffles for significance test.
@@ -365,14 +365,14 @@ def _compute_unit_analysis(
     )
 
     # Rate map
-    spike_weights, _, _ = np.histogram2d(
+    event_weights, _, _ = np.histogram2d(
         unit_data["x"],
         unit_data["y"],
         bins=[x_edges, y_edges],
         weights=unit_data["s"],
     )
     rate_map = np.zeros_like(occupancy_time)
-    rate_map[valid_mask] = spike_weights[valid_mask] / occupancy_time[valid_mask]
+    rate_map[valid_mask] = event_weights[valid_mask] / occupancy_time[valid_mask]
     rate_map_smooth = _gaussian_filter_normalized(rate_map, sigma=activity_sigma)
 
     # Normalize to 0-1 range
@@ -384,13 +384,13 @@ def _compute_unit_analysis(
     rate_map_smooth[~valid_mask] = np.nan
 
     # Visualization threshold
-    vis_thresh = unit_data["s"].mean() + spike_threshold_sigma * unit_data["s"].std()
+    vis_thresh = unit_data["s"].mean() + event_threshold_sigma * unit_data["s"].std()
     total_time = np.sum(occupancy_time[valid_mask])
-    total_spikes = np.sum(spike_weights[valid_mask])
+    total_events = np.sum(event_weights[valid_mask])
 
     # Spatial information calculation
-    if total_time > 0 and total_spikes > 0:
-        overall_lambda = total_spikes / total_time
+    if total_time > 0 and total_events > 0:
+        overall_lambda = total_events / total_time
         P_i = np.zeros_like(occupancy_time)
         P_i[valid_mask] = occupancy_time[valid_mask] / total_time
 
@@ -406,21 +406,21 @@ def _compute_unit_analysis(
         # Shuffling test
         traj_frames = trajectory_df["beh_frame_index"].values
         u_grouped = unit_data.groupby("beh_frame_index")["s"].sum()
-        aligned_spikes = u_grouped.reindex(traj_frames, fill_value=0).values
+        aligned_events = u_grouped.reindex(traj_frames, fill_value=0).values
 
         shuffled_sis = []
         for _ in range(n_shuffles):
-            shift = np.random.randint(len(aligned_spikes))
-            s_shuffled = np.roll(aligned_spikes, shift)
+            shift = np.random.randint(len(aligned_events))
+            s_shuffled = np.roll(aligned_events, shift)
 
-            spike_w_shuf, _, _ = np.histogram2d(
+            event_w_shuf, _, _ = np.histogram2d(
                 trajectory_df["x"],
                 trajectory_df["y"],
                 bins=[x_edges, y_edges],
                 weights=s_shuffled,
             )
             rate_shuf = np.zeros_like(occupancy_time)
-            rate_shuf[valid_mask] = spike_w_shuf[valid_mask] / occupancy_time[valid_mask]
+            rate_shuf[valid_mask] = event_w_shuf[valid_mask] / occupancy_time[valid_mask]
 
             valid_s = (rate_shuf > 0) & valid_mask
             if np.any(valid_s):
@@ -441,9 +441,9 @@ def _compute_unit_analysis(
     # Visualization data
     vis_data_above = unit_data[unit_data["s"] > vis_thresh]
     vis_data_below = pd.DataFrame()
-    if df_all_spikes is not None:
-        unit_all_spikes = df_all_spikes[df_all_spikes["unit_id"] == unit_id]
-        vis_data_below = unit_all_spikes[unit_all_spikes["s"] > vis_thresh]
+    if df_all_events is not None:
+        unit_all_events = df_all_events[df_all_events["unit_id"] == unit_id]
+        vis_data_below = unit_all_events[unit_all_events["s"] > vis_thresh]
 
     # Trace data
     trace_data = None
@@ -646,12 +646,12 @@ def plot_max_projection_with_unit_footprint(
 
 
 def browse_place_cells(
-    spike_place_csv: str | Path,
+    event_place_csv: str | Path,
     behavior_position: str | Path,
     behavior_timestamp: str | Path,
     bodypart: str,
     neural_path: str | Path | None = None,
-    spike_index_csv: str | Path | None = None,
+    event_index_csv: str | Path | None = None,
     trace_name: str = "C",
     speed_threshold: float = 1.0,
     min_occupancy: float = 0.1,
@@ -664,14 +664,14 @@ def browse_place_cells(
     n_shuffles: int = 100,
     random_seed: int | None = None,
     trace_time_window: float = 600.0,
-    spike_threshold_sigma: float = 2.0,
+    event_threshold_sigma: float = 2.0,
     p_value_threshold: float | None = None,
 ) -> None:
     """
     Interactive browser for place cell analysis with keyboard navigation.
 
     Layout:
-    - Top row (4 quarters): Max projection, Trajectory+spikes, Rate map, SI histogram
+    - Top row (4 quarters): Max projection, Trajectory+events, Rate map, SI histogram
     - Bottom row (full width): Trace
 
     Navigation:
@@ -680,8 +680,8 @@ def browse_place_cells(
 
     Parameters
     ----------
-    spike_place_csv : str or Path
-        Path to spike_place CSV file (speed-filtered).
+    event_place_csv : str or Path
+        Path to event_place CSV file (speed-filtered).
     behavior_position : str or Path
         Path to behavior position CSV file (behavior_position.csv).
     behavior_timestamp : str or Path
@@ -690,8 +690,8 @@ def browse_place_cells(
         Body part name to use for trajectory (e.g. "LED").
     neural_path : str or Path, optional
         Path to neural data directory (for traces and max projection).
-    spike_index_csv : str or Path, optional
-        Path to spike_index CSV (all spikes). If provided, shows all spikes on trace plot (gray).
+    event_index_csv : str or Path, optional
+        Path to event_index CSV (all events). If provided, shows all events on trace plot (gray).
     trace_name : str
         Name of trace zarr to load (default "C").
     speed_threshold : float
@@ -714,8 +714,8 @@ def browse_place_cells(
         Time window for trace display in seconds (default 600.0, i.e., 10 minutes).
     random_seed : int, optional
         Random seed for reproducible shuffling. If None, results vary between runs.
-    spike_threshold_sigma : float
-        Sigma multiplier for spike amplitude threshold in trajectory visualization (default 2.0).
+    event_threshold_sigma : float
+        Sigma multiplier for event amplitude threshold in trajectory visualization (default 2.0).
     """
     if plt is None:
         raise ImportError(
@@ -726,14 +726,14 @@ def browse_place_cells(
     if random_seed is not None:
         np.random.seed(random_seed)
 
-    # Load spike data
-    df = pd.read_csv(spike_place_csv)
+    # Load event data
+    df = pd.read_csv(event_place_csv)
     df_filtered = df[df["speed"] > speed_threshold].copy()
 
-    # Load all spikes from spike_index if provided (for trace plot only)
-    df_all_spikes = None
-    if spike_index_csv is not None:
-        df_all_spikes = pd.read_csv(spike_index_csv)
+    # Load all events from event_index if provided (for trace plot only)
+    df_all_events = None
+    if event_index_csv is not None:
+        df_all_events = pd.read_csv(event_index_csv)
 
     # Load behavior data
     trajectory_with_speed, trajectory_df = _load_behavior_data(
@@ -783,14 +783,14 @@ def browse_place_cells(
         unit_results[unit_id] = _compute_unit_analysis(
             unit_id=unit_id,
             df_filtered=df_filtered,
-            df_all_spikes=df_all_spikes,
+            df_all_events=df_all_events,
             trajectory_df=trajectory_df,
             occupancy_time=occupancy_time,
             valid_mask=valid_mask,
             x_edges=x_edges,
             y_edges=y_edges,
             activity_sigma=activity_sigma,
-            spike_threshold_sigma=spike_threshold_sigma,
+            event_threshold_sigma=event_threshold_sigma,
             n_shuffles=n_shuffles,
             traces=traces,
             trace_fps=trace_fps,
@@ -892,7 +892,7 @@ def browse_place_cells(
                 zorder=2,
             )
 
-        ax2.set_title(f"Trajectory ({len(vis_data_above)} spikes)")
+        ax2.set_title(f"Trajectory ({len(vis_data_above)} events)")
         ax2.set_aspect("equal")
         ax2.axis("off")
 
@@ -947,31 +947,31 @@ def browse_place_cells(
             event_times_red = []
             event_amplitudes_red = []
 
-            # Gray: all deconvolved events from spike_index (below speed threshold)
-            if df_all_spikes is not None:
-                unit_all_spikes = df_all_spikes[df_all_spikes["unit_id"] == unit_id]
-                has_frame = "frame" in unit_all_spikes.columns
-                has_amp = "s" in unit_all_spikes.columns
-                if has_frame and has_amp and not unit_all_spikes.empty:
-                    spike_frames = unit_all_spikes["frame"].values
-                    spike_amplitudes = unit_all_spikes["s"].values
-                    spike_times = spike_frames / trace_fps
-                    spike_mask = (spike_times >= t_start) & (spike_times <= t_end)
-                    if np.any(spike_mask):
-                        event_times_gray = spike_times[spike_mask]
-                        event_amplitudes_gray = spike_amplitudes[spike_mask]
+            # Gray: all deconvolved events from event_index (below speed threshold)
+            if df_all_events is not None:
+                unit_all_events = df_all_events[df_all_events["unit_id"] == unit_id]
+                has_frame = "frame" in unit_all_events.columns
+                has_amp = "s" in unit_all_events.columns
+                if has_frame and has_amp and not unit_all_events.empty:
+                    event_frames = unit_all_events["frame"].values
+                    event_amplitudes = unit_all_events["s"].values
+                    event_times = event_frames / trace_fps
+                    event_mask = (event_times >= t_start) & (event_times <= t_end)
+                    if np.any(event_mask):
+                        event_times_gray = event_times[event_mask]
+                        event_amplitudes_gray = event_amplitudes[event_mask]
 
-            # Red: deconvolved events from spike_place (above speed threshold)
+            # Red: deconvolved events from event_place (above speed threshold)
             vis_data_above = result["vis_data_above"]
             has_required_cols = "frame" in vis_data_above.columns and "s" in vis_data_above.columns
             if has_required_cols and not vis_data_above.empty:
-                spike_frames = vis_data_above["frame"].values
-                spike_amplitudes = vis_data_above["s"].values
-                spike_times = spike_frames / trace_fps
-                spike_mask = (spike_times >= t_start) & (spike_times <= t_end)
-                if np.any(spike_mask):
-                    event_times_red = spike_times[spike_mask]
-                    event_amplitudes_red = spike_amplitudes[spike_mask]
+                event_frames = vis_data_above["frame"].values
+                event_amplitudes = vis_data_above["s"].values
+                event_times = event_frames / trace_fps
+                event_mask = (event_times >= t_start) & (event_times <= t_end)
+                if np.any(event_mask):
+                    event_times_red = event_times[event_mask]
+                    event_amplitudes_red = event_amplitudes[event_mask]
 
             # Plot deconvolved events as vertical spikes with height proportional to amplitude
             y_min, y_max = ax5.get_ylim()

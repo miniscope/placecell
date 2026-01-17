@@ -46,10 +46,10 @@ def _default_label() -> str:
     help="Label used in output filenames. Defaults to timestamp.",
 )
 @click.option(
-    "--spike-index-out",
+    "--event-index-out",
     type=click.Path(dir_okay=False, path_type=Path),
     default=None,
-    help="CSV file to write spike indices. Defaults to <out-dir>/spike_index_<label>.csv",
+    help="CSV file to write event indices. Defaults to <out-dir>/event_index_<label>.csv",
 )
 @click.option(
     "--start-idx",
@@ -75,7 +75,7 @@ def deconvolve(
     neural_path: Path,
     out_dir: Path,
     label: str | None,
-    spike_index_out: Path | None,
+    event_index_out: Path | None,
     start_idx: int,
     end_idx: int | None,
     curation_csv: Path | None,
@@ -105,8 +105,8 @@ def deconvolve(
     out_dir = out_dir.resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    if spike_index_out is None:
-        spike_index_out = out_dir / f"spike_index_{label}.csv"
+    if event_index_out is None:
+        event_index_out = out_dir / f"event_index_{label}.csv"
 
     logger.info(f"Using neural data at: {neural_path}")
 
@@ -230,16 +230,16 @@ def deconvolve(
     logger.info(f"Saving deconvolution results to: {out_path}")
     ds.to_zarr(out_path, mode="w")
 
-    # Write spike-index CSV
-    spike_index_out = spike_index_out.resolve()
-    spike_index_out.parent.mkdir(parents=True, exist_ok=True)
-    with spike_index_out.open("w", encoding="utf-8") as f:
+    # Write event-index CSV
+    event_index_out = event_index_out.resolve()
+    event_index_out.parent.mkdir(parents=True, exist_ok=True)
+    with event_index_out.open("w", encoding="utf-8") as f:
         f.write("unit_id,frame,s\n")
         for i, uid in enumerate(unit_idx):
             s_vec = S[i]
             frames = np.nonzero(s_vec > 0)[0]
             for fr in frames:
                 f.write(f"{int(uid)},{int(fr)},{float(s_vec[fr])}\n")
-    logger.info(f"Wrote spike index CSV to: {spike_index_out}")
+    logger.info(f"Wrote event index CSV to: {event_index_out}")
 
     logger.info("Done.")

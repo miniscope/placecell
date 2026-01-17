@@ -2,12 +2,15 @@
 
 Place cell analysis toolkit for calcium imaging data.
 
+Extracts neural events from calcium traces, aligns them with animal behavior, and computes spatial tuning metrics including rate maps and spatial information.
+
 ## Getting Started
 
 ```{toctree}
 :maxdepth: 1
 
 installation
+quickstart
 ```
 
 ## User Guide
@@ -15,7 +18,7 @@ installation
 ```{toctree}
 :maxdepth: 1
 
-Spatial neural activity analysis <spatial_analysis>
+Pipeline details <pipeline>
 cli
 ```
 

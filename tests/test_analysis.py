@@ -5,13 +5,13 @@ from pathlib import Path
 import pandas as pd
 import xarray as xr
 
-from placecell.analysis import build_spike_place_dataframe, load_traces
+from placecell.analysis import build_event_place_dataframe, load_traces
 
 
-def test_spike_place_regression(assets_dir: Path) -> None:
-    """spike_index → spike_place should match reference output."""
-    result = build_spike_place_dataframe(
-        spike_index_path=assets_dir / "reference_spike_index.csv",
+def test_event_place_regression(assets_dir: Path) -> None:
+    """event_index → event_place should match reference output."""
+    result = build_event_place_dataframe(
+        event_index_path=assets_dir / "reference_event_index.csv",
         neural_timestamp_path=assets_dir / "neural_data" / "neural_timestamp.csv",
         behavior_position_path=assets_dir / "behavior" / "behavior_position.csv",
         behavior_timestamp_path=assets_dir / "behavior" / "behavior_timestamp.csv",
@@ -21,7 +21,7 @@ def test_spike_place_regression(assets_dir: Path) -> None:
         speed_window_frames=5,
     )
 
-    reference = pd.read_csv(assets_dir / "reference_spike_place.csv")
+    reference = pd.read_csv(assets_dir / "reference_event_place.csv")
 
     # Same shape and columns
     assert list(result.columns) == list(reference.columns)

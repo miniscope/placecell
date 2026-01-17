@@ -119,8 +119,8 @@ def compute_behavior_speed(
     return df
 
 
-def build_spike_place_dataframe(
-    spike_index_path: Path,
+def build_event_place_dataframe(
+    event_index_path: Path,
     neural_timestamp_path: Path,
     behavior_position_path: Path,
     behavior_timestamp_path: Path,
@@ -130,21 +130,21 @@ def build_spike_place_dataframe(
     speed_window_frames: int = 5,
     use_neural_last_timestamp: bool = True,
 ) -> pd.DataFrame:
-    """Match spikes to behavior positions for place-cell analysis.
+    """Match neural events to behavior positions for place-cell analysis.
 
     This function:
-    - Reads spike index CSV (columns: unit_id, frame, s)
+    - Reads event index CSV (columns: unit_id, frame, s)
     - Reads neural frame timestamps CSV (columns: frame, timestamp_first, timestamp_last)
     - Reads behavior position CSV (DeepLabCut format with multi-index header)
     - Reads behavior timestamp CSV (columns: frame_index, unix_time)
-    - For each spike, finds the closest behavior frame in time
+    - For each event, finds the closest behavior frame in time
     - Filters out matches where timestamp difference exceeds threshold (0.5 / behavior_fps)
     - Filters out samples where running speed is below `speed_threshold`
 
     Parameters
     ----------
-    spike_index_path:
-        Path to spike index CSV file (columns: unit_id, frame, s).
+    event_index_path:
+        Path to event index CSV file (columns: unit_id, frame, s).
     neural_timestamp_path:
         Path to neural timestamp CSV file (columns: frame, timestamp_first, timestamp_last).
     behavior_position_path:
@@ -155,9 +155,9 @@ def build_spike_place_dataframe(
         Body part name to use for position tracking (e.g. 'LED').
     behavior_fps:
         Frames per second for behavior data. Required. Used to set timestamp
-        difference threshold (0.5 / behavior_fps) for matching spikes to behavior frames.
+        difference threshold (0.5 / behavior_fps) for matching events to behavior frames.
     speed_threshold:
-        Minimum running speed to keep spikes (pixels/s).
+        Minimum running speed to keep events (pixels/s).
     speed_window_frames:
         Number of frames to use for speed calculation window.
     use_neural_last_timestamp:
@@ -168,7 +168,7 @@ def build_spike_place_dataframe(
     DataFrame with columns:
       - unit_id: Unit identifier
       - frame: Neural frame number
-      - s: Spike amplitude
+      - s: Event amplitude
       - neural_time: Neural timestamp (seconds)
       - beh_frame_index: Behavior frame index
       - beh_time: Behavior timestamp (seconds, unix time)
@@ -177,7 +177,7 @@ def build_spike_place_dataframe(
       - speed: Running speed (pixels/s)
     """
 
-    spike_df = pd.read_csv(spike_index_path)
+    event_df = pd.read_csv(event_index_path)
 
     neural_ts = pd.read_csv(neural_timestamp_path)
     ts_col = "timestamp_last" if use_neural_last_timestamp else "timestamp_first"
@@ -201,29 +201,29 @@ def build_spike_place_dataframe(
         }
     )
 
-    # Merge spikes with neural timestamps
-    spikes = spike_df.merge(neural_ts, on="frame", how="left")
+    # Merge events with neural timestamps
+    events = event_df.merge(neural_ts, on="frame", how="left")
 
-    # For each spike, find nearest behavior frame in time
+    # For each event, find nearest behavior frame in time
     beh_times = beh[["beh_frame_index", "beh_time", "x", "y", "speed"]]
     beh_times = beh_times.sort_values("beh_time").reset_index(drop=True)
 
-    spike_times = spikes["neural_time"].to_numpy()
+    event_times = events["neural_time"].to_numpy()
     beh_time_arr = beh_times["beh_time"].to_numpy()
 
     # Timestamp difference threshold: half the sampling time
     time_threshold = 0.5 / behavior_fps
 
-    # Find nearest behavior frame for each spike
-    idx = np.searchsorted(beh_time_arr, spike_times, side="left")
+    # Find nearest behavior frame for each event
+    idx = np.searchsorted(beh_time_arr, event_times, side="left")
     idx_clipped = np.clip(idx, 0, len(beh_time_arr) - 1)
 
     # Check both left and right neighbors to find the closest
     idx_left = idx_clipped
     idx_right = np.clip(idx_clipped + 1, 0, len(beh_time_arr) - 1)
 
-    time_diff_left = np.abs(spike_times - beh_time_arr[idx_left])
-    time_diff_right = np.abs(spike_times - beh_time_arr[idx_right])
+    time_diff_left = np.abs(event_times - beh_time_arr[idx_left])
+    time_diff_right = np.abs(event_times - beh_time_arr[idx_right])
 
     # Choose the closer neighbor
     use_right = time_diff_right < time_diff_left
@@ -231,7 +231,7 @@ def build_spike_place_dataframe(
     time_diff_final = np.where(use_right, time_diff_right, time_diff_left)
 
     beh_matched = beh_times.iloc[idx_final].reset_index(drop=True)
-    out = pd.concat([spikes.reset_index(drop=True), beh_matched], axis=1)
+    out = pd.concat([events.reset_index(drop=True), beh_matched], axis=1)
 
     # Filter by timestamp difference threshold
     out = out[time_diff_final <= time_threshold].reset_index(drop=True)

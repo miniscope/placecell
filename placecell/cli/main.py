@@ -3,7 +3,7 @@
 import click
 from mio.logging import init_logger
 
-from placecell.cli.analysis import plot, spike_place, workflow
+from placecell.cli.analysis import event_place, plot, workflow
 from placecell.cli.behavior import behavior
 from placecell.cli.deconvolve import deconvolve
 
@@ -22,7 +22,7 @@ def placecell(verbose: bool) -> None:
 
 # Register all command groups
 placecell.add_command(deconvolve)
-placecell.add_command(spike_place)
+placecell.add_command(event_place)
 placecell.add_command(plot)
 placecell.add_command(workflow)
 placecell.add_command(behavior)

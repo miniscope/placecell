@@ -6,31 +6,31 @@ from pathlib import Path
 import click
 from mio.logging import init_logger
 
-from placecell.analysis import build_spike_place_dataframe
+from placecell.analysis import build_event_place_dataframe
 from placecell.config import AppConfig, BehaviorConfig, DataPathsConfig
 
 logger = init_logger(__name__)
 
 
 def _launch_browser(
-    spike_place_csv: Path,
+    event_place_csv: Path,
     behavior_position: Path,
     behavior_timestamp: Path,
     cfg: AppConfig,
     behavior_cfg: BehaviorConfig,
     neural_path: Path | None = None,
-    spike_index_csv: Path | None = None,
+    event_index_csv: Path | None = None,
 ) -> None:
     """Launch the interactive place cell browser with config settings."""
     from placecell.visualization import browse_place_cells
 
     browse_place_cells(
-        spike_place_csv=spike_place_csv,
+        event_place_csv=event_place_csv,
         behavior_position=behavior_position,
         behavior_timestamp=behavior_timestamp,
         bodypart=behavior_cfg.bodypart,
         neural_path=neural_path,
-        spike_index_csv=spike_index_csv,
+        event_index_csv=event_index_csv,
         trace_name=cfg.neural.trace_name,
         speed_threshold=behavior_cfg.speed_threshold,
         min_occupancy=behavior_cfg.spatial_map.min_occupancy,
@@ -42,7 +42,7 @@ def _launch_browser(
         speed_window_frames=behavior_cfg.speed_window_frames,
         n_shuffles=behavior_cfg.spatial_map.n_shuffles,
         random_seed=behavior_cfg.spatial_map.random_seed,
-        spike_threshold_sigma=behavior_cfg.spatial_map.spike_threshold_sigma,
+        event_threshold_sigma=behavior_cfg.spatial_map.event_threshold_sigma,
         p_value_threshold=behavior_cfg.spatial_map.p_value_threshold,
     )
 
@@ -51,8 +51,8 @@ def _default_timestamp() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
-def _run_spike_place(
-    spike_index: Path,
+def _run_event_place(
+    event_index: Path,
     neural_timestamp: Path,
     behavior_position: Path,
     behavior_timestamp: Path,
@@ -64,10 +64,10 @@ def _run_spike_place(
     start_idx: int = 0,
     end_idx: int | None = None,
 ) -> None:
-    """Internal function: Match spikes to behavior positions and write CSV."""
+    """Internal function: Match events to behavior positions and write CSV."""
 
-    df = build_spike_place_dataframe(
-        spike_index_path=spike_index,
+    df = build_event_place_dataframe(
+        event_index_path=event_index,
         neural_timestamp_path=neural_timestamp,
         behavior_position_path=behavior_position,
         behavior_timestamp_path=behavior_timestamp,
@@ -91,7 +91,7 @@ def _run_spike_place(
     logger.info(f"Wrote {len(df)} rows for units {start_idx}-{end_idx} to {out_file}")
 
 
-@click.command(name="spike-place")
+@click.command(name="event-place")
 @click.option(
     "--config",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -99,10 +99,10 @@ def _run_spike_place(
     help="YAML config file with behavior settings.",
 )
 @click.option(
-    "--spike-index",
+    "--event-index",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     required=True,
-    help="Spike index CSV from deconvolve step.",
+    help="Event index CSV from deconvolve step.",
 )
 @click.option(
     "--data",
@@ -133,7 +133,7 @@ def _run_spike_place(
     "--out",
     type=click.Path(dir_okay=False, path_type=Path),
     default=None,
-    help="Output CSV path. Defaults to output/spike_place_<timestamp>.csv",
+    help="Output CSV path. Defaults to output/event_place_<timestamp>.csv",
 )
 @click.option(
     "--start-idx",
@@ -148,9 +148,9 @@ def _run_spike_place(
     default=None,
     help="End unit index (inclusive). Defaults to last unit.",
 )
-def spike_place(
+def event_place(
     config: Path,
-    spike_index: Path,
+    event_index: Path,
     data_config: Path | None,
     neural_timestamp: Path | None,
     behavior_position: Path | None,
@@ -159,7 +159,7 @@ def spike_place(
     start_idx: int,
     end_idx: int | None,
 ) -> None:
-    """Match spikes to behavior positions."""
+    """Match neural events to behavior positions."""
     # --data and individual path options are mutually exclusive
     if data_config and (neural_timestamp or behavior_position or behavior_timestamp):
         raise click.ClickException(
@@ -173,14 +173,14 @@ def spike_place(
         behavior_timestamp = (yaml_dir / paths.behavior_timestamp).resolve()
 
     if out is None:
-        out = Path(f"output/spike_place_{_default_timestamp()}.csv")
+        out = Path(f"output/event_place_{_default_timestamp()}.csv")
 
     cfg = AppConfig.from_yaml(config)
     if cfg.behavior is None:
         raise click.ClickException("Config file must include a 'behavior' section.")
 
-    _run_spike_place(
-        spike_index=spike_index,
+    _run_event_place(
+        event_index=event_index,
         neural_timestamp=neural_timestamp,
         behavior_position=behavior_position,
         behavior_timestamp=behavior_timestamp,
@@ -279,7 +279,7 @@ def visualize(
     start_idx: int,
     end_idx: int | None,
 ) -> None:
-    """Run deconvolution, spike-place matching, and launch interactive plot."""
+    """Run deconvolution, event-place matching, and launch interactive plot."""
 
     import subprocess
 
@@ -325,8 +325,8 @@ def visualize(
         str(out_dir),
         "--label",
         label,
-        "--spike-index-out",
-        str(out_dir / f"spike_index_{label}.csv"),
+        "--event-index-out",
+        str(out_dir / f"event_index_{label}.csv"),
         "--start-idx",
         str(start_idx),
     ]
@@ -336,9 +336,9 @@ def visualize(
         cmd1.extend(["--curation-csv", str(curation_csv)])
     subprocess.run(cmd1, check=True)
 
-    # 2) Spike-place (internal function)
-    _run_spike_place(
-        spike_index=out_dir / f"spike_index_{label}.csv",
+    # 2) Event-place (internal function)
+    _run_event_place(
+        event_index=out_dir / f"event_index_{label}.csv",
         neural_timestamp=neural_timestamp,
         behavior_position=behavior_position,
         behavior_timestamp=behavior_timestamp,
@@ -346,18 +346,18 @@ def visualize(
         behavior_fps=cfg.behavior.behavior_fps,
         speed_threshold=cfg.behavior.speed_threshold,
         speed_window_frames=cfg.behavior.speed_window_frames,
-        out_file=out_dir / f"spike_place_{label}.csv",
+        out_file=out_dir / f"event_place_{label}.csv",
     )
 
     # 3) Interactive plot
     _launch_browser(
-        spike_place_csv=out_dir / f"spike_place_{label}.csv",
+        event_place_csv=out_dir / f"event_place_{label}.csv",
         behavior_position=behavior_position,
         behavior_timestamp=behavior_timestamp,
         cfg=cfg,
         behavior_cfg=cfg.behavior,
         neural_path=neural_path,
-        spike_index_csv=out_dir / f"spike_index_{label}.csv",
+        event_index_csv=out_dir / f"event_index_{label}.csv",
     )
 
 
@@ -369,18 +369,18 @@ def visualize(
     help="YAML config file.",
 )
 @click.option(
-    "--spike-place",
-    "spike_place_path",
+    "--event-place",
+    "event_place_path",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     required=True,
-    help="Spike-place CSV file.",
+    help="Event-place CSV file.",
 )
 @click.option(
-    "--spike-index",
-    "spike_index_path",
+    "--event-index",
+    "event_index_path",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     default=None,
-    help="Spike index CSV (optional, shows all spikes on trace plot).",
+    help="Event index CSV (optional, shows all events on trace plot).",
 )
 @click.option(
     "--data",
@@ -409,8 +409,8 @@ def visualize(
 )
 def plot(
     config: Path,
-    spike_place_path: Path,
-    spike_index_path: Path | None,
+    event_place_path: Path,
+    event_index_path: Path | None,
     data_config: Path | None,
     neural_path: Path | None,
     behavior_position: Path | None,
@@ -434,11 +434,11 @@ def plot(
         raise click.ClickException("Config file must include a 'behavior' section.")
 
     _launch_browser(
-        spike_place_csv=spike_place_path,
+        event_place_csv=event_place_path,
         behavior_position=behavior_position,
         behavior_timestamp=behavior_timestamp,
         cfg=cfg,
         behavior_cfg=cfg.behavior,
         neural_path=neural_path,
-        spike_index_csv=spike_index_path,
+        event_index_csv=event_index_path,
     )

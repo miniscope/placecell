@@ -8,10 +8,10 @@ neural:
     id: oasis
     g: [1.60, -0.63]  # AR(2) coefficients, null to estimate from data
     baseline: p10
-    penalty: 0  # Sparsity penalty (higher = fewer spikes). Default 0.
+    penalty: 0  # Sparsity penalty (higher = fewer events). Default 0.
     optimize_g: 0  # Number of events to use for optimizing AR coefficients. 0 = no optimization (default).
     lambda_: null  # Regularization parameter. null = auto-determined.
-    s_min: null  # Minimum spike size. Positive = direct threshold, negative = calculated, 0 = auto, null = default.
+    s_min: null  # Minimum event size. Positive = direct threshold, negative = calculated, 0 = auto, null = default.
   trace_name: C_lp
   max_units: null  # Max units to process. null = process all units.
 behavior:
@@ -28,5 +28,5 @@ behavior:
     activity_sigma: 3  # Gaussian smoothing (in bins) for spatial activity map
     n_shuffles: 500
     random_seed: 1
-    spike_threshold_sigma: 0  # Sigma multiplier for spike amplitude threshold in trajectory visualization
+    event_threshold_sigma: 0  # Sigma multiplier for event amplitude threshold in trajectory visualization
     p_value_threshold: 0.05 # P-value threshold. Only units with p < threshold are plotted.
