@@ -5,7 +5,7 @@ description = "Package for analyzing place cells"
 license = {text = "AGPL-3.0"}
 readme = "README.md"
 
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.13"
 dependencies = [
     "numpy>=1.24.0",
     "pandas>=2.0.0",
@@ -22,6 +22,8 @@ dependencies = [
     "ipython>=9.9.0",
     "ipywidgets>=8.1.8",
     "ipympl>=0.10.0",
+    "ipykernel>=7.1.0",
+    "jupyterlab>=4.5.3",
 ]
 
 [project.optional-dependencies]
@@ -77,14 +79,14 @@ packages = ["placecell"]
 
 [tool.ruff]
 target-version = "py311"
-include = ["placecell/**/*.py", "pyproject.toml"]
+include = ["placecell/**/*.py", "notebook/**/*.ipynb", "pyproject.toml"]
 exclude = ["docs", "tests", "placecell/assets"]
 line-length = 100
 
 [tool.ruff.lint]
 select = [
     # pycodestyle
-    "E", 
+    "E",
     # Pyflakes
     "F",
     # pyupgrade
@@ -113,6 +115,13 @@ ignore = [
     "UP006", "UP035",
     "UP007",
     "D107",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"notebook/**/*.ipynb" = [
+    "E402",  # Module level import not at top of file - normal in notebooks
+    "ANN",   # Type annotations - not needed in notebooks
+    "D",     # Docstrings - not needed in notebooks
 ]
 
 [tool.black]
