@@ -402,7 +402,7 @@ def plot_summary_scatter(
     ]
     ax1.legend(handles=legend_elements, loc="upper right", fontsize=10)
 
-    # Right plot: SI vs Fisher Z
+    # Right plot: SI vs Fisher Z (same colors as left plot)
     ax2.scatter(
         si_vals,
         fisher_z,
@@ -410,7 +410,7 @@ def plot_summary_scatter(
         alpha=0.7,
         edgecolors="black",
         linewidths=0.5,
-        c="steelblue",
+        c=colors,
     )
 
     # Linear regression
