@@ -293,17 +293,17 @@ def plot_max_projection_with_unit_footprint(
     return fig
 
 
-def plot_significance_stability_scatter(
+def plot_summary_scatter(
     unit_results: dict,
     p_value_threshold: float = 0.05,
     stability_threshold: float = 0.5,
 ) -> "Figure":
-    """Create a 2D scatter plot of p-value significance vs stability correlation.
+    """Create side-by-side scatter plots: significance vs stability and SI vs Fisher Z.
 
     Parameters
     ----------
     unit_results : dict
-        Dictionary mapping unit_id to analysis results containing 'p_val' and 'stability_corr'.
+        Dictionary mapping unit_id to analysis results.
     p_value_threshold : float
         Threshold for significance test (default 0.05).
     stability_threshold : float
@@ -312,7 +312,7 @@ def plot_significance_stability_scatter(
     Returns
     -------
     Figure
-        Matplotlib figure with the scatter plot.
+        Matplotlib figure with two scatter plots side by side.
     """
     if plt is None:
         raise ImportError("matplotlib is required for plotting.")
@@ -320,6 +320,8 @@ def plot_significance_stability_scatter(
     unit_ids = list(unit_results.keys())
     p_vals = [unit_results[uid]["p_val"] for uid in unit_ids]
     stab_corrs = [unit_results[uid]["stability_corr"] for uid in unit_ids]
+    fisher_z = [unit_results[uid]["stability_z"] for uid in unit_ids]
+    si_vals = [unit_results[uid]["si"] for uid in unit_ids]
 
     # Determine colors based on pass/fail both tests
     colors = []
@@ -335,20 +337,20 @@ def plot_significance_stability_scatter(
         else:
             colors.append("red")  # Both fail
 
-    fig, ax = plt.subplots(figsize=(8, 6))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
 
-    # Plot scatter
-    ax.scatter(p_vals, stab_corrs, c=colors, s=50, alpha=0.7, edgecolors="black", linewidths=0.5)
+    # Left plot: Significance vs Stability
+    ax1.scatter(p_vals, stab_corrs, c=colors, s=50, alpha=0.7, edgecolors="black", linewidths=0.5)
 
     # Add threshold lines
-    ax.axvline(
+    ax1.axvline(
         p_value_threshold,
         color="gray",
         linestyle="--",
         linewidth=1.5,
         label=f"p={p_value_threshold}",
     )
-    ax.axhline(
+    ax1.axhline(
         stability_threshold,
         color="gray",
         linestyle=":",
@@ -357,27 +359,29 @@ def plot_significance_stability_scatter(
     )
 
     # Shade quadrants
-    xlim = ax.get_xlim()
-    ylim = ax.get_ylim()
+    xlim = ax1.get_xlim()
+    ylim = ax1.get_ylim()
     # Top-left (sig pass, stab pass) - green
-    ax.fill_between([0, p_value_threshold], stability_threshold, ylim[1], alpha=0.1, color="green")
+    ax1.fill_between([0, p_value_threshold], stability_threshold, ylim[1], alpha=0.1, color="green")
     # Top-right (sig fail, stab pass) - blue
-    ax.fill_between(
+    ax1.fill_between(
         [p_value_threshold, xlim[1]], stability_threshold, ylim[1], alpha=0.1, color="blue"
     )
     # Bottom-left (sig pass, stab fail) - orange
-    ax.fill_between([0, p_value_threshold], ylim[0], stability_threshold, alpha=0.1, color="orange")
+    ax1.fill_between(
+        [0, p_value_threshold], ylim[0], stability_threshold, alpha=0.1, color="orange"
+    )
     # Bottom-right (sig fail, stab fail) - red
-    ax.fill_between(
+    ax1.fill_between(
         [p_value_threshold, xlim[1]], ylim[0], stability_threshold, alpha=0.1, color="red"
     )
 
-    ax.set_xlim(xlim)
-    ax.set_ylim(ylim)
+    ax1.set_xlim(xlim)
+    ax1.set_ylim(ylim)
 
-    ax.set_xlabel("P-value (significance test)", fontsize=12)
-    ax.set_ylabel("Correlation (stability test)", fontsize=12)
-    ax.set_title("Significance vs Stability", fontsize=14, fontweight="bold")
+    ax1.set_xlabel("P-value (significance test)", fontsize=12)
+    ax1.set_ylabel("Correlation (stability test)", fontsize=12)
+    ax1.set_title("Significance vs Stability", fontsize=12)
 
     # Count units in each quadrant
     n_both = sum(1 for c in colors if c == "green")
@@ -394,7 +398,58 @@ def plot_significance_stability_scatter(
         Patch(facecolor="blue", edgecolor="black", label=f"Stab only: {n_stab_only}"),
         Patch(facecolor="red", edgecolor="black", label=f"Neither: {n_neither}"),
     ]
-    ax.legend(handles=legend_elements, loc="upper right", fontsize=10)
+    ax1.legend(handles=legend_elements, loc="upper right", fontsize=10)
+
+    # Right plot: SI vs Fisher Z (same colors as left plot)
+    ax2.scatter(
+        si_vals,
+        fisher_z,
+        s=50,
+        alpha=0.7,
+        edgecolors="black",
+        linewidths=0.5,
+        c=colors,
+    )
+
+    # Linear regression
+    si_arr = np.array(si_vals)
+    z_arr = np.array(fisher_z)
+    # Filter out NaN values for regression
+    valid_mask = ~(np.isnan(si_arr) | np.isnan(z_arr))
+    si_valid = si_arr[valid_mask]
+    z_valid = z_arr[valid_mask]
+
+    if len(si_valid) > 1:
+        # Compute linear regression
+        slope, intercept = np.polyfit(si_valid, z_valid, 1)
+        # Compute R²
+        y_pred = slope * si_valid + intercept
+        ss_res = np.sum((z_valid - y_pred) ** 2)
+        ss_tot = np.sum((z_valid - np.mean(z_valid)) ** 2)
+        r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+
+        # Plot regression line
+        x_line = np.array([si_valid.min(), si_valid.max()])
+        y_line = slope * x_line + intercept
+        ax2.plot(
+            x_line,
+            y_line,
+            color="red",
+            linestyle="-",
+            linewidth=2,
+            label=f"$R^2$ = {r_squared:.3f}",
+        )
+        ax2.legend(loc="upper right", fontsize=10)
+
+    ax2.set_xlabel("Spatial Information (bits/s)", fontsize=12)
+    ax2.set_ylabel("Fisher Z score (stability)", fontsize=12)
+    ax2.set_title("Spatial Information vs Stability (Fisher Z)", fontsize=12)
+
+    # Add grid for readability
+    ax2.grid(True, alpha=0.3, linestyle="--")
+
+    # Add zero line for Fisher Z reference
+    ax2.axhline(0, color="gray", linestyle=":", linewidth=1, alpha=0.5)
 
     plt.tight_layout()
     return fig
@@ -591,9 +646,9 @@ def browse_place_cells(
     # p_value_threshold is used to determine pass/fail status (not for filtering)
     # All units are shown, with significance test result displayed
 
-    # Show summary scatter plot of significance vs stability
+    # Show summary scatter plots (side by side)
     threshold_p = p_value_threshold if p_value_threshold is not None else 0.05
-    fig_scatter = plot_significance_stability_scatter(
+    fig_scatter = plot_summary_scatter(
         unit_results,
         p_value_threshold=threshold_p,
         stability_threshold=stability_threshold,
