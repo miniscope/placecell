@@ -177,6 +177,8 @@ def event_place(
         out = Path(f"output/event_place_{_default_timestamp()}.csv")
 
     cfg = AppConfig.from_yaml(config)
+    if data_config:
+        cfg = cfg.with_data_overrides(paths)
     if cfg.behavior is None:
         raise click.ClickException("Config file must include a 'behavior' section.")
 
@@ -301,6 +303,8 @@ def visualize(
             curation_csv = (yaml_dir / paths.curation_csv).resolve()
 
     cfg = AppConfig.from_yaml(config)
+    if data_config:
+        cfg = cfg.with_data_overrides(paths)
     if cfg.behavior is None:
         raise click.ClickException("Config file must include a 'behavior' section.")
 
@@ -431,6 +435,8 @@ def plot(
         behavior_timestamp = (yaml_dir / paths.behavior_timestamp).resolve()
 
     cfg = AppConfig.from_yaml(config)
+    if data_config:
+        cfg = cfg.with_data_overrides(paths)
     if cfg.behavior is None:
         raise click.ClickException("Config file must include a 'behavior' section.")
 

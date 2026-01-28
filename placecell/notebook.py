@@ -318,13 +318,21 @@ def create_unit_browser(
             if len(event_times_gray) > 0:
                 legend_elements.append(
                     Line2D(
-                        [0], [0], color="gray", linewidth=1.5, label=f"Events (< {speed_threshold:.0f} px/s)"
+                        [0],
+                        [0],
+                        color="gray",
+                        linewidth=1.5,
+                        label=f"Events (< {speed_threshold:.0f} px/s)",
                     )
                 )
             if len(event_times_red) > 0:
                 legend_elements.append(
                     Line2D(
-                        [0], [0], color="red", linewidth=1.5, label=f"Events (>= {speed_threshold:.0f} px/s)"
+                        [0],
+                        [0],
+                        color="red",
+                        linewidth=1.5,
+                        label=f"Events (>= {speed_threshold:.0f} px/s)",
                     )
                 )
             ax5.legend(handles=legend_elements, loc="upper left", fontsize=7, framealpha=0.9)
@@ -361,7 +369,14 @@ def create_unit_browser(
         txt = fig.text(0.30, 0.98, f"Sig (p={p_val:.3f}): ", ha="left", va="top", fontsize=8)
         text_annotations.append(txt)
         txt = fig.text(
-            0.44, 0.98, sig_text, ha="left", va="top", fontsize=8, fontweight="bold", color=sig_color
+            0.44,
+            0.98,
+            sig_text,
+            ha="left",
+            va="top",
+            fontsize=8,
+            fontweight="bold",
+            color=sig_color,
         )
         text_annotations.append(txt)
 
@@ -369,7 +384,14 @@ def create_unit_browser(
         txt = fig.text(0.52, 0.98, f"Stab ({stab_str}): ", ha="left", va="top", fontsize=8)
         text_annotations.append(txt)
         txt = fig.text(
-            0.68, 0.98, stab_text, ha="left", va="top", fontsize=8, fontweight="bold", color=stab_color
+            0.68,
+            0.98,
+            stab_text,
+            ha="left",
+            va="top",
+            fontsize=8,
+            fontweight="bold",
+            color=stab_color,
         )
         text_annotations.append(txt)
 
