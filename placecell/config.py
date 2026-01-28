@@ -169,6 +169,13 @@ class DataPathsConfig(MiniscopeConfig, ConfigYAMLMixin):
             "Only units with keep=1 will be processed. If None, all units are used."
         ),
     )
+    oasis: OasisConfig | None = Field(
+        None,
+        description=(
+            "Optional OASIS parameters to override main config for this dataset. "
+            "If provided, these values override the main config's neural.oasis settings."
+        ),
+    )
 
 
 class AppConfig(MiniscopeConfig, ConfigYAMLMixin):
@@ -176,3 +183,22 @@ class AppConfig(MiniscopeConfig, ConfigYAMLMixin):
 
     neural: NeuralConfig
     behavior: BehaviorConfig | None = None
+
+    def with_data_overrides(self, data_cfg: DataPathsConfig) -> "AppConfig":
+        """Create a new config with data-specific overrides applied.
+
+        Parameters
+        ----------
+        data_cfg : DataPathsConfig
+            Data configuration that may contain override values.
+
+        Returns
+        -------
+        AppConfig
+            New config with overrides applied. Original config is unchanged.
+        """
+        if data_cfg.oasis is not None:
+            # Override OASIS config with data-specific values
+            new_neural = self.neural.model_copy(update={"oasis": data_cfg.oasis})
+            return self.model_copy(update={"neural": new_neural})
+        return self

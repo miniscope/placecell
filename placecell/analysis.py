@@ -131,9 +131,8 @@ def compute_rate_map(
     # Normalize to 0-1 range
     valid_rate_values = rate_map_smooth[valid_mask]
     if len(valid_rate_values) > 0 and np.nanmax(valid_rate_values) > 0:
-        rate_map_smooth[valid_mask] = (
-            rate_map_smooth[valid_mask] - np.nanmin(valid_rate_values)
-        ) / (np.nanmax(valid_rate_values) - np.nanmin(valid_rate_values))
+        rate_map_smooth[valid_mask] = rate_map_smooth[valid_mask] / np.nanmax(valid_rate_values)
+
     rate_map_smooth[~valid_mask] = np.nan
 
     return rate_map_smooth

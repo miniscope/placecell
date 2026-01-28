@@ -7,7 +7,7 @@ neural:
   oasis:
     id: oasis
     g: [1.60, -0.63]  # AR(2) coefficients (required)
-    baseline: 0
+    baseline: p10
     penalty: 0  # Sparsity penalty (higher = fewer events). Default 0.
     s_min: 0  # Minimum event size threshold. Default 0.
   trace_name: C_lp
