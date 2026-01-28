@@ -6,9 +6,9 @@ neural:
   fps: 20.0
   oasis:
     id: oasis
-    g: [1.60, -0.63]  # AR(2) coefficients (required)
-    baseline: 0
-    penalty: 0  # Sparsity penalty (higher = fewer events). Default 0.
+    g: [1.621509, -0.634367]  # AR(2) coefficients (required)
+    baseline: p10  # Baseline correction: 'pXX' for percentile or numeric value
+    penalty: 0.8  # Sparsity penalty (higher = fewer events). Default 0.
     s_min: 0  # Minimum event size threshold. Default 0.
   trace_name: C_lp
   max_units: null  # Max units to process. null = process all units.
