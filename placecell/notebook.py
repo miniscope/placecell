@@ -445,6 +445,7 @@ def create_unit_browser(
     nav_box = widgets.HBox([prev_btn, unit_slider, next_btn], layout=widgets.Layout(width="100%"))
     controls = widgets.VBox([nav_box, trace_slider], layout=widgets.Layout(width="100%"))
 
+    # Render initial unit
     render_unit(0, 0)
 
     return fig, controls
