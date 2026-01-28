@@ -362,9 +362,7 @@ def plot_summary_scatter(
     xlim = ax1.get_xlim()
     ylim = ax1.get_ylim()
     # Top-left (sig pass, stab pass) - green
-    ax1.fill_between(
-        [0, p_value_threshold], stability_threshold, ylim[1], alpha=0.1, color="green"
-    )
+    ax1.fill_between([0, p_value_threshold], stability_threshold, ylim[1], alpha=0.1, color="green")
     # Top-right (sig fail, stab pass) - blue
     ax1.fill_between(
         [p_value_threshold, xlim[1]], stability_threshold, ylim[1], alpha=0.1, color="blue"
@@ -434,7 +432,12 @@ def plot_summary_scatter(
         x_line = np.array([si_valid.min(), si_valid.max()])
         y_line = slope * x_line + intercept
         ax2.plot(
-            x_line, y_line, color="red", linestyle="-", linewidth=2, label=f"$R^2$ = {r_squared:.3f}"
+            x_line,
+            y_line,
+            color="red",
+            linestyle="-",
+            linewidth=2,
+            label=f"$R^2$ = {r_squared:.3f}",
         )
         ax2.legend(loc="upper right", fontsize=10)
 
