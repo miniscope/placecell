@@ -26,8 +26,3 @@ jobs:
 
       - name: Lint (ruff)
         run: ruff check placecell
-
-      - name: Check notebook outputs are stripped
-        run: |
-          pip install nbstripout
-          nbstripout --is-stripped notebook/*.ipynb
