@@ -19,6 +19,7 @@ def _launch_browser(
     cfg: AppConfig,
     behavior_cfg: BehaviorConfig,
     neural_path: Path | None = None,
+    neural_timestamp: Path | None = None,
     event_index_csv: Path | None = None,
 ) -> None:
     """Launch the interactive place cell browser with config settings."""
@@ -30,6 +31,7 @@ def _launch_browser(
         behavior_timestamp=behavior_timestamp,
         bodypart=behavior_cfg.bodypart,
         neural_path=neural_path,
+        neural_timestamp=neural_timestamp,
         event_index_csv=event_index_csv,
         trace_name=cfg.neural.trace_name,
         speed_threshold=behavior_cfg.speed_threshold,
@@ -45,6 +47,8 @@ def _launch_browser(
         event_threshold_sigma=behavior_cfg.spatial_map.event_threshold_sigma,
         p_value_threshold=behavior_cfg.spatial_map.p_value_threshold,
         stability_threshold=behavior_cfg.spatial_map.stability_threshold,
+        x_col=behavior_cfg.x_col,
+        y_col=behavior_cfg.y_col,
     )
 
 
@@ -64,6 +68,8 @@ def _run_event_place(
     out_file: Path,
     start_idx: int = 0,
     end_idx: int | None = None,
+    x_col: str = "x",
+    y_col: str = "y",
 ) -> None:
     """Internal function: Match events to behavior positions and write CSV."""
 
@@ -76,6 +82,8 @@ def _run_event_place(
         behavior_fps=behavior_fps,
         speed_threshold=speed_threshold,
         speed_window_frames=speed_window_frames,
+        x_col=x_col,
+        y_col=y_col,
     )
 
     # Filter by unit index range
@@ -194,6 +202,8 @@ def event_place(
         out_file=out,
         start_idx=start_idx,
         end_idx=end_idx,
+        x_col=cfg.behavior.x_col,
+        y_col=cfg.behavior.y_col,
     )
 
 
@@ -352,6 +362,8 @@ def visualize(
         speed_threshold=cfg.behavior.speed_threshold,
         speed_window_frames=cfg.behavior.speed_window_frames,
         out_file=out_dir / f"event_place_{label}.csv",
+        x_col=cfg.behavior.x_col,
+        y_col=cfg.behavior.y_col,
     )
 
     # 3) Interactive plot
@@ -362,6 +374,7 @@ def visualize(
         cfg=cfg,
         behavior_cfg=cfg.behavior,
         neural_path=neural_path,
+        neural_timestamp=neural_timestamp,
         event_index_csv=out_dir / f"event_index_{label}.csv",
     )
 
@@ -412,6 +425,12 @@ def visualize(
     default=None,
     help="Behavior timestamp CSV file (behavior_timestamp.csv).",
 )
+@click.option(
+    "--neural-timestamp",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Neural timestamp CSV file. If provided, trims behavior to neural-behavior overlap.",
+)
 def plot(
     config: Path,
     event_place_path: Path,
@@ -420,6 +439,7 @@ def plot(
     neural_path: Path | None,
     behavior_position: Path | None,
     behavior_timestamp: Path | None,
+    neural_timestamp: Path | None,
 ) -> None:
     """Interactive matplotlib browser for place cells."""
     # --data and individual path options are mutually exclusive
@@ -431,6 +451,7 @@ def plot(
         paths = DataPathsConfig.from_yaml(data_config)
         yaml_dir = data_config.parent
         neural_path = (yaml_dir / paths.neural_path).resolve()
+        neural_timestamp = (yaml_dir / paths.neural_timestamp).resolve()
         behavior_position = (yaml_dir / paths.behavior_position).resolve()
         behavior_timestamp = (yaml_dir / paths.behavior_timestamp).resolve()
 
@@ -447,5 +468,6 @@ def plot(
         cfg=cfg,
         behavior_cfg=cfg.behavior,
         neural_path=neural_path,
+        neural_timestamp=neural_timestamp,
         event_index_csv=event_index_path,
     )

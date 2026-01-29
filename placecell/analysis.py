@@ -502,7 +502,12 @@ def load_curated_unit_ids(curation_csv: Path) -> list[int]:
     return sorted(int(uid) for uid in keep_ids)
 
 
-def _load_behavior_xy(csv_path: Path, bodypart: str) -> pd.DataFrame:
+def _load_behavior_xy(
+    csv_path: Path,
+    bodypart: str,
+    x_col: str = "x",
+    y_col: str = "y",
+) -> pd.DataFrame:
     """Load DeepLabCut-style behavior CSV and return x/y coordinates per frame.
 
     Parameters
@@ -511,6 +516,10 @@ def _load_behavior_xy(csv_path: Path, bodypart: str) -> pd.DataFrame:
         Path to DeepLabCut CSV file with multi-index header.
     bodypart:
         Body part name to extract (e.g. 'LED').
+    x_col:
+        Coordinate column name for the x-axis (default 'x').
+    y_col:
+        Coordinate column name for the y-axis (default 'y').
     """
 
     # Read CSV with multi-index header (scorer, bodypart, coord)
@@ -518,7 +527,7 @@ def _load_behavior_xy(csv_path: Path, bodypart: str) -> pd.DataFrame:
 
     scorer = None
     for col in df.columns[1:]:
-        if col[1] == bodypart and col[2] == "x":
+        if col[1] == bodypart and col[2] == x_col:
             scorer = col[0]
             break
 
@@ -529,8 +538,8 @@ def _load_behavior_xy(csv_path: Path, bodypart: str) -> pd.DataFrame:
             f"Available bodyparts: {sorted(available_bodyparts)}"
         )
 
-    x = df[(scorer, bodypart, "x")]
-    y = df[(scorer, bodypart, "y")]
+    x = df[(scorer, bodypart, x_col)]
+    y = df[(scorer, bodypart, y_col)]
     frame_index = df.iloc[:, 0]
 
     out = pd.DataFrame({"frame_index": frame_index, "x": x, "y": y})
@@ -602,6 +611,8 @@ def build_event_place_dataframe(
     speed_threshold: float = 50.0,
     speed_window_frames: int = 5,
     use_neural_last_timestamp: bool = True,
+    x_col: str = "x",
+    y_col: str = "y",
 ) -> pd.DataFrame:
     """Match neural events to behavior positions for place-cell analysis.
 
@@ -658,7 +669,7 @@ def build_event_place_dataframe(
         ["frame", "neural_time"]
     ]
 
-    beh_pos = _load_behavior_xy(behavior_position_path, bodypart=bodypart)
+    beh_pos = _load_behavior_xy(behavior_position_path, bodypart=bodypart, x_col=x_col, y_col=y_col)
     beh_ts = pd.read_csv(behavior_timestamp_path)  # frame_index, unix_time
 
     beh = compute_behavior_speed(

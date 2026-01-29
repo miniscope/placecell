@@ -137,6 +137,14 @@ class BehaviorConfig(MiniscopeConfig, ConfigYAMLMixin):
         ...,
         description="Body part name to use for position tracking (e.g. 'LED').",
     )
+    x_col: str = Field(
+        "x",
+        description="Coordinate column name for the x-axis in the behavior CSV.",
+    )
+    y_col: str = Field(
+        "y",
+        description="Coordinate column name for the y-axis in the behavior CSV.",
+    )
     spatial_map: SpatialMapConfig = Field(
         default_factory=SpatialMapConfig,
         description="Spatial map visualization settings.",

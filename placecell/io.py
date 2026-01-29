@@ -13,12 +13,66 @@ from placecell.analysis import _load_behavior_xy, compute_behavior_speed, load_t
 logger = init_logger(__name__)
 
 
+def compute_overlap_time_range(
+    neural_timestamp: Path,
+    behavior_timestamp: Path,
+    use_neural_last_timestamp: bool = True,
+) -> tuple[float, float]:
+    """Compute the overlapping time range between neural and behavior recordings.
+
+    Parameters
+    ----------
+    neural_timestamp:
+        Path to neural timestamp CSV (columns: frame, timestamp_first, timestamp_last).
+    behavior_timestamp:
+        Path to behavior timestamp CSV (columns: frame_index, unix_time).
+    use_neural_last_timestamp:
+        Whether to use timestamp_last for neural frames.
+
+    Returns
+    -------
+    tuple[float, float]
+        (start_time, end_time) of the overlapping window in unix time.
+    """
+    neural_ts = pd.read_csv(neural_timestamp)
+    beh_ts = pd.read_csv(behavior_timestamp)
+
+    ts_col = "timestamp_last" if use_neural_last_timestamp else "timestamp_first"
+    neural_start = neural_ts[ts_col].min()
+    neural_end = neural_ts[ts_col].max()
+
+    beh_start = beh_ts["unix_time"].min()
+    beh_end = beh_ts["unix_time"].max()
+
+    overlap_start = max(neural_start, beh_start)
+    overlap_end = min(neural_end, beh_end)
+
+    if overlap_start >= overlap_end:
+        raise ValueError(
+            f"No time overlap between neural [{neural_start:.1f}, {neural_end:.1f}] "
+            f"and behavior [{beh_start:.1f}, {beh_end:.1f}]."
+        )
+
+    neural_dur = neural_end - neural_start
+    beh_dur = beh_end - beh_start
+    overlap_dur = overlap_end - overlap_start
+    logger.info(
+        f"Time overlap: {overlap_dur:.1f}s "
+        f"(neural: {neural_dur:.1f}s, behavior: {beh_dur:.1f}s)"
+    )
+
+    return overlap_start, overlap_end
+
+
 def load_behavior_data(
     behavior_position: Path,
     behavior_timestamp: Path,
     bodypart: str,
     speed_window_frames: int,
     speed_threshold: float,
+    time_range: tuple[float, float] | None = None,
+    x_col: str = "x",
+    y_col: str = "y",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Load behavior data and compute speed-filtered trajectory.
 
@@ -34,6 +88,13 @@ def load_behavior_data(
         Window size for speed computation.
     speed_threshold:
         Minimum speed threshold.
+    time_range:
+        Optional (start_time, end_time) to restrict behavior data.
+        Use :func:`compute_overlap_time_range` to get this from neural/behavior timestamps.
+    x_col:
+        Coordinate column name for the x-axis in the behavior CSV.
+    y_col:
+        Coordinate column name for the y-axis in the behavior CSV.
 
     Returns
     -------
@@ -52,7 +113,9 @@ def load_behavior_data(
             "This is required for speed calculation."
         )
 
-    full_trajectory = _load_behavior_xy(behavior_position, bodypart=bodypart)
+    full_trajectory = _load_behavior_xy(
+        behavior_position, bodypart=bodypart, x_col=x_col, y_col=y_col
+    )
     behavior_timestamps = pd.read_csv(behavior_timestamp)
 
     trajectory_with_speed = compute_behavior_speed(
@@ -60,6 +123,18 @@ def load_behavior_data(
         timestamps=behavior_timestamps,
         window_frames=speed_window_frames,
     )
+
+    # Trim to time range if specified
+    if time_range is not None:
+        t_start, t_end = time_range
+        mask = (trajectory_with_speed["unix_time"] >= t_start) & (
+            trajectory_with_speed["unix_time"] <= t_end
+        )
+        n_before = len(trajectory_with_speed)
+        trajectory_with_speed = trajectory_with_speed[mask].reset_index(drop=True)
+        logger.info(
+            f"Trimmed behavior to overlap window: {len(trajectory_with_speed)}/{n_before} frames"
+        )
 
     trajectory_filtered = trajectory_with_speed[trajectory_with_speed["speed"] >= speed_threshold]
     trajectory_filtered = trajectory_filtered.sort_values("frame_index")

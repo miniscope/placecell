@@ -13,7 +13,7 @@ from placecell.analysis import (
     compute_occupancy_map,
     compute_unit_analysis,
 )
-from placecell.io import load_behavior_data, load_neural_data
+from placecell.io import compute_overlap_time_range, load_behavior_data, load_neural_data
 
 try:
     import matplotlib.pyplot as plt
@@ -121,6 +121,8 @@ def plot_trajectory(
     csv_path: str | Path,
     bodypart: str,
     ax: "Axes | None" = None,
+    x_col: str = "x",
+    y_col: str = "y",
 ) -> "Axes":
     """
     Plot trajectory from DeepLabCut CSV file.
@@ -133,6 +135,10 @@ def plot_trajectory(
         Body part to plot (default: "LED")
     ax : matplotlib.Axes, optional
         Matplotlib axes to plot on
+    x_col : str
+        Coordinate column name for x-axis (default "x").
+    y_col : str
+        Coordinate column name for y-axis (default "y").
 
     Returns
     -------
@@ -157,7 +163,7 @@ def plot_trajectory(
     # Skip the first column which is the header row identifier
     scorer_name = None
     for col in df.columns[1:]:
-        if col[1] == bodypart and col[2] == "x":
+        if col[1] == bodypart and col[2] == x_col:
             scorer_name = col[0]
             break
 
@@ -169,11 +175,11 @@ def plot_trajectory(
         )
 
     # Extract x and y coordinates for the specified bodypart
-    x_col = (scorer_name, bodypart, "x")
-    y_col = (scorer_name, bodypart, "y")
+    x_csv_col = (scorer_name, bodypart, x_col)
+    y_csv_col = (scorer_name, bodypart, y_col)
 
-    x = df[x_col].values
-    y = df[y_col].values
+    x = df[x_csv_col].values
+    y = df[y_csv_col].values
 
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 8))
@@ -461,6 +467,7 @@ def browse_place_cells(
     behavior_timestamp: str | Path,
     bodypart: str,
     neural_path: str | Path | None = None,
+    neural_timestamp: str | Path | None = None,
     event_index_csv: str | Path | None = None,
     trace_name: str = "C",
     speed_threshold: float = 1.0,
@@ -477,6 +484,8 @@ def browse_place_cells(
     event_threshold_sigma: float = 2.0,
     p_value_threshold: float | None = None,
     stability_threshold: float = 0.5,
+    x_col: str = "x",
+    y_col: str = "y",
 ) -> None:
     """
     Interactive browser for place cell analysis with keyboard navigation.
@@ -501,6 +510,9 @@ def browse_place_cells(
         Body part name to use for trajectory (e.g. "LED").
     neural_path : str or Path, optional
         Path to neural data directory (for traces and max projection).
+    neural_timestamp : str or Path, optional
+        Path to neural timestamp CSV. If provided, behavior data is trimmed to the
+        overlapping time range between neural and behavior recordings.
     event_index_csv : str or Path, optional
         Path to event_index CSV (all events). If provided, shows all events on trace plot (gray).
     trace_name : str
@@ -546,6 +558,14 @@ def browse_place_cells(
     if event_index_csv is not None:
         df_all_events = pd.read_csv(event_index_csv)
 
+    # Compute overlap time range if neural timestamp is provided
+    time_range = None
+    if neural_timestamp is not None:
+        time_range = compute_overlap_time_range(
+            neural_timestamp=Path(neural_timestamp),
+            behavior_timestamp=Path(behavior_timestamp),
+        )
+
     # Load behavior data
     trajectory_with_speed, trajectory_df = load_behavior_data(
         behavior_position=Path(behavior_position),
@@ -553,6 +573,9 @@ def browse_place_cells(
         bodypart=bodypart,
         speed_window_frames=speed_window_frames,
         speed_threshold=speed_threshold,
+        time_range=time_range,
+        x_col=x_col,
+        y_col=y_col,
     )
 
     # Compute occupancy map
