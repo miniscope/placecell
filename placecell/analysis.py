@@ -249,6 +249,7 @@ def compute_stability_score(
     activity_sigma: float = 1.0,
     behavior_fps: float = 20.0,
     min_occupancy: float = 0.1,
+    occupancy_sigma: float = 0.0,
     split_method: str = "half",
 ) -> tuple[float, float, np.ndarray, np.ndarray]:
     """Compute stability score by comparing rate maps from split data.
@@ -275,6 +276,8 @@ def compute_stability_score(
         Behavior sampling rate.
     min_occupancy:
         Minimum occupancy time in seconds for a bin to be valid.
+    occupancy_sigma:
+        Gaussian smoothing sigma for occupancy maps (default 0.0 = no smoothing).
     split_method:
         Splitting method. Currently only "half" is supported.
         Future options: "odd_even", "thirds", etc.
@@ -313,7 +316,7 @@ def compute_stability_score(
             return occ, mask
         counts, _, _ = np.histogram2d(traj_half["x"], traj_half["y"], bins=[x_edges, y_edges])
         occ = counts * time_per_frame
-        occ_smooth = gaussian_filter_normalized(occ, sigma=activity_sigma)
+        occ_smooth = gaussian_filter_normalized(occ, sigma=occupancy_sigma)
         mask = occ_smooth >= min_occupancy
         return occ_smooth, mask
 
@@ -325,17 +328,24 @@ def compute_stability_score(
         events: pd.DataFrame, occ: np.ndarray, mask: np.ndarray
     ) -> np.ndarray:
         """Compute rate map for a half."""
-        rate_map = np.full_like(occ, np.nan)
         if events.empty or not np.any(mask):
-            return rate_map
+            return np.full_like(occ, np.nan)
+
         event_weights, _, _ = np.histogram2d(
             events["x"],
             events["y"],
             bins=[x_edges, y_edges],
             weights=events["s"],
         )
+
+        # Compute rate map - use 0 for invalid bins to prevent NaN propagation
+        rate_map = np.zeros_like(occ)
         rate_map[mask] = event_weights[mask] / occ[mask]
+
+        # Smooth the rate map (zeros in invalid bins won't propagate NaN)
         rate_map_smooth = gaussian_filter_normalized(rate_map, sigma=activity_sigma)
+
+        # Set invalid bins to NaN after smoothing
         rate_map_smooth[~mask] = np.nan
         return rate_map_smooth
 
@@ -383,6 +393,7 @@ def compute_unit_analysis(
     random_seed: int | None = None,
     behavior_fps: float = 20.0,
     min_occupancy: float = 0.1,
+    occupancy_sigma: float = 0.0,
     stability_threshold: float = 0.5,
 ) -> dict:
     """Compute rate map, spatial information, stability, and thresholded events for a unit.
@@ -413,6 +424,8 @@ def compute_unit_analysis(
         Behavior sampling rate for stability computation.
     min_occupancy:
         Minimum occupancy time for stability computation.
+    occupancy_sigma:
+        Gaussian smoothing sigma for occupancy maps in stability computation.
     stability_threshold:
         Correlation threshold for stability test pass/fail.
 
@@ -463,6 +476,7 @@ def compute_unit_analysis(
         activity_sigma=activity_sigma,
         behavior_fps=behavior_fps,
         min_occupancy=min_occupancy,
+        occupancy_sigma=occupancy_sigma,
     )
 
     return {

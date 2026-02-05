@@ -605,6 +605,7 @@ def browse_place_cells(
             n_shuffles=n_shuffles,
             behavior_fps=behavior_fps,
             min_occupancy=min_occupancy,
+            occupancy_sigma=occupancy_sigma,
             stability_threshold=stability_threshold,
         )
 
