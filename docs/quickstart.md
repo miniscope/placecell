@@ -1,10 +1,6 @@
 # Quickstart
 
-Run spatial neural activity analysis with a single command:
-
-```bash
-pcell workflow visualize --config config.yaml --data data_paths.yaml
-```
+Run the analysis using the Jupyter notebook at `notebook/workflow_2D.ipynb`.
 
 ## Required Files
 
@@ -78,11 +74,9 @@ behavior:
 ```
 :::
 
-### 3. Run the workflow
+### 3. Run the notebook
 
-```bash
-pcell workflow visualize --config config.yaml --data data_paths.yaml
-```
+Open `notebook/workflow_2D.ipynb` in Jupyter Lab, set `CONFIG_PATH` and `DATA_PATH` to your config files, and run all cells.
 
 ## Output
 
@@ -98,17 +92,5 @@ And finally launches the interactive place cell viewer:
 
 ![Place Cell Viewer](assets/Figure_3.png)
 
-## CLI Options
-
-```bash
-pcell workflow visualize --help
-```
-
-Optional arguments:
-- `--out-dir`: output directory (default: `output/`)
-- `--label`: label for output files (default: timestamp)
-- `--start-idx`, `--end-idx`: unit index range to process
-
 ## Next Steps
 - See [Pipeline Details](pipeline.md) for how the analysis works
-- See [CLI Reference](cli.md) for all available commands

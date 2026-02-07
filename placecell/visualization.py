@@ -337,7 +337,7 @@ def plot_summary_scatter(
         else:
             colors.append("red")  # Both fail
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 3))
 
     # Left plot: Significance vs Stability
     ax1.scatter(p_vals, stab_corrs, c=colors, s=50, alpha=0.7, edgecolors="black", linewidths=0.5)
