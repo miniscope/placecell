@@ -723,15 +723,33 @@ def browse_place_cells(
         vis_data_above = result["vis_data_above"]
         ax2.plot(trajectory_df["x"], trajectory_df["y"], "k-", alpha=1.0, linewidth=1, zorder=1)
 
-        # Plot above-threshold spikes with alpha proportional to amplitude
+        # Plot above-threshold spikes with alpha proportional to amplitude/occupancy
         if not vis_data_above.empty:
             amps = vis_data_above["s"].values
-            amp_max = np.max(amps) if len(amps) > 0 and np.max(amps) > 0 else 1.0
-            # Linear alpha from 0 to 1
-            alphas = amps / amp_max
+            x_vals = vis_data_above["x"].values
+            y_vals = vis_data_above["y"].values
+
+            # Find spatial bin index for each event
+            x_bin_idx = np.digitize(x_vals, x_edges) - 1
+            y_bin_idx = np.digitize(y_vals, y_edges) - 1
+
+            # Clip to valid bin indices
+            x_bin_idx = np.clip(x_bin_idx, 0, len(x_edges) - 2)
+            y_bin_idx = np.clip(y_bin_idx, 0, len(y_edges) - 2)
+
+            # Look up occupancy at each event location
+            event_occupancy = occupancy_time[x_bin_idx, y_bin_idx]
+
+            # Normalize amplitude by occupancy (avoid division by zero)
+            normalized_amps = amps / np.maximum(event_occupancy, 0.01)
+
+            # Scale to 0-1 range
+            norm_max = np.max(normalized_amps) if len(normalized_amps) > 0 and np.max(normalized_amps) > 0 else 1.0
+            alphas = normalized_amps / norm_max
+
             ax2.scatter(
-                vis_data_above["x"],
-                vis_data_above["y"],
+                x_vals,
+                y_vals,
                 c="red",
                 s=30,
                 alpha=alphas,

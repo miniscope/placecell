@@ -116,6 +116,7 @@ def create_unit_browser(
     footprints: Any | None,
     x_edges: np.ndarray,
     y_edges: np.ndarray,
+    occupancy_time: np.ndarray,
     trace_name: str,
     neural_fps: float,
     speed_threshold: float,
@@ -141,6 +142,8 @@ def create_unit_browser(
         Unit footprints.
     x_edges, y_edges : np.ndarray
         Spatial bin edges.
+    occupancy_time : np.ndarray
+        Occupancy time map for normalizing event alpha.
     trace_name : str
         Name of trace for y-axis label.
     neural_fps : float
@@ -163,19 +166,25 @@ def create_unit_browser(
     """
     n_units = len(unique_units)
 
-    # Create figure
-    fig = plt.figure(figsize=(10, 6))
+    # Create figure with 3 rows
+    fig = plt.figure(figsize=(8, 7))
     fig.canvas.toolbar_visible = False
     fig.canvas.header_visible = False
     fig.canvas.layout.width = "100%"
 
-    # Create axes
-    ax1 = fig.add_axes([0.02, 0.42, 0.20, 0.48])
-    ax2 = fig.add_axes([0.26, 0.42, 0.20, 0.48])
-    ax3 = fig.add_axes([0.50, 0.42, 0.18, 0.48])
-    ax3_cbar = fig.add_axes([0.69, 0.50, 0.015, 0.32])
-    ax4 = fig.add_axes([0.78, 0.42, 0.20, 0.48])
-    ax5 = fig.add_axes([0.06, 0.08, 0.88, 0.28])
+    # Create axes - 3 rows: top (unit/traj/SI), middle (3 rate maps), bottom (trace)
+    # Top row (leave space above for text annotations)
+    ax1 = fig.add_axes([0, 0.65, 0.25, 0.27])  # Unit footprint
+    ax2 = fig.add_axes([0.33, 0.65, 0.25, 0.27])  # Trajectory
+    ax4 = fig.add_axes([0.66, 0.65, 0.25, 0.27])  # SI histogram
+
+    # Middle row - rate maps (with better spacing)
+    ax3a = fig.add_axes([0, 0.3, 0.24, 0.26])  # First half
+    ax3b = fig.add_axes([0.33, 0.3, 0.24, 0.26])  # Second half
+    ax3c = fig.add_axes([0.66, 0.3, 0.24, 0.26])  # Full session
+
+    # Bottom row - trace
+    ax5 = fig.add_axes([0.08, 0.05, 0.8, 0.18])
 
     text_annotations: list[Any] = []
 
@@ -185,7 +194,7 @@ def create_unit_browser(
         unit_id = unique_units[unit_idx]
         result = unit_results[unit_id]
 
-        for ax in [ax1, ax2, ax3, ax3_cbar, ax4, ax5]:
+        for ax in [ax1, ax2, ax3a, ax3b, ax3c, ax4, ax5]:
             ax.clear()
 
         for txt in text_annotations:
@@ -216,31 +225,59 @@ def create_unit_browser(
 
         if not vis_data_above.empty:
             amps = vis_data_above["s"].values
-            amp_max = np.max(amps) if len(amps) > 0 and np.max(amps) > 0 else 1.0
-            alphas = amps / amp_max
+            x_vals = vis_data_above["x"].values
+            y_vals = vis_data_above["y"].values
+
+            # Find spatial bin index for each event
+            x_bin_idx = np.digitize(x_vals, x_edges) - 1
+            y_bin_idx = np.digitize(y_vals, y_edges) - 1
+
+            # Clip to valid bin indices
+            x_bin_idx = np.clip(x_bin_idx, 0, len(x_edges) - 2)
+            y_bin_idx = np.clip(y_bin_idx, 0, len(y_edges) - 2)
+
+            # Look up occupancy at each event location
+            event_occupancy = occupancy_time[x_bin_idx, y_bin_idx]
+
+            # Normalize amplitude by occupancy (avoid division by zero)
+            normalized_amps = amps / np.maximum(event_occupancy, 0.01)
+
+            # Scale to 0-1 range
+            norm_max = np.max(normalized_amps) if len(normalized_amps) > 0 and np.max(normalized_amps) > 0 else 1.0
+            alphas = normalized_amps / norm_max
+
             ax2.scatter(
-                vis_data_above["x"], vis_data_above["y"], c="red", s=20, alpha=alphas, zorder=2
+                x_vals, y_vals, c="red", s=20, alpha=alphas, zorder=2
             )
 
         ax2.set_title(f"Trajectory ({len(vis_data_above)} events)", fontsize=9)
         ax2.set_aspect("equal")
         ax2.axis("off")
 
-        # 3. Rate map
-        rate_map_data = result["rate_map"].T
-        im = ax3.imshow(
-            rate_map_data,
-            origin="lower",
-            extent=[x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]],
-            aspect="equal",
-            cmap="jet",
-        )
-        ax3.set_title("Rate map", fontsize=9)
-        ax3.axis("off")
-        im.set_clim(0.0, 1.0)
-        plt.colorbar(im, cax=ax3_cbar)
-        ax3_cbar.set_ylabel("Norm. rate", rotation=270, labelpad=8, fontsize=8)
-        ax3_cbar.tick_params(labelsize=7)
+        # 3. Rate maps (first half, second half, full)
+        rate_map_first = result.get("rate_map_first", np.full_like(result["rate_map"], np.nan))
+        rate_map_second = result.get("rate_map_second", np.full_like(result["rate_map"], np.nan))
+        stab_corr = result.get("stability_corr", np.nan)
+
+        # Plot first half
+        im1 = ax3a.imshow(rate_map_first.T, origin="lower", cmap="jet", aspect="equal")
+        ax3a.set_title("1st half", fontsize=9)
+        ax3a.axis("off")
+
+        # Plot second half
+        im2 = ax3b.imshow(rate_map_second.T, origin="lower", cmap="jet", aspect="equal")
+        ax3b.set_title("2nd half", fontsize=9)
+        ax3b.axis("off")
+
+        # Plot full session
+        im3 = ax3c.imshow(result["rate_map"].T, origin="lower", cmap="jet", aspect="equal")
+        ax3c.set_title(f"Full (r={stab_corr:.2f})" if not np.isnan(stab_corr) else "Full", fontsize=9)
+        ax3c.axis("off")
+
+        # Set same color scale for all three
+        im1.set_clim(0.0, 1.0)
+        im2.set_clim(0.0, 1.0)
+        im3.set_clim(0.0, 1.0)
 
         # 4. SI histogram
         ax4.hist(result["shuffled_sis"], bins=15, color="gray", alpha=0.7, edgecolor="black")
@@ -357,7 +394,7 @@ def create_unit_browser(
 
         txt = fig.text(
             0.02,
-            0.98,
+            0.97,
             f"Unit {unit_id} ({unit_idx + 1}/{n_units}) | N={n_events}",
             ha="left",
             va="top",
@@ -366,11 +403,11 @@ def create_unit_browser(
         )
         text_annotations.append(txt)
 
-        txt = fig.text(0.30, 0.98, f"Sig (p={p_val:.3f}): ", ha="left", va="top", fontsize=8)
+        txt = fig.text(0.28, 0.97, f"Sig (p={p_val:.3f}): ", ha="left", va="top", fontsize=8)
         text_annotations.append(txt)
         txt = fig.text(
-            0.44,
-            0.98,
+            0.40,
+            0.97,
             sig_text,
             ha="left",
             va="top",
@@ -381,11 +418,11 @@ def create_unit_browser(
         text_annotations.append(txt)
 
         stab_str = f"r={stab_corr:.2f}" if not np.isnan(stab_corr) else ""
-        txt = fig.text(0.52, 0.98, f"Stab ({stab_str}): ", ha="left", va="top", fontsize=8)
+        txt = fig.text(0.48, 0.97, f"Stab ({stab_str}): ", ha="left", va="top", fontsize=8)
         text_annotations.append(txt)
         txt = fig.text(
-            0.68,
-            0.98,
+            0.62,
+            0.97,
             stab_text,
             ha="left",
             va="top",
