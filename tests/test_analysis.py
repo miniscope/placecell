@@ -9,16 +9,18 @@ import pytest
 import xarray as xr
 
 from placecell.analysis import (
-    build_event_place_dataframe,
-    compute_behavior_speed,
     compute_occupancy_map,
     compute_rate_map,
     compute_spatial_information,
     compute_unit_analysis,
     gaussian_filter_normalized,
-    load_curated_unit_ids,
-    load_traces,
 )
+from placecell.behavior import (
+    build_event_place_dataframe,
+    compute_behavior_speed,
+    load_curated_unit_ids,
+)
+from placecell.neural import load_traces
 
 
 def test_event_place_regression(assets_dir: Path) -> None:

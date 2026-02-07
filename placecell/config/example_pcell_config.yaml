@@ -28,4 +28,7 @@ behavior:
     random_seed: 1
     event_threshold_sigma: 0  # Sigma multiplier for event amplitude threshold in trajectory visualization
     p_value_threshold: 0.05 # P-value threshold. Units with p < threshold pass.
-    stability_threshold: 0.5 # Correlation threshold. Units with r >= threshold pass.
+    stability_threshold: 0.5 # Correlation threshold (used when stability_method='threshold').
+    stability_method: threshold  # Stability test: 'shuffle' (p-value via circular shift) or 'threshold' (fixed r cutoff)
+    min_shift_seconds: 20  # Minimum circular shift (seconds) for shuffle test. 0 = no minimum.
+    si_weight_mode: amplitude  # SI weight mode: 'amplitude' (event amplitudes) or 'binary' (event counts)

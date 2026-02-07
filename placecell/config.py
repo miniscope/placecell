@@ -106,8 +106,35 @@ class SpatialMapConfig(MiniscopeConfig, ConfigYAMLMixin):
         ge=-1.0,
         le=1.0,
         description=(
-            "Correlation threshold for stability test pass/fail. "
+            "Correlation threshold for stability test pass/fail (used when "
+            "stability_method='threshold'). "
             "Units with first/second half rate map correlation >= threshold pass."
+        ),
+    )
+    stability_method: str = Field(
+        "shuffle",
+        description=(
+            "Stability test method: "
+            "'shuffle' uses circular-shift significance test (Shuman et al. 2020), "
+            "'threshold' uses a fixed correlation threshold (stability_threshold)."
+        ),
+    )
+    min_shift_seconds: float = Field(
+        20.0,
+        ge=0.0,
+        description=(
+            "Minimum circular shift in seconds for shuffle significance test. "
+            "Ensures shuffled data breaks the temporal-spatial association. "
+            "Set to 0 to allow any shift size (original behavior)."
+        ),
+    )
+    si_weight_mode: str = Field(
+        "binary",
+        description=(
+            "Weight mode for spatial information calculation: "
+            "'amplitude' uses event amplitudes (s values), "
+            "'binary' uses event counts (1 per event, ignoring amplitude). "
+            "Binary mode is more robust to bursty firing patterns."
         ),
     )
 

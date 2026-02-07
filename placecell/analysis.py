@@ -1,11 +1,7 @@
-"""Analysis functions for place cells."""
-
-from pathlib import Path
-from typing import Any
+"""Spatial analysis functions for place cells."""
 
 import numpy as np
 import pandas as pd
-import xarray as xr
 from scipy.ndimage import gaussian_filter
 
 
@@ -148,6 +144,9 @@ def compute_spatial_information(
     y_edges: np.ndarray,
     n_shuffles: int = 100,
     random_seed: int | None = None,
+    min_shift_seconds: float = 0.0,
+    behavior_fps: float = 20.0,
+    si_weight_mode: str = "amplitude",
 ) -> tuple[float, float, np.ndarray]:
     """Compute spatial information and significance via shuffling.
 
@@ -167,6 +166,16 @@ def compute_spatial_information(
         Number of shuffles for significance test.
     random_seed:
         Random seed for reproducibility.
+    min_shift_seconds:
+        Minimum circular shift in seconds. Shifts smaller than this are
+        re-drawn to ensure the temporal-spatial association is broken.
+        Default 0.0 (no minimum).
+    behavior_fps:
+        Behavior sampling rate, used to convert min_shift_seconds to frames.
+    si_weight_mode:
+        ``"amplitude"`` weights events by their ``s`` value;
+        ``"binary"`` counts each event as 1 regardless of amplitude,
+        which is more robust to bursty firing patterns.
 
     Returns
     -------
@@ -180,11 +189,17 @@ def compute_spatial_information(
     if unit_events.empty:
         return 0.0, 1.0, np.zeros(n_shuffles)
 
+    # Choose weights based on mode
+    if si_weight_mode == "binary":
+        weights = np.ones(len(unit_events))
+    else:
+        weights = unit_events["s"].values
+
     event_weights, _, _ = np.histogram2d(
         unit_events["x"],
         unit_events["y"],
         bins=[x_edges, y_edges],
-        weights=unit_events["s"],
+        weights=weights,
     )
     rate_map = np.zeros_like(occupancy_time)
     rate_map[valid_mask] = event_weights[valid_mask] / occupancy_time[valid_mask]
@@ -208,12 +223,23 @@ def compute_spatial_information(
 
     # Shuffling test
     traj_frames = trajectory_df["beh_frame_index"].values
-    u_grouped = unit_events.groupby("beh_frame_index")["s"].sum()
-    aligned_events = u_grouped.reindex(traj_frames, fill_value=0).values
+    if si_weight_mode == "binary":
+        u_grouped = unit_events.groupby("beh_frame_index").size()
+    else:
+        u_grouped = unit_events.groupby("beh_frame_index")["s"].sum()
+    aligned_events = u_grouped.reindex(traj_frames, fill_value=0).values.astype(float)
+
+    n_frames = len(aligned_events)
+    min_shift_frames = int(min_shift_seconds * behavior_fps)
+    # Clamp so valid range exists (shift between min_shift and n_frames - min_shift)
+    min_shift_frames = min(min_shift_frames, n_frames // 2)
 
     shuffled_sis = []
     for _ in range(n_shuffles):
-        shift = np.random.randint(len(aligned_events))
+        if min_shift_frames > 0:
+            shift = np.random.randint(min_shift_frames, n_frames - min_shift_frames)
+        else:
+            shift = np.random.randint(n_frames)
         s_shuffled = np.roll(aligned_events, shift)
 
         event_w_shuf, _, _ = np.histogram2d(
@@ -252,12 +278,20 @@ def compute_stability_score(
     min_occupancy: float = 0.1,
     occupancy_sigma: float = 0.0,
     split_method: str = "half",
-) -> tuple[float, float, np.ndarray, np.ndarray]:
+    n_shuffles: int = 0,
+    random_seed: int | None = None,
+    min_shift_seconds: float = 0.0,
+    si_weight_mode: str = "amplitude",
+) -> tuple[float, float, float, np.ndarray, np.ndarray]:
     """Compute stability score by comparing rate maps from split data.
 
     Splits the recording into two halves based on behavior frame index,
     computes rate maps for each half, and returns the Pearson correlation
     between them (using valid bins in both halves).
+
+    Optionally runs a shuffle significance test (Shuman et al. 2020):
+    circularly shifts events and computes the split-half correlation for
+    each shuffle to build a null distribution.
 
     Parameters
     ----------
@@ -281,20 +315,35 @@ def compute_stability_score(
         Gaussian smoothing sigma for occupancy maps (default 0.0 = no smoothing).
     split_method:
         Splitting method. Currently only "half" is supported.
-        Future options: "odd_even", "thirds", etc.
+    n_shuffles:
+        Number of shuffles for stability significance test.
+        0 means no shuffle test (return NaN for p-value).
+    random_seed:
+        Random seed for reproducibility.
+    min_shift_seconds:
+        Minimum circular shift in seconds for shuffle test.
+    si_weight_mode:
+        ``"amplitude"`` weights events by their ``s`` value;
+        ``"binary"`` counts each event as 1.
 
     Returns
     -------
     tuple
-        (correlation, fisher_z, rate_map_first, rate_map_second)
+        (correlation, fisher_z, stability_p_val, rate_map_first, rate_map_second)
         correlation: Pearson correlation between the two rate maps
         fisher_z: Fisher z-transformed correlation
+        stability_p_val: Shuffle-based p-value (NaN if n_shuffles=0)
         rate_map_first: Rate map from first half
         rate_map_second: Rate map from second half
     """
     if unit_events.empty or trajectory_df.empty:
         nan_map = np.full_like(occupancy_time, np.nan)
-        return np.nan, np.nan, nan_map, nan_map
+        return np.nan, np.nan, np.nan, nan_map, nan_map
+
+    # Binary mode: use event counts instead of amplitudes
+    if si_weight_mode == "binary":
+        unit_events = unit_events.copy()
+        unit_events["s"] = 1.0
 
     # Split trajectory by frame index
     all_frames = trajectory_df["beh_frame_index"].values
@@ -356,7 +405,7 @@ def compute_stability_score(
     # Compute correlation only on bins valid in both halves
     both_valid = valid_first & valid_second
     if not np.any(both_valid):
-        return np.nan, np.nan, rate_map_first, rate_map_second
+        return np.nan, np.nan, np.nan, rate_map_first, rate_map_second
 
     vals_first = rate_map_first[both_valid]
     vals_second = rate_map_second[both_valid]
@@ -364,7 +413,7 @@ def compute_stability_score(
     # Remove any remaining NaN values
     finite_mask = np.isfinite(vals_first) & np.isfinite(vals_second)
     if np.sum(finite_mask) < 3:  # Need at least 3 points for correlation
-        return np.nan, np.nan, rate_map_first, rate_map_second
+        return np.nan, np.nan, np.nan, rate_map_first, rate_map_second
 
     vals_first = vals_first[finite_mask]
     vals_second = vals_second[finite_mask]
@@ -377,7 +426,73 @@ def compute_stability_score(
     corr_clipped = np.clip(corr, -0.9999, 0.9999)
     fisher_z = np.arctanh(corr_clipped)
 
-    return corr, fisher_z, rate_map_first, rate_map_second
+    # Normalize split rate maps to 0-1 for display (doesn't affect correlation)
+    for rm, mask in [(rate_map_first, valid_first), (rate_map_second, valid_second)]:
+        valid_vals = rm[mask]
+        if len(valid_vals) > 0 and np.nanmax(valid_vals) > 0:
+            rm[mask] = rm[mask] / np.nanmax(valid_vals)
+
+    # Shuffle-based stability significance test
+    if n_shuffles > 0:
+        if random_seed is not None:
+            np.random.seed(random_seed)
+
+        traj_frames = trajectory_df["beh_frame_index"].values
+        u_grouped = unit_events.groupby("beh_frame_index")["s"].sum()
+        aligned_events = u_grouped.reindex(traj_frames, fill_value=0).values.astype(float)
+
+        all_frames = trajectory_df["beh_frame_index"].values
+        mid_frame = np.median(all_frames)
+        first_half = all_frames <= mid_frame
+        second_half = all_frames > mid_frame
+
+        traj_x = trajectory_df["x"].values
+        traj_y = trajectory_df["y"].values
+
+        n_frames = len(aligned_events)
+        min_shift_frames = int(min_shift_seconds * behavior_fps)
+        min_shift_frames = min(min_shift_frames, n_frames // 2)
+
+        shuffled_corrs = np.empty(n_shuffles)
+        for i in range(n_shuffles):
+            if min_shift_frames > 0:
+                shift = np.random.randint(min_shift_frames, n_frames - min_shift_frames)
+            else:
+                shift = np.random.randint(n_frames)
+            shifted = np.roll(aligned_events, shift)
+
+            ew1, _, _ = np.histogram2d(
+                traj_x[first_half], traj_y[first_half],
+                bins=[x_edges, y_edges], weights=shifted[first_half],
+            )
+            rm1 = np.zeros_like(occ_first)
+            rm1[valid_first] = ew1[valid_first] / occ_first[valid_first]
+            rm1 = gaussian_filter_normalized(rm1, sigma=activity_sigma)
+
+            ew2, _, _ = np.histogram2d(
+                traj_x[second_half], traj_y[second_half],
+                bins=[x_edges, y_edges], weights=shifted[second_half],
+            )
+            rm2 = np.zeros_like(occ_second)
+            rm2[valid_second] = ew2[valid_second] / occ_second[valid_second]
+            rm2 = gaussian_filter_normalized(rm2, sigma=activity_sigma)
+
+            bv = valid_first & valid_second
+            if not np.any(bv):
+                shuffled_corrs[i] = 0.0
+                continue
+            v1, v2 = rm1[bv], rm2[bv]
+            fm = np.isfinite(v1) & np.isfinite(v2)
+            if np.sum(fm) < 3:
+                shuffled_corrs[i] = 0.0
+                continue
+            shuffled_corrs[i] = np.corrcoef(v1[fm], v2[fm])[0, 1]
+
+        stability_p_val = float(np.sum(shuffled_corrs >= corr) / n_shuffles)
+    else:
+        stability_p_val = np.nan
+
+    return corr, fisher_z, stability_p_val, rate_map_first, rate_map_second
 
 
 def compute_unit_analysis(
@@ -396,6 +511,9 @@ def compute_unit_analysis(
     min_occupancy: float = 0.1,
     occupancy_sigma: float = 0.0,
     stability_threshold: float = 0.5,
+    stability_method: str = "shuffle",
+    min_shift_seconds: float = 0.0,
+    si_weight_mode: str = "amplitude",
 ) -> dict:
     """Compute rate map, spatial information, stability, and thresholded events for a unit.
 
@@ -429,6 +547,13 @@ def compute_unit_analysis(
         Gaussian smoothing sigma for occupancy maps in stability computation.
     stability_threshold:
         Correlation threshold for stability test pass/fail.
+    stability_method:
+        ``"shuffle"`` runs circular-shift significance test for stability;
+        ``"threshold"`` uses a fixed correlation threshold only.
+    min_shift_seconds:
+        Minimum circular shift in seconds for shuffle significance test.
+    si_weight_mode:
+        Weight mode for SI: ``"amplitude"`` or ``"binary"``.
 
     Returns
     -------
@@ -456,6 +581,9 @@ def compute_unit_analysis(
         y_edges,
         n_shuffles,
         random_seed=random_seed,
+        min_shift_seconds=min_shift_seconds,
+        behavior_fps=behavior_fps,
+        si_weight_mode=si_weight_mode,
     )
 
     # Event threshold for visualization
@@ -467,17 +595,24 @@ def compute_unit_analysis(
         events_above = pd.DataFrame()
 
     # Stability test
-    stability_corr, stability_z, rate_map_first, rate_map_second = compute_stability_score(
-        unit_data,
-        trajectory_df,
-        occupancy_time,
-        valid_mask,
-        x_edges,
-        y_edges,
-        activity_sigma=activity_sigma,
-        behavior_fps=behavior_fps,
-        min_occupancy=min_occupancy,
-        occupancy_sigma=occupancy_sigma,
+    stab_shuffles = n_shuffles if stability_method == "shuffle" else 0
+    stability_corr, stability_z, stability_p_val, rate_map_first, rate_map_second = (
+        compute_stability_score(
+            unit_data,
+            trajectory_df,
+            occupancy_time,
+            valid_mask,
+            x_edges,
+            y_edges,
+            activity_sigma=activity_sigma,
+            behavior_fps=behavior_fps,
+            min_occupancy=min_occupancy,
+            occupancy_sigma=occupancy_sigma,
+            n_shuffles=stab_shuffles,
+            random_seed=random_seed,
+            min_shift_seconds=min_shift_seconds,
+            si_weight_mode=si_weight_mode,
+        )
     )
 
     return {
@@ -490,385 +625,7 @@ def compute_unit_analysis(
         "unit_data": unit_data,
         "stability_corr": stability_corr,
         "stability_z": stability_z,
+        "stability_p_val": stability_p_val,
         "rate_map_first": rate_map_first,
         "rate_map_second": rate_map_second,
     }
-
-
-def load_curated_unit_ids(curation_csv: Path) -> list[int]:
-    """Load curated unit IDs from a curation results CSV.
-
-    Parameters
-    ----------
-    curation_csv:
-        Path to CSV file with columns 'unit_id' and 'keep'.
-        Units with keep=1 are included.
-
-    Returns
-    -------
-    List of unit IDs to keep, sorted.
-    """
-    df = pd.read_csv(curation_csv)
-    if "unit_id" not in df.columns or "keep" not in df.columns:
-        raise ValueError(
-            f"Curation CSV must have 'unit_id' and 'keep' columns, " f"got: {list(df.columns)}"
-        )
-    keep_ids = df.loc[df["keep"] == 1, "unit_id"].tolist()
-    return sorted(int(uid) for uid in keep_ids)
-
-
-def _load_behavior_xy(csv_path: Path, bodypart: str) -> pd.DataFrame:
-    """Load DeepLabCut-style behavior CSV and return x/y coordinates per frame.
-
-    Parameters
-    ----------
-    csv_path:
-        Path to DeepLabCut CSV file with multi-index header.
-    bodypart:
-        Body part name to extract (e.g. 'LED').
-    """
-
-    # Read CSV with multi-index header (scorer, bodypart, coord)
-    df = pd.read_csv(csv_path, header=[0, 1, 2])
-
-    scorer = None
-    for col in df.columns[1:]:
-        if col[1] == bodypart and col[2] == "x":
-            scorer = col[0]
-            break
-
-    if scorer is None:
-        available_bodyparts = {col[1] for col in df.columns[1:]}
-        raise ValueError(
-            f"Bodypart '{bodypart}' not found in CSV. "
-            f"Available bodyparts: {sorted(available_bodyparts)}"
-        )
-
-    x = df[(scorer, bodypart, "x")]
-    y = df[(scorer, bodypart, "y")]
-    frame_index = df.iloc[:, 0]
-
-    out = pd.DataFrame({"frame_index": frame_index, "x": x, "y": y})
-    return out
-
-
-def compute_behavior_speed(
-    positions: pd.DataFrame,
-    timestamps: pd.DataFrame,
-    window_frames: int = 10,
-) -> pd.DataFrame:
-    """Compute speed from behavior positions and timestamps using a window.
-
-    Speed is calculated over a window of frames for stability, especially
-    useful at high frame rates where consecutive frame differences are noisy.
-
-    Parameters
-    ----------
-    positions:
-        DataFrame with columns `frame_index`, `x`, `y` in pixels.
-    timestamps:
-        DataFrame with columns `frame_index`, `unix_time` in seconds.
-    window_frames:
-        Number of frames to use for speed calculation. Speed is computed
-        as distance traveled over this window divided by time elapsed.
-
-    Returns
-    -------
-    DataFrame with speed in pixels/s.
-    """
-
-    df = positions.merge(timestamps, on="frame_index", how="inner").sort_values("frame_index")
-
-    x_vals = df["x"].values
-    y_vals = df["y"].values
-    t_vals = df["unix_time"].values
-
-    n = len(df)
-    distances = np.zeros(n)
-    time_diffs = np.zeros(n)
-
-    for i in range(n):
-        # Look ahead by window_frames, but don't go past the end
-        end_idx = min(i + window_frames, n - 1)
-        if end_idx > i:
-            dx = x_vals[end_idx] - x_vals[i]
-            dy = y_vals[end_idx] - y_vals[i]
-            dt = t_vals[end_idx] - t_vals[i]
-
-            dist = np.sqrt(dx**2 + dy**2)
-            distances[i] = dist
-            time_diffs[i] = dt if dt > 0 else np.nan
-        else:
-            distances[i] = 0.0
-            time_diffs[i] = np.nan
-
-    speed = distances / time_diffs
-    df["speed"] = pd.Series(speed).fillna(0.0)
-    return df
-
-
-def build_event_place_dataframe(
-    event_index_path: Path,
-    neural_timestamp_path: Path,
-    behavior_position_path: Path,
-    behavior_timestamp_path: Path,
-    bodypart: str,
-    behavior_fps: float,
-    speed_threshold: float = 50.0,
-    speed_window_frames: int = 5,
-    use_neural_last_timestamp: bool = True,
-) -> pd.DataFrame:
-    """Match neural events to behavior positions for place-cell analysis.
-
-    This function:
-    - Reads event index CSV (columns: unit_id, frame, s)
-    - Reads neural frame timestamps CSV (columns: frame, timestamp_first, timestamp_last)
-    - Reads behavior position CSV (DeepLabCut format with multi-index header)
-    - Reads behavior timestamp CSV (columns: frame_index, unix_time)
-    - For each event, finds the closest behavior frame in time
-    - Filters out matches where timestamp difference exceeds threshold (0.5 / behavior_fps)
-    - Filters out samples where running speed is below `speed_threshold`
-
-    Parameters
-    ----------
-    event_index_path:
-        Path to event index CSV file (columns: unit_id, frame, s).
-    neural_timestamp_path:
-        Path to neural timestamp CSV file (columns: frame, timestamp_first, timestamp_last).
-    behavior_position_path:
-        Path to behavior position CSV file (DeepLabCut format with multi-index header).
-    behavior_timestamp_path:
-        Path to behavior timestamp CSV file (columns: frame_index, unix_time).
-    bodypart:
-        Body part name to use for position tracking (e.g. 'LED').
-    behavior_fps:
-        Frames per second for behavior data. Required. Used to set timestamp
-        difference threshold (0.5 / behavior_fps) for matching events to behavior frames.
-    speed_threshold:
-        Minimum running speed to keep events (pixels/s).
-    speed_window_frames:
-        Number of frames to use for speed calculation window.
-    use_neural_last_timestamp:
-        Whether to use the last neural timestamp for each frame.
-
-    Returns
-    -------
-    DataFrame with columns:
-      - unit_id: Unit identifier
-      - frame: Neural frame number
-      - s: Event amplitude
-      - neural_time: Neural timestamp (seconds)
-      - beh_frame_index: Behavior frame index
-      - beh_time: Behavior timestamp (seconds, unix time)
-      - x: X position (pixels)
-      - y: Y position (pixels)
-      - speed: Running speed (pixels/s)
-    """
-
-    event_df = pd.read_csv(event_index_path)
-
-    neural_ts = pd.read_csv(neural_timestamp_path)
-    ts_col = "timestamp_last" if use_neural_last_timestamp else "timestamp_first"
-    neural_ts = neural_ts.rename(columns={"frame": "frame", ts_col: "neural_time"})[
-        ["frame", "neural_time"]
-    ]
-
-    beh_pos = _load_behavior_xy(behavior_position_path, bodypart=bodypart)
-    beh_ts = pd.read_csv(behavior_timestamp_path)  # frame_index, unix_time
-
-    beh = compute_behavior_speed(
-        positions=beh_pos,
-        timestamps=beh_ts,
-        window_frames=speed_window_frames,
-    )
-
-    beh = beh.rename(
-        columns={
-            "frame_index": "beh_frame_index",
-            "unix_time": "beh_time",
-        }
-    )
-
-    # Merge events with neural timestamps
-    events = event_df.merge(neural_ts, on="frame", how="left")
-
-    # For each event, find nearest behavior frame in time
-    beh_times = beh[["beh_frame_index", "beh_time", "x", "y", "speed"]]
-    beh_times = beh_times.sort_values("beh_time").reset_index(drop=True)
-
-    event_times = events["neural_time"].to_numpy()
-    beh_time_arr = beh_times["beh_time"].to_numpy()
-
-    # Timestamp difference threshold: half the sampling time
-    time_threshold = 0.5 / behavior_fps
-
-    # Find nearest behavior frame for each event
-    idx = np.searchsorted(beh_time_arr, event_times, side="left")
-    idx_clipped = np.clip(idx, 0, len(beh_time_arr) - 1)
-
-    # Check both left and right neighbors to find the closest
-    idx_left = idx_clipped
-    idx_right = np.clip(idx_clipped + 1, 0, len(beh_time_arr) - 1)
-
-    time_diff_left = np.abs(event_times - beh_time_arr[idx_left])
-    time_diff_right = np.abs(event_times - beh_time_arr[idx_right])
-
-    # Choose the closer neighbor
-    use_right = time_diff_right < time_diff_left
-    idx_final = np.where(use_right, idx_right, idx_left)
-    time_diff_final = np.where(use_right, time_diff_right, time_diff_left)
-
-    beh_matched = beh_times.iloc[idx_final].reset_index(drop=True)
-    out = pd.concat([events.reset_index(drop=True), beh_matched], axis=1)
-
-    # Filter by timestamp difference threshold
-    out = out[time_diff_final <= time_threshold].reset_index(drop=True)
-
-    # Apply speed threshold
-    out = out[out["speed"] >= float(speed_threshold)].reset_index(drop=True)
-    return out
-
-
-def load_traces(
-    neural_path: Path,
-    trace_name: str = "C",
-) -> xr.DataArray:
-    """Load traces from a Minian-style zarr store as a DataArray.
-
-    Parameters
-    ----------
-    neural_path:
-        Directory containing ``<trace_name>.zarr``.
-    trace_name:
-        Base name of the zarr group (e.g. ``"C"`` or ``"C_lp"``).
-        Also used as the variable name if the zarr contains a Dataset.
-
-    Returns
-    -------
-    xr.DataArray
-        DataArray with dimensions ('unit_id', 'frame').
-    """
-    zarr_path = neural_path / f"{trace_name}.zarr"
-    ds_or_da = xr.open_zarr(zarr_path, consolidated=False)
-
-    if isinstance(ds_or_da, xr.Dataset):
-        if trace_name not in ds_or_da:
-            raise KeyError(
-                f"Variable {trace_name!r} not found in dataset; "
-                f"available: {list(ds_or_da.data_vars)}"
-            )
-        C = ds_or_da[trace_name]
-    else:
-        C = ds_or_da
-
-    if "unit_id" not in C.dims or "frame" not in C.dims:
-        raise ValueError(f"Expected dims ('unit_id','frame'), got {C.dims}")
-
-    # Validate coordinates are unique
-    unit_ids = C.coords["unit_id"].values
-    if len(unit_ids) != len(np.unique(unit_ids)):
-        raise ValueError(
-            f"unit_id coordinates must be unique, but found {len(np.unique(unit_ids))} "
-            f"unique values for {len(unit_ids)} units. "
-            f"The zarr file has corrupted coordinates."
-        )
-
-    return C
-
-
-def run_deconvolution(
-    C_da: Any,
-    unit_ids: list[int],
-    g: tuple[float, float],
-    baseline: float | str,
-    penalty: float,
-    s_min: float,
-    progress_bar: Any = None,
-) -> tuple[list[int], list[np.ndarray], list[np.ndarray]]:
-    """Run OASIS deconvolution on calcium traces.
-
-    Parameters
-    ----------
-    C_da : xarray.DataArray
-        Calcium traces with dimensions (unit_id, frame).
-    unit_ids : list[int]
-        List of unit IDs to process.
-    g : tuple[float, float]
-        AR(2) coefficients for OASIS.
-    baseline : float or str
-        Baseline correction. Use 'pXX' for percentile (e.g., 'p10') or numeric value.
-    penalty : float
-        Sparsity penalty for OASIS.
-    s_min : float
-        Minimum event size threshold.
-    progress_bar : optional
-        tqdm progress bar wrapper (e.g., tqdm.notebook.tqdm).
-
-    Returns
-    -------
-    good_unit_ids : list[int]
-        Unit IDs that were successfully deconvolved.
-    C_list : list[np.ndarray]
-        Deconvolved calcium traces.
-    S_list : list[np.ndarray]
-        Spike trains.
-    """
-    from oasis.oasis_methods import oasisAR2
-
-    good_unit_ids: list[int] = []
-    C_list: list[np.ndarray] = []
-    S_list: list[np.ndarray] = []
-
-    iterator = progress_bar(unit_ids) if progress_bar else unit_ids
-
-    for uid in iterator:
-        y = np.ascontiguousarray(C_da.sel(unit_id=uid).values, dtype=np.float64)
-
-        # Baseline correction
-        if isinstance(baseline, str) and baseline.startswith("p"):
-            p = float(baseline[1:])
-            b = float(np.percentile(y, p))
-        else:
-            b = float(baseline)
-
-        y_corrected = y - b
-
-        try:
-            c, s = oasisAR2(y_corrected, g1=g[0], g2=g[1], lam=penalty, s_min=s_min)
-            good_unit_ids.append(int(uid))
-            C_list.append(np.asarray(c, dtype=float))
-            S_list.append(np.asarray(s, dtype=float))
-        except Exception:
-            continue
-
-    return good_unit_ids, C_list, S_list
-
-
-def build_event_index_dataframe(
-    unit_ids: list[int],
-    S_list: list[np.ndarray],
-) -> pd.DataFrame:
-    """Build event index DataFrame from spike trains.
-
-    Parameters
-    ----------
-    unit_ids : list[int]
-        Unit IDs corresponding to each spike train.
-    S_list : list[np.ndarray]
-        List of spike train arrays.
-
-    Returns
-    -------
-    pd.DataFrame
-        Event index with columns: unit_id, frame, s.
-    """
-    S_arr = np.stack(S_list, axis=0)
-    event_rows = []
-
-    for i, uid in enumerate(unit_ids):
-        s_vec = S_arr[i]
-        frames = np.nonzero(s_vec > 0)[0]
-        for fr in frames:
-            event_rows.append({"unit_id": uid, "frame": int(fr), "s": float(s_vec[fr])})
-
-    return pd.DataFrame(event_rows)

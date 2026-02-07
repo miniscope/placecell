@@ -323,11 +323,16 @@ def plot_summary_scatter(
     fisher_z = [unit_results[uid]["stability_z"] for uid in unit_ids]
     si_vals = [unit_results[uid]["si"] for uid in unit_ids]
 
+    stab_pvals = [unit_results[uid].get("stability_p_val", np.nan) for uid in unit_ids]
+
     # Determine colors based on pass/fail both tests
     colors = []
-    for p, s in zip(p_vals, stab_corrs):
+    for p, s, sp in zip(p_vals, stab_corrs, stab_pvals):
         sig_pass = p < p_value_threshold
-        stab_pass = not np.isnan(s) and s >= stability_threshold
+        if not np.isnan(sp):
+            stab_pass = sp < p_value_threshold
+        else:
+            stab_pass = not np.isnan(s) and s >= stability_threshold
         if sig_pass and stab_pass:
             colors.append("green")  # Both pass
         elif sig_pass and not stab_pass:
@@ -337,7 +342,7 @@ def plot_summary_scatter(
         else:
             colors.append("red")  # Both fail
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 3))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
 
     # Left plot: Significance vs Stability
     ax1.scatter(p_vals, stab_corrs, c=colors, s=50, alpha=0.7, edgecolors="black", linewidths=0.5)
@@ -477,6 +482,8 @@ def browse_place_cells(
     event_threshold_sigma: float = 2.0,
     p_value_threshold: float | None = None,
     stability_threshold: float = 0.5,
+    min_shift_seconds: float = 0.0,
+    si_weight_mode: str = "amplitude",
 ) -> None:
     """
     Interactive browser for place cell analysis with keyboard navigation.
@@ -603,10 +610,13 @@ def browse_place_cells(
             activity_sigma=activity_sigma,
             event_threshold_sigma=event_threshold_sigma,
             n_shuffles=n_shuffles,
+            random_seed=random_seed,
             behavior_fps=behavior_fps,
             min_occupancy=min_occupancy,
             occupancy_sigma=occupancy_sigma,
             stability_threshold=stability_threshold,
+            min_shift_seconds=min_shift_seconds,
+            si_weight_mode=si_weight_mode,
         )
 
         # Visualization-specific: events above threshold for this unit
@@ -635,6 +645,7 @@ def browse_place_cells(
             "p_val": result["p_val"],
             "stability_corr": result["stability_corr"],
             "stability_z": result["stability_z"],
+            "stability_p_val": result["stability_p_val"],
             "rate_map_first": result["rate_map_first"],
             "rate_map_second": result["rate_map_second"],
             "vis_data_above": vis_data_above,
@@ -945,10 +956,15 @@ def browse_place_cells(
 
         # Determine stability test pass/fail
         stab_corr = result["stability_corr"]
+        stab_p = result.get("stability_p_val", np.nan)
         if np.isnan(stab_corr):
             stab_pass = None  # N/A
             stab_text = "N/A"
             stab_color = "gray"
+        elif not np.isnan(stab_p):
+            stab_pass = stab_p < threshold
+            stab_text = "pass" if stab_pass else "fail"
+            stab_color = "green" if stab_pass else "red"
         else:
             stab_pass = stab_corr >= stability_threshold
             stab_text = "pass" if stab_pass else "fail"
@@ -1004,7 +1020,12 @@ def browse_place_cells(
         sig_status._is_test_status = True
 
         # Stability test (stacked below significance test)
-        stab_corr_str = f"r={stab_corr:.2f}" if not np.isnan(stab_corr) else ""
+        stab_parts = []
+        if not np.isnan(stab_corr):
+            stab_parts.append(f"r={stab_corr:.2f}")
+        if not np.isnan(stab_p):
+            stab_parts.append(f"p={stab_p:.3f}")
+        stab_corr_str = ", ".join(stab_parts)
         stab_label = fig.text(
             0.02,
             0.92,

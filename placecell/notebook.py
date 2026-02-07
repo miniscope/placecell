@@ -69,7 +69,7 @@ def create_unit_browser(
     n_units = len(unique_units)
 
     # Create figure with 3 rows
-    fig = plt.figure(figsize=(8, 7))
+    fig = plt.figure(figsize=(10, 8))
     fig.canvas.toolbar_visible = False
     fig.canvas.header_visible = False
     fig.canvas.layout.width = "100%"
@@ -281,7 +281,8 @@ def create_unit_browser(
         # Status text
         n_events = len(result["unit_data"]) if not result["unit_data"].empty else 0
         p_val = result["p_val"]
-        stab_corr = result["stability_corr"]
+        stab_corr = result.get("stability_corr", np.nan)
+        stab_p = result.get("stability_p_val", np.nan)
 
         sig_pass = p_val < p_value_threshold
         sig_text = "pass" if sig_pass else "fail"
@@ -289,6 +290,10 @@ def create_unit_browser(
 
         if np.isnan(stab_corr):
             stab_text, stab_color = "N/A", "gray"
+        elif not np.isnan(stab_p):
+            stab_pass = stab_p < p_value_threshold
+            stab_text = "pass" if stab_pass else "fail"
+            stab_color = "green" if stab_pass else "red"
         else:
             stab_pass = stab_corr >= stability_threshold
             stab_text = "pass" if stab_pass else "fail"
@@ -319,7 +324,12 @@ def create_unit_browser(
         )
         text_annotations.append(txt)
 
-        stab_str = f"r={stab_corr:.2f}" if not np.isnan(stab_corr) else ""
+        stab_parts = []
+        if not np.isnan(stab_corr):
+            stab_parts.append(f"r={stab_corr:.2f}")
+        if not np.isnan(stab_p):
+            stab_parts.append(f"p={stab_p:.3f}")
+        stab_str = ", ".join(stab_parts)
         txt = fig.text(0.48, 0.97, f"Stab ({stab_str}): ", ha="left", va="top", fontsize=8)
         text_annotations.append(txt)
         txt = fig.text(
