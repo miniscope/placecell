@@ -771,7 +771,7 @@ def browse_place_cells(
         ax2.set_aspect("equal")
         ax2.axis("off")
 
-        # 3. Rate map (NaN values will appear white - bins below min_occupancy)
+        # 3. Rate map
         rate_map_data = result["rate_map"].T
         im = ax3.imshow(
             rate_map_data,
