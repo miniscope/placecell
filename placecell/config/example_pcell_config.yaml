@@ -15,7 +15,7 @@ neural:
 behavior:
   id: behavior
   behavior_fps: 20.0
-  speed_threshold: 50.0
+  speed_threshold: 10.0
   speed_window_frames: 2
   bodypart: LED_clean
   spatial_map:

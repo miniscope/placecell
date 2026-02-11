@@ -118,10 +118,20 @@ Launches `pcell plot` with the processed data.
 - **Stability Test**: split-half correlation comparing first and second half rate maps
 - **P-value Filter**: if `p_value_threshold` is set, filter to significant units
 
+**Place Field Detection** (Guo et al. 2023):
+- **Shuffled rate percentile**: for each unit, circular-shift shuffles produce a per-bin 95th percentile rate threshold
+- **Seed detection**: bins exceeding the 95th percentile form seeds; only contiguous seed regions with ≥ `place_field_min_bins` bins are kept
+- **Extension**: each seed region extends to contiguous bins with rate ≥ `place_field_threshold` × (seed's peak rate)
+- Red contours on rate maps show the resulting place field boundaries
+
+**Coverage Analysis:**
+- **Coverage map**: sum of place field masks across place cells (how many cells cover each bin)
+- **Coverage curve**: cells sorted by field size (largest first), cumulative fraction of environment covered
+
 **Display:**
 - Max projection with cell footprint overlay
 - Trajectory with event locations (only events above speed threshold)
-- Rate map (normalized event rate)
+- Rate map (normalized event rate) with place field contour
 - SI histogram (actual SI vs shuffle distribution)
 - Stability correlation with first/second half rate maps
 - Scrollable trace view at bottom
@@ -136,6 +146,9 @@ Launches `pcell plot` with the processed data.
 - `n_shuffles`: number of shuffle iterations for p-value calculation
 - `p_value_threshold`: filter units by spatial information significance
 - `stability_threshold`: correlation threshold for stability test (compares first/second half rate maps)
+- `stability_method`: `'shuffle'` (circular-shift significance) or `'threshold'` (fixed correlation cutoff)
+- `place_field_threshold`: fraction of peak rate for place field boundary (red contour)
+- `place_field_min_bins`: minimum contiguous bins for a place field component (filters isolated spots)
 
 ## Configuration Reference
 
@@ -191,5 +204,11 @@ behavior:
     event_threshold_sigma: 0  # Sigma multiplier for event amplitude threshold in trajectory visualization
     p_value_threshold: 0.05  # P-value threshold. Only units with p < threshold are plotted.
     stability_threshold: 0.5  # Correlation threshold for stability test (first/second half rate maps)
+    stability_method: shuffle  # 'shuffle' (p-value via circular shift) or 'threshold' (fixed r cutoff)
+    min_shift_seconds: 20  # Minimum circular shift (seconds) for shuffle test
+    si_weight_mode: amplitude  # 'amplitude' (event amplitudes) or 'binary' (event counts)
+    place_field_threshold: 0.2  # Fraction of peak rate for place field boundary (red contour)
+    place_field_min_bins: 5  # Minimum contiguous bins for a place field component
+    place_field_seed_percentile: 95  # Percentile of shuffled rates for seed detection. null = skip (faster)
 ```
 :::
