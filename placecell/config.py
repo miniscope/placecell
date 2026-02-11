@@ -106,8 +106,65 @@ class SpatialMapConfig(MiniscopeConfig, ConfigYAMLMixin):
         ge=-1.0,
         le=1.0,
         description=(
-            "Correlation threshold for stability test pass/fail. "
+            "Correlation threshold for stability test pass/fail (used when "
+            "stability_method='threshold'). "
             "Units with first/second half rate map correlation >= threshold pass."
+        ),
+    )
+    stability_method: str = Field(
+        "shuffle",
+        description=(
+            "Stability test method: "
+            "'shuffle' uses circular-shift significance test (Shuman et al. 2020), "
+            "'threshold' uses a fixed correlation threshold (stability_threshold)."
+        ),
+    )
+    min_shift_seconds: float = Field(
+        20.0,
+        ge=0.0,
+        description=(
+            "Minimum circular shift in seconds for shuffle significance test. "
+            "Ensures shuffled data breaks the temporal-spatial association. "
+            "Set to 0 to allow any shift size (original behavior)."
+        ),
+    )
+    si_weight_mode: str = Field(
+        "binary",
+        description=(
+            "Weight mode for spatial information calculation: "
+            "'amplitude' uses event amplitudes (s values), "
+            "'binary' uses event counts (1 per event, ignoring amplitude). "
+            "Binary mode is more robust to bursty firing patterns."
+        ),
+    )
+    place_field_threshold: float = Field(
+        0.05,
+        gt=0.0,
+        lt=1.0,
+        description=(
+            "Fraction of peak rate to define the place field boundary "
+            "(red contour on rate maps and coverage analysis). "
+            "Applied to the smoothed, normalized rate map. "
+            "E.g. 0.05 means bins >= 5%% of peak are inside the field."
+        ),
+    )
+    place_field_min_bins: int = Field(
+        5,
+        ge=1,
+        description=(
+            "Minimum number of contiguous bins for a connected component "
+            "to count as a place field (Guo et al. 2023). Smaller "
+            "disconnected regions are discarded. Set to 1 to disable."
+        ),
+    )
+    place_field_seed_percentile: float | None = Field(
+        95.0,
+        description=(
+            "Percentile of shuffled rate maps for place field seed detection "
+            "(Guo et al. 2023). Bins exceeding this percentile form seeds; "
+            "seeds extend to contiguous bins above place_field_threshold. "
+            "Set to null to skip seed detection and use simplified "
+            "threshold-only algorithm (faster)."
         ),
     )
 

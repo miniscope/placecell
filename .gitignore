@@ -1,6 +1,7 @@
 export/
 output/
 user_data/
+_tmp/
 
 # hatch-vcs generated version file
 placecell/_version.py

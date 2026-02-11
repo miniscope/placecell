@@ -16,16 +16,22 @@ behavior:
   id: behavior
   behavior_fps: 20.0
   speed_threshold: 10.0
-  speed_window_frames: 5
+  speed_window_frames: 2
   bodypart: LED_clean
   spatial_map:
     id: spatial_map
     bins: 50
-    min_occupancy: 0.05 # Minimum occupancy (in seconds) to include a bin in spatial map
+    min_occupancy: 0.025 # Minimum occupancy (in seconds) to include a bin in spatial map
     occupancy_sigma: 3  # Gaussian smoothing (in bins) for occupancy map (0 = no smoothing)
     activity_sigma: 3  # Gaussian smoothing (in bins) for spatial activity map
     n_shuffles: 500
     random_seed: 1
     event_threshold_sigma: 0  # Sigma multiplier for event amplitude threshold in trajectory visualization
     p_value_threshold: 0.05 # P-value threshold. Units with p < threshold pass.
-    stability_threshold: 0.5 # Correlation threshold. Units with r >= threshold pass.
+    stability_threshold: 0.5 # Correlation threshold (used when stability_method='threshold').
+    stability_method: threshold  # Stability test: 'shuffle' (p-value via circular shift) or 'threshold' (fixed r cutoff)
+    min_shift_seconds: 20  # Minimum circular shift (seconds) for shuffle test. 0 = no minimum.
+    si_weight_mode: amplitude  # SI weight mode: 'amplitude' (event amplitudes) or 'binary' (event counts)
+    place_field_threshold: 0.25  # Fraction of peak rate for place field boundary (red contour). Applied to smoothed rate map.
+    place_field_min_bins: 5  # Minimum contiguous bins for a place field component. Smaller disconnected regions are discarded.
+    place_field_seed_percentile: 95  # Percentile of shuffled rates for seed detection (Guo et al. 2023). null = skip seed detection (faster).

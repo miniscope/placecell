@@ -11,6 +11,7 @@ from tqdm import tqdm
 
 from placecell.analysis import (
     compute_occupancy_map,
+    compute_place_field_mask,
     compute_unit_analysis,
 )
 from placecell.io import load_behavior_data, load_neural_data
@@ -323,11 +324,16 @@ def plot_summary_scatter(
     fisher_z = [unit_results[uid]["stability_z"] for uid in unit_ids]
     si_vals = [unit_results[uid]["si"] for uid in unit_ids]
 
+    stab_pvals = [unit_results[uid].get("stability_p_val", np.nan) for uid in unit_ids]
+
     # Determine colors based on pass/fail both tests
     colors = []
-    for p, s in zip(p_vals, stab_corrs):
+    for p, s, sp in zip(p_vals, stab_corrs, stab_pvals):
         sig_pass = p < p_value_threshold
-        stab_pass = not np.isnan(s) and s >= stability_threshold
+        if not np.isnan(sp):
+            stab_pass = sp < p_value_threshold
+        else:
+            stab_pass = not np.isnan(s) and s >= stability_threshold
         if sig_pass and stab_pass:
             colors.append("green")  # Both pass
         elif sig_pass and not stab_pass:
@@ -337,7 +343,7 @@ def plot_summary_scatter(
         else:
             colors.append("red")  # Both fail
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
 
     # Left plot: Significance vs Stability
     ax1.scatter(p_vals, stab_corrs, c=colors, s=50, alpha=0.7, edgecolors="black", linewidths=0.5)
@@ -477,6 +483,8 @@ def browse_place_cells(
     event_threshold_sigma: float = 2.0,
     p_value_threshold: float | None = None,
     stability_threshold: float = 0.5,
+    min_shift_seconds: float = 0.0,
+    si_weight_mode: str = "amplitude",
 ) -> None:
     """
     Interactive browser for place cell analysis with keyboard navigation.
@@ -603,9 +611,13 @@ def browse_place_cells(
             activity_sigma=activity_sigma,
             event_threshold_sigma=event_threshold_sigma,
             n_shuffles=n_shuffles,
+            random_seed=random_seed,
             behavior_fps=behavior_fps,
             min_occupancy=min_occupancy,
+            occupancy_sigma=occupancy_sigma,
             stability_threshold=stability_threshold,
+            min_shift_seconds=min_shift_seconds,
+            si_weight_mode=si_weight_mode,
         )
 
         # Visualization-specific: events above threshold for this unit
@@ -634,6 +646,7 @@ def browse_place_cells(
             "p_val": result["p_val"],
             "stability_corr": result["stability_corr"],
             "stability_z": result["stability_z"],
+            "stability_p_val": result["stability_p_val"],
             "rate_map_first": result["rate_map_first"],
             "rate_map_second": result["rate_map_second"],
             "vis_data_above": vis_data_above,
@@ -722,15 +735,33 @@ def browse_place_cells(
         vis_data_above = result["vis_data_above"]
         ax2.plot(trajectory_df["x"], trajectory_df["y"], "k-", alpha=1.0, linewidth=1, zorder=1)
 
-        # Plot above-threshold spikes with alpha proportional to amplitude
+        # Plot above-threshold spikes with alpha proportional to amplitude/occupancy
         if not vis_data_above.empty:
             amps = vis_data_above["s"].values
-            amp_max = np.max(amps) if len(amps) > 0 and np.max(amps) > 0 else 1.0
-            # Linear alpha from 0 to 1
-            alphas = amps / amp_max
+            x_vals = vis_data_above["x"].values
+            y_vals = vis_data_above["y"].values
+
+            # Find spatial bin index for each event
+            x_bin_idx = np.digitize(x_vals, x_edges) - 1
+            y_bin_idx = np.digitize(y_vals, y_edges) - 1
+
+            # Clip to valid bin indices
+            x_bin_idx = np.clip(x_bin_idx, 0, len(x_edges) - 2)
+            y_bin_idx = np.clip(y_bin_idx, 0, len(y_edges) - 2)
+
+            # Look up occupancy at each event location
+            event_occupancy = occupancy_time[x_bin_idx, y_bin_idx]
+
+            # Normalize amplitude by occupancy (avoid division by zero)
+            normalized_amps = amps / np.maximum(event_occupancy, 0.01)
+
+            # Scale to 0-1 range
+            norm_max = np.max(normalized_amps) if len(normalized_amps) > 0 and np.max(normalized_amps) > 0 else 1.0
+            alphas = normalized_amps / norm_max
+
             ax2.scatter(
-                vis_data_above["x"],
-                vis_data_above["y"],
+                x_vals,
+                y_vals,
                 c="red",
                 s=30,
                 alpha=alphas,
@@ -741,7 +772,7 @@ def browse_place_cells(
         ax2.set_aspect("equal")
         ax2.axis("off")
 
-        # 3. Rate map (NaN values will appear white - bins below min_occupancy)
+        # 3. Rate map
         rate_map_data = result["rate_map"].T
         im = ax3.imshow(
             rate_map_data,
@@ -750,6 +781,20 @@ def browse_place_cells(
             aspect="equal",
             cmap="jet",
         )
+        field_mask = compute_place_field_mask(
+            result["rate_map"],
+            threshold=0.05,
+            shuffled_rate_p95=result.get("shuffled_rate_p95"),
+        )
+        if np.any(field_mask):
+            ax3.contour(
+                field_mask.T.astype(float),
+                levels=[0.5],
+                colors="red",
+                linewidths=1.5,
+                extent=[x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]],
+                origin="lower",
+            )
         ax3.set_title("Rate map")
         ax3.axis("off")
 
@@ -926,10 +971,15 @@ def browse_place_cells(
 
         # Determine stability test pass/fail
         stab_corr = result["stability_corr"]
+        stab_p = result.get("stability_p_val", np.nan)
         if np.isnan(stab_corr):
             stab_pass = None  # N/A
             stab_text = "N/A"
             stab_color = "gray"
+        elif not np.isnan(stab_p):
+            stab_pass = stab_p < threshold
+            stab_text = "pass" if stab_pass else "fail"
+            stab_color = "green" if stab_pass else "red"
         else:
             stab_pass = stab_corr >= stability_threshold
             stab_text = "pass" if stab_pass else "fail"
@@ -985,7 +1035,12 @@ def browse_place_cells(
         sig_status._is_test_status = True
 
         # Stability test (stacked below significance test)
-        stab_corr_str = f"r={stab_corr:.2f}" if not np.isnan(stab_corr) else ""
+        stab_parts = []
+        if not np.isnan(stab_corr):
+            stab_parts.append(f"r={stab_corr:.2f}")
+        if not np.isnan(stab_p):
+            stab_parts.append(f"p={stab_p:.3f}")
+        stab_corr_str = ", ".join(stab_parts)
         stab_label = fig.text(
             0.02,
             0.92,
