@@ -15,13 +15,13 @@ neural:
 behavior:
   id: behavior
   behavior_fps: 20.0
-  speed_threshold: 10.0
+  speed_threshold: 50.0
   speed_window_frames: 2
   bodypart: LED_clean
   spatial_map:
     id: spatial_map
     bins: 50
-    min_occupancy: 0.1 # Minimum occupancy (in seconds) to include a bin in spatial map
+    min_occupancy: 0.025 # Minimum occupancy (in seconds) to include a bin in spatial map
     occupancy_sigma: 3  # Gaussian smoothing (in bins) for occupancy map (0 = no smoothing)
     activity_sigma: 3  # Gaussian smoothing (in bins) for spatial activity map
     n_shuffles: 500
