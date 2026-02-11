@@ -137,6 +137,36 @@ class SpatialMapConfig(MiniscopeConfig, ConfigYAMLMixin):
             "Binary mode is more robust to bursty firing patterns."
         ),
     )
+    place_field_threshold: float = Field(
+        0.05,
+        gt=0.0,
+        lt=1.0,
+        description=(
+            "Fraction of peak rate to define the place field boundary "
+            "(red contour on rate maps and coverage analysis). "
+            "Applied to the smoothed, normalized rate map. "
+            "E.g. 0.05 means bins >= 5%% of peak are inside the field."
+        ),
+    )
+    place_field_min_bins: int = Field(
+        5,
+        ge=1,
+        description=(
+            "Minimum number of contiguous bins for a connected component "
+            "to count as a place field (Guo et al. 2023). Smaller "
+            "disconnected regions are discarded. Set to 1 to disable."
+        ),
+    )
+    place_field_seed_percentile: float | None = Field(
+        95.0,
+        description=(
+            "Percentile of shuffled rate maps for place field seed detection "
+            "(Guo et al. 2023). Bins exceeding this percentile form seeds; "
+            "seeds extend to contiguous bins above place_field_threshold. "
+            "Set to null to skip seed detection and use simplified "
+            "threshold-only algorithm (faster)."
+        ),
+    )
 
 
 class BehaviorConfig(MiniscopeConfig, ConfigYAMLMixin):

@@ -2,7 +2,7 @@
 
 import numpy as np
 import pandas as pd
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter, label
 
 
 def gaussian_filter_normalized(
@@ -266,6 +266,113 @@ def compute_spatial_information(
     return actual_si, p_val, shuffled_sis
 
 
+def compute_shuffled_rate_percentile(
+    unit_events: pd.DataFrame,
+    trajectory_df: pd.DataFrame,
+    occupancy_time: np.ndarray,
+    valid_mask: np.ndarray,
+    x_edges: np.ndarray,
+    y_edges: np.ndarray,
+    activity_sigma: float = 1.0,
+    n_shuffles: int = 100,
+    min_shift_seconds: float = 0.0,
+    behavior_fps: float = 20.0,
+    si_weight_mode: str = "amplitude",
+    random_seed: int | None = None,
+    percentile: float = 95.0,
+) -> np.ndarray:
+    """Compute per-bin percentile of shuffled smoothed rate maps.
+
+    Used for the seed detection step of the Guo et al. 2023 place field
+    algorithm.  For each shuffle iteration, circularly shifts event times
+    relative to the trajectory, computes a smoothed and normalized (0-1)
+    rate map, then returns the requested percentile across shuffles at
+    each spatial bin.
+
+    Parameters
+    ----------
+    unit_events:
+        DataFrame with x, y, s, beh_frame_index columns for a single unit.
+    trajectory_df:
+        Speed-filtered trajectory with beh_frame_index column.
+    occupancy_time:
+        Occupancy time map.
+    valid_mask:
+        Valid occupancy mask.
+    x_edges, y_edges:
+        Spatial bin edges.
+    activity_sigma:
+        Gaussian smoothing sigma for rate maps.
+    n_shuffles:
+        Number of shuffle iterations.
+    min_shift_seconds:
+        Minimum circular shift in seconds.
+    behavior_fps:
+        Behavior sampling rate.
+    si_weight_mode:
+        ``"amplitude"`` or ``"binary"``.
+    random_seed:
+        Random seed for reproducibility.
+    percentile:
+        Percentile to compute (default 95).
+
+    Returns
+    -------
+    np.ndarray
+        Per-bin percentile of the shuffled normalized rate maps.
+    """
+    result = np.zeros_like(occupancy_time)
+    if unit_events.empty:
+        return result
+
+    # Use a local RNG to avoid disturbing the global state.
+    # Offset seed by a large prime so shuffles differ from SI shuffles.
+    rng = np.random.RandomState(random_seed + 104729 if random_seed is not None else None)
+
+    traj_frames = trajectory_df["beh_frame_index"].values
+    if si_weight_mode == "binary":
+        u_grouped = unit_events.groupby("beh_frame_index").size()
+    else:
+        u_grouped = unit_events.groupby("beh_frame_index")["s"].sum()
+    aligned_events = u_grouped.reindex(traj_frames, fill_value=0).values.astype(float)
+
+    n_frames = len(aligned_events)
+    min_shift_frames = int(min_shift_seconds * behavior_fps)
+    min_shift_frames = min(min_shift_frames, n_frames // 2)
+
+    traj_x = trajectory_df["x"].values
+    traj_y = trajectory_df["y"].values
+
+    shuffled_rates = np.zeros((n_shuffles, *occupancy_time.shape))
+
+    for i in range(n_shuffles):
+        if min_shift_frames > 0:
+            shift = rng.randint(min_shift_frames, n_frames - min_shift_frames)
+        else:
+            shift = rng.randint(n_frames)
+        s_shuffled = np.roll(aligned_events, shift)
+
+        event_w_shuf, _, _ = np.histogram2d(
+            traj_x,
+            traj_y,
+            bins=[x_edges, y_edges],
+            weights=s_shuffled,
+        )
+        rate_shuf = np.zeros_like(occupancy_time)
+        rate_shuf[valid_mask] = event_w_shuf[valid_mask] / occupancy_time[valid_mask]
+        rate_shuf_smooth = gaussian_filter_normalized(rate_shuf, sigma=activity_sigma)
+
+        # Normalize 0-1 (same as actual rate map)
+        peak = np.nanmax(rate_shuf_smooth[valid_mask]) if np.any(valid_mask) else 0
+        if peak > 0:
+            rate_shuf_smooth[valid_mask] /= peak
+        rate_shuf_smooth[~valid_mask] = 0
+
+        shuffled_rates[i] = rate_shuf_smooth
+
+    return np.percentile(shuffled_rates, percentile, axis=0)
+
+
 def compute_stability_score(
     unit_events: pd.DataFrame,
     trajectory_df: pd.DataFrame,
@@ -514,6 +621,7 @@ def compute_unit_analysis(
     stability_method: str = "shuffle",
     min_shift_seconds: float = 0.0,
     si_weight_mode: str = "amplitude",
+    place_field_seed_percentile: float | None = 95.0,
 ) -> dict:
     """Compute rate map, spatial information, stability, and thresholded events for a unit.
 
@@ -554,6 +662,10 @@ def compute_unit_analysis(
         Minimum circular shift in seconds for shuffle significance test.
     si_weight_mode:
         Weight mode for SI: ``"amplitude"`` or ``"binary"``.
+    place_field_seed_percentile:
+        Percentile of shuffled rate maps for seed detection (Guo et al.
+        2023).  ``None`` skips the computation and uses the simplified
+        threshold-only algorithm (faster).
 
     Returns
     -------
@@ -566,9 +678,12 @@ def compute_unit_analysis(
         df_filtered[df_filtered["unit_id"] == unit_id] if not df_filtered.empty else pd.DataFrame()
     )
 
-    # Rate map
+    # Rate map (smoothed + normalized for display, raw for place field detection)
     rate_map = compute_rate_map(
         unit_data, occupancy_time, valid_mask, x_edges, y_edges, activity_sigma
+    )
+    rate_map_raw = compute_raw_rate_map(
+        unit_data, occupancy_time, valid_mask, x_edges, y_edges
     )
 
     # Spatial information
@@ -594,6 +709,26 @@ def compute_unit_analysis(
         vis_threshold = 0.0
         events_above = pd.DataFrame()
 
+    # Shuffled rate percentile for place field seed detection (Guo et al. 2023)
+    if place_field_seed_percentile is not None:
+        shuffled_rate_p95 = compute_shuffled_rate_percentile(
+            unit_data,
+            trajectory_df,
+            occupancy_time,
+            valid_mask,
+            x_edges,
+            y_edges,
+            activity_sigma=activity_sigma,
+            n_shuffles=n_shuffles,
+            min_shift_seconds=min_shift_seconds,
+            behavior_fps=behavior_fps,
+            si_weight_mode=si_weight_mode,
+            random_seed=random_seed,
+            percentile=place_field_seed_percentile,
+        )
+    else:
+        shuffled_rate_p95 = None
+
     # Stability test
     stab_shuffles = n_shuffles if stability_method == "shuffle" else 0
     stability_corr, stability_z, stability_p_val, rate_map_first, rate_map_second = (
@@ -617,9 +752,11 @@ def compute_unit_analysis(
 
     return {
         "rate_map": rate_map,
+        "rate_map_raw": rate_map_raw,
         "si": si,
         "p_val": p_val,
         "shuffled_sis": shuffled_sis,
+        "shuffled_rate_p95": shuffled_rate_p95,
         "events_above_threshold": events_above,
         "vis_threshold": vis_threshold,
         "unit_data": unit_data,
@@ -629,3 +766,243 @@ def compute_unit_analysis(
         "rate_map_first": rate_map_first,
         "rate_map_second": rate_map_second,
     }
+
+
+def compute_raw_rate_map(
+    unit_events: pd.DataFrame,
+    occupancy_time: np.ndarray,
+    valid_mask: np.ndarray,
+    x_edges: np.ndarray,
+    y_edges: np.ndarray,
+) -> np.ndarray:
+    """Compute unsmoothed binned spatial activity rate.
+
+    This is the raw event-weight / occupancy-time rate without Gaussian
+    smoothing or min-max normalization.  It is used for place field
+    boundary detection where smoothing would artificially widen the field.
+
+    Parameters
+    ----------
+    unit_events:
+        DataFrame with x, y, s columns for a single unit.
+    occupancy_time:
+        Occupancy time map.
+    valid_mask:
+        Valid occupancy mask.
+    x_edges, y_edges:
+        Spatial bin edges.
+
+    Returns
+    -------
+    np.ndarray
+        Unsmoothed rate map.  Invalid bins are set to NaN.
+    """
+    if unit_events.empty:
+        return np.full_like(occupancy_time, np.nan)
+
+    event_weights, _, _ = np.histogram2d(
+        unit_events["x"],
+        unit_events["y"],
+        bins=[x_edges, y_edges],
+        weights=unit_events["s"],
+    )
+    rate_map = np.full_like(occupancy_time, np.nan)
+    rate_map[valid_mask] = event_weights[valid_mask] / occupancy_time[valid_mask]
+    return rate_map
+
+
+def compute_place_field_mask(
+    rate_map: np.ndarray,
+    threshold: float = 0.05,
+    min_bins: int = 5,
+    shuffled_rate_p95: np.ndarray | None = None,
+) -> np.ndarray:
+    """Compute a binary mask of the place field from a rate map.
+
+    Implements the place field detection algorithm from Guo et al. 2023
+    (Science Advances, Supplementary Methods lines 1013-1020):
+
+    1. **Seed detection**: find bins where the actual rate exceeds the
+       95th percentile of the shuffled rate (``shuffled_rate_p95``).
+       Only contiguous seed regions with >= ``min_bins`` bins are kept.
+    2. **Extension**: from each seed region, extend to all contiguous
+       bins whose rate >= ``threshold`` × (seed region's peak rate).
+
+    If ``shuffled_rate_p95`` is not provided, falls back to the
+    simplified threshold-only algorithm (threshold + connected-component
+    size filter).
+
+    Parameters
+    ----------
+    rate_map:
+        Smoothed, normalized (0-1) rate map.  NaN bins are treated as
+        outside the field.
+    threshold:
+        Fraction of peak rate for field extension (step 2).
+    min_bins:
+        Minimum number of contiguous bins for a seed region (step 1)
+        or for a component in the simplified fallback.
+    shuffled_rate_p95:
+        Per-bin 95th percentile of shuffled normalized rate maps.
+        When provided, enables the full seed-extension algorithm.
+
+    Returns
+    -------
+    np.ndarray
+        Boolean mask where True indicates the place field.
+    """
+    mask = np.zeros_like(rate_map, dtype=bool)
+    valid = np.isfinite(rate_map)
+    if not np.any(valid):
+        return mask
+    peak = np.nanmax(rate_map)
+    if peak <= 0:
+        return mask
+
+    if shuffled_rate_p95 is None:
+        # Simplified fallback: threshold + connected-component size filter
+        raw_mask = valid & (rate_map >= threshold * peak)
+        if min_bins <= 1:
+            return raw_mask
+        labeled, n_components = label(raw_mask)
+        for comp_id in range(1, n_components + 1):
+            comp = labeled == comp_id
+            if comp.sum() >= min_bins:
+                mask |= comp
+        return mask
+
+    # --- Full Guo et al. 2023 algorithm ---
+
+    # Step 1: Identify significant seed bins (rate > 95th percentile of shuffle)
+    sig_bins = valid & (rate_map > shuffled_rate_p95)
+    seed_labeled, n_seeds = label(sig_bins)
+
+    # Keep only seed regions with >= min_bins contiguous bins
+    seed_mask = np.zeros_like(rate_map, dtype=bool)
+    for comp_id in range(1, n_seeds + 1):
+        comp = seed_labeled == comp_id
+        if comp.sum() >= min_bins:
+            seed_mask |= comp
+
+    if not np.any(seed_mask):
+        return mask
+
+    # Step 2: For each seed region, extend to contiguous bins
+    # >= threshold × (seed's peak rate)
+    seed_labeled_clean, n_seed_regions = label(seed_mask)
+
+    for seed_id in range(1, n_seed_regions + 1):
+        seed_region = seed_labeled_clean == seed_id
+        field_peak = np.nanmax(rate_map[seed_region])
+        if field_peak <= 0:
+            continue
+        extension_cutoff = threshold * field_peak
+
+        # Find all candidate bins above the extension threshold
+        candidate = valid & (rate_map >= extension_cutoff)
+        candidate_labeled, _ = label(candidate)
+
+        # Keep the candidate component(s) that overlap with this seed
+        overlapping_ids = set(candidate_labeled[seed_region]) - {0}
+        for cand_id in overlapping_ids:
+            mask |= candidate_labeled == cand_id
+
+    return mask
+
+
+def compute_coverage_map(
+    unit_results: dict,
+    threshold: float = 0.05,
+    min_bins: int = 5,
+) -> np.ndarray:
+    """Compute combined place field coverage across all units.
+
+    For each unit, thresholds the smoothed rate map to define the place
+    field, then sums all binary masks to get the number of overlapping
+    fields at each spatial bin.
+
+    Parameters
+    ----------
+    unit_results:
+        Dictionary mapping unit_id to analysis results
+        (must contain 'rate_map').
+    threshold:
+        Fraction of peak rate to define place field boundary.
+    min_bins:
+        Minimum contiguous bins for a connected component to count.
+
+    Returns
+    -------
+    np.ndarray
+        Integer array of place field overlap counts at each bin.
+    """
+    coverage = None
+    for uid, result in unit_results.items():
+        rm = result["rate_map"]
+        if coverage is None:
+            coverage = np.zeros_like(rm, dtype=int)
+        field_mask = compute_place_field_mask(
+            rm,
+            threshold=threshold,
+            min_bins=min_bins,
+            shuffled_rate_p95=result.get("shuffled_rate_p95"),
+        )
+        coverage += field_mask.astype(int)
+    if coverage is None:
+        return np.zeros((1, 1), dtype=int)
+    return coverage
+
+
+def compute_coverage_curve(
+    unit_results: dict,
+    valid_mask: np.ndarray,
+    threshold: float = 0.05,
+    min_bins: int = 5,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compute cumulative coverage curve: fraction of environment covered vs number of cells.
+
+    Cells are added one at a time (largest field first). At each step,
+    the fraction of valid bins covered by at least one place field is recorded.
+
+    Parameters
+    ----------
+    unit_results:
+        Dictionary mapping unit_id to analysis results
+        (must contain 'rate_map').
+    valid_mask:
+        Boolean mask of valid spatial bins.
+    threshold:
+        Fraction of peak rate to define place field boundary.
+    min_bins:
+        Minimum contiguous bins for a connected component to count.
+
+    Returns
+    -------
+    tuple
+        (n_cells_array, coverage_fraction_array) where n_cells goes from 0 to N.
+    """
+    n_valid = int(np.sum(valid_mask))
+    if n_valid == 0:
+        return np.array([0]), np.array([0.0])
+
+    # Collect per-unit field masks and sort by field size (largest first)
+    masks = []
+    for uid, result in unit_results.items():
+        m = compute_place_field_mask(
+            result["rate_map"],
+            threshold=threshold,
+            min_bins=min_bins,
+            shuffled_rate_p95=result.get("shuffled_rate_p95"),
+        )
+        masks.append(m)
+    masks.sort(key=lambda m: m.sum(), reverse=True)
+
+    n_cells = np.arange(len(masks) + 1)
+    fractions = np.zeros(len(masks) + 1)
+    cumulative = np.zeros_like(valid_mask, dtype=bool)
+    for i, m in enumerate(masks):
+        cumulative |= m
+        covered = np.sum(cumulative & valid_mask)
+        fractions[i + 1] = covered / n_valid
+
+    return n_cells, fractions

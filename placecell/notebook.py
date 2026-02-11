@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 from matplotlib.lines import Line2D
 
+from placecell.analysis import compute_place_field_mask
+
 
 def create_unit_browser(
     unit_results: dict[int, dict],
@@ -25,6 +27,8 @@ def create_unit_browser(
     p_value_threshold: float,
     stability_threshold: float,
     trace_time_window: float = 600.0,
+    place_field_threshold: float = 0.05,
+    place_field_min_bins: int = 5,
 ) -> tuple[plt.Figure, widgets.VBox]:
     """Create interactive place cell browser widget.
 
@@ -58,6 +62,8 @@ def create_unit_browser(
         Correlation threshold for stability.
     trace_time_window : float
         Time window for trace display in seconds.
+    place_field_threshold : float
+        Fraction of peak rate to define place field boundary for red contour.
 
     Returns
     -------
@@ -171,8 +177,18 @@ def create_unit_browser(
         ax3b.set_title("2nd half", fontsize=9)
         ax3b.axis("off")
 
-        # Plot full session
+        # Plot full session with red contour
         im3 = ax3c.imshow(result["rate_map"].T, origin="lower", cmap="jet", aspect="equal")
+        field_mask_full = compute_place_field_mask(
+            result["rate_map"],
+            threshold=place_field_threshold,
+            min_bins=place_field_min_bins,
+            shuffled_rate_p95=result.get("shuffled_rate_p95"),
+        )
+        if np.any(field_mask_full):
+            ax3c.contour(
+                field_mask_full.T.astype(float), levels=[0.5], colors="red", linewidths=1.5
+            )
         ax3c.set_title(f"Full (r={stab_corr:.2f})" if not np.isnan(stab_corr) else "Full", fontsize=9)
         ax3c.axis("off")
 

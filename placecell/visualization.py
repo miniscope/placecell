@@ -11,6 +11,7 @@ from tqdm import tqdm
 
 from placecell.analysis import (
     compute_occupancy_map,
+    compute_place_field_mask,
     compute_unit_analysis,
 )
 from placecell.io import load_behavior_data, load_neural_data
@@ -780,6 +781,20 @@ def browse_place_cells(
             aspect="equal",
             cmap="jet",
         )
+        field_mask = compute_place_field_mask(
+            result["rate_map"],
+            threshold=0.05,
+            shuffled_rate_p95=result.get("shuffled_rate_p95"),
+        )
+        if np.any(field_mask):
+            ax3.contour(
+                field_mask.T.astype(float),
+                levels=[0.5],
+                colors="red",
+                linewidths=1.5,
+                extent=[x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]],
+                origin="lower",
+            )
         ax3.set_title("Rate map")
         ax3.axis("off")
 
