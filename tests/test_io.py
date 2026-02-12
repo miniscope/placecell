@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from placecell.io import load_behavior_data, load_neural_data
+from placecell.io import load_behavior_data, load_visualization_data
 
 
 def test_load_behavior_data_shape(assets_dir: Path) -> None:
@@ -20,9 +20,9 @@ def test_load_behavior_data_shape(assets_dir: Path) -> None:
     assert len(trajectory_filtered) == 737
 
 
-def test_load_neural_data_shape(assets_dir: Path) -> None:
-    """load_neural_data should return expected shapes from test data."""
-    traces, max_proj, footprints = load_neural_data(
+def test_load_visualization_data_shape(assets_dir: Path) -> None:
+    """load_visualization_data should return expected shapes from test data."""
+    traces, max_proj, footprints = load_visualization_data(
         neural_path=assets_dir / "neural_data",
         trace_name="C",
     )

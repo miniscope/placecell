@@ -1,6 +1,8 @@
 """Notebook utilities for interactive place cell visualization."""
 
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
@@ -9,6 +11,128 @@ import pandas as pd
 from matplotlib.lines import Line2D
 
 from placecell.analysis import compute_place_field_mask
+
+if TYPE_CHECKING:
+    from placecell.dataset import PlaceCellDataset
+
+
+def create_deconv_browser(
+    good_unit_ids: list[int],
+    C_da: Any,
+    S_list: list[np.ndarray],
+    neural_fps: float,
+    trace_name: str = "C",
+    time_window: float = 600.0,
+) -> tuple[plt.Figure, widgets.VBox]:
+    """Interactive browser for deconvolution results.
+
+    Parameters
+    ----------
+    good_unit_ids:
+        Unit IDs that were successfully deconvolved.
+    C_da:
+        Calcium traces DataArray with dims (unit_id, frame).
+    S_list:
+        Spike trains from deconvolution, one per unit.
+    neural_fps:
+        Neural sampling rate.
+    trace_name:
+        Label for y-axis.
+    time_window:
+        Visible time window in seconds.
+    """
+    n_good = len(good_unit_ids)
+    max_time = C_da.sizes["frame"] / neural_fps
+
+    fig, ax = plt.subplots(1, 1, figsize=(10, 2.5))
+    fig.canvas.toolbar_visible = False
+    fig.canvas.header_visible = False
+    fig.canvas.layout.width = "100%"
+
+    def _render(unit_idx: int, t_start: float) -> None:
+        ax.clear()
+        uid = good_unit_ids[unit_idx]
+        trace = C_da.sel(unit_id=uid).values
+        t_full = np.arange(len(trace)) / neural_fps
+        spikes = S_list[unit_idx]
+
+        t_end = min(max_time, t_start + time_window)
+        mask = (t_full >= t_start) & (t_full <= t_end)
+
+        ax.plot(t_full[mask], trace[mask], "b-", linewidth=0.5, alpha=0.7)
+
+        spike_frames = np.nonzero(spikes > 0)[0]
+        spike_times = spike_frames / neural_fps
+        spike_mask = (spike_times >= t_start) & (spike_times <= t_end)
+        if np.any(spike_mask):
+            st = spike_times[spike_mask]
+            sa = spikes[spike_frames[spike_mask]]
+            y_min, y_max = ax.get_ylim()
+            amp_max = sa.max() if sa.max() > 0 else 1.0
+            max_spike_h = (y_max - y_min) * 0.3
+            for t_s, a_s in zip(st, sa):
+                h = (a_s / amp_max) * max_spike_h
+                ax.plot([t_s, t_s], [y_min, y_min + h], color="red", lw=0.8)
+
+        ax.set_xlim(t_start, t_end)
+        ax.set_ylabel(trace_name, fontsize=9)
+        ax.set_xlabel("Time (s)", fontsize=9)
+        ax.set_title(
+            f"Deconvolution Preview — Unit {uid} ({unit_idx + 1}/{n_good})",
+            fontsize=10,
+        )
+        ax.legend(
+            handles=[
+                Line2D([0], [0], color="blue", linewidth=0.5, label="Fluorescence"),
+                Line2D([0], [0], color="red", linewidth=1.5, label="Deconvolved spikes"),
+            ],
+            loc="upper right",
+            fontsize=8,
+            framealpha=0.9,
+        )
+        fig.canvas.draw_idle()
+
+    unit_slider = widgets.IntSlider(
+        value=0,
+        min=0,
+        max=n_good - 1,
+        step=1,
+        description="Unit:",
+        continuous_update=False,
+        layout=widgets.Layout(width="100%"),
+    )
+    time_slider = widgets.FloatSlider(
+        value=0,
+        min=0,
+        max=max(0, max_time - time_window),
+        step=10,
+        description="Time (s):",
+        continuous_update=False,
+        layout=widgets.Layout(width="100%"),
+    )
+    prev_btn = widgets.Button(description="< Prev", layout=widgets.Layout(width="70px"))
+    next_btn = widgets.Button(description="Next >", layout=widgets.Layout(width="70px"))
+
+    def _on_prev(_: Any) -> None:
+        unit_slider.value = (unit_slider.value - 1) % n_good
+
+    def _on_next(_: Any) -> None:
+        unit_slider.value = (unit_slider.value + 1) % n_good
+
+    prev_btn.on_click(_on_prev)
+    next_btn.on_click(_on_next)
+
+    def _update(_: Any = None) -> None:
+        _render(unit_slider.value, time_slider.value)
+
+    unit_slider.observe(_update, names="value")
+    time_slider.observe(_update, names="value")
+
+    nav = widgets.HBox([prev_btn, unit_slider, next_btn], layout=widgets.Layout(width="100%"))
+    controls = widgets.VBox([nav, time_slider], layout=widgets.Layout(width="100%"))
+
+    _render(0, 0)
+    return fig, controls
 
 
 def create_unit_browser(
@@ -151,12 +275,11 @@ def create_unit_browser(
             normalized_amps = amps / np.maximum(event_occupancy, 0.01)
 
             # Scale to 0-1 range
-            norm_max = np.max(normalized_amps) if len(normalized_amps) > 0 and np.max(normalized_amps) > 0 else 1.0
+            has_amps = len(normalized_amps) > 0 and np.max(normalized_amps) > 0
+            norm_max = np.max(normalized_amps) if has_amps else 1.0
             alphas = normalized_amps / norm_max
 
-            ax2.scatter(
-                x_vals, y_vals, c="red", s=20, alpha=alphas, zorder=2
-            )
+            ax2.scatter(x_vals, y_vals, c="red", s=20, alpha=alphas, zorder=2)
 
         ax2.set_title(f"Trajectory ({len(vis_data_above)} events)", fontsize=9)
         ax2.set_aspect("equal")
@@ -189,7 +312,8 @@ def create_unit_browser(
             ax3c.contour(
                 field_mask_full.T.astype(float), levels=[0.5], colors="red", linewidths=1.5
             )
-        ax3c.set_title(f"Full (r={stab_corr:.2f})" if not np.isnan(stab_corr) else "Full", fontsize=9)
+        title = f"Full (r={stab_corr:.2f})" if not np.isnan(stab_corr) else "Full"
+        ax3c.set_title(title, fontsize=9)
         ax3c.axis("off")
 
         # Set same color scale for all three
@@ -414,3 +538,43 @@ def create_unit_browser(
     render_unit(0, 0)
 
     return fig, controls
+
+
+def browse_units(
+    ds: PlaceCellDataset,
+    unit_results: dict[int, dict] | None = None,
+    place_field_threshold: float | None = None,
+) -> tuple[plt.Figure, widgets.VBox]:
+    """Create a unit browser from a PlaceCellDataset.
+
+    Parameters
+    ----------
+    ds:
+        Dataset with completed analysis (analyze_units must have been called).
+    unit_results:
+        Subset of results to browse. Defaults to ds.unit_results.
+    place_field_threshold:
+        Override for place field contour threshold.
+    """
+    results = unit_results if unit_results is not None else ds.unit_results
+    scfg = ds.spatial
+
+    return create_unit_browser(
+        unit_results=results,
+        unique_units=sorted(results.keys()),
+        trajectory_df=ds.trajectory_filtered,
+        df_all_events=ds.event_index,
+        max_proj=ds.max_proj,
+        footprints=ds.footprints,
+        x_edges=ds.x_edges,
+        y_edges=ds.y_edges,
+        occupancy_time=ds.occupancy_time,
+        trace_name=ds.cfg.neural.trace_name,
+        neural_fps=ds.neural_fps,
+        speed_threshold=ds.cfg.behavior.speed_threshold,
+        p_value_threshold=scfg.p_value_threshold or 0.05,
+        stability_threshold=scfg.stability_threshold,
+        trace_time_window=scfg.trace_time_window,
+        place_field_threshold=place_field_threshold or scfg.place_field_threshold,
+        place_field_min_bins=scfg.place_field_min_bins,
+    )

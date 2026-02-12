@@ -8,7 +8,7 @@ import pandas as pd
 import xarray as xr
 
 
-def load_traces(
+def load_calcium_traces(
     neural_path: Path,
     trace_name: str = "C",
 ) -> xr.DataArray:

@@ -172,7 +172,7 @@ curation_csv: path/to/curation.csv  # optional
 :::{dropdown} pcell_config.yaml
 ```yaml
 id: pcell_config
-mio_model: placecell.config.AppConfig
+mio_model: placecell.config.AnalysisConfig
 mio_version: 0.8.1
 neural:
   id: neural

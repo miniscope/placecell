@@ -20,35 +20,37 @@ from placecell.behavior import (
     compute_behavior_speed,
     load_curated_unit_ids,
 )
-from placecell.neural import load_traces
+from placecell.neural import load_calcium_traces
 
 
 def test_event_place_regression(assets_dir: Path) -> None:
     """event_index → event_place should match reference output."""
+    from placecell.behavior import _load_behavior_xy
+
+    event_index = pd.read_csv(assets_dir / "reference_event_index.csv")
+    beh_pos = _load_behavior_xy(assets_dir / "behavior" / "behavior_position.csv", "LED_clean")
+    beh_ts = pd.read_csv(assets_dir / "behavior" / "behavior_timestamp.csv")
+    behavior_with_speed = compute_behavior_speed(beh_pos, beh_ts, window_frames=5)
+
     result = build_event_place_dataframe(
-        event_index_path=assets_dir / "reference_event_index.csv",
+        event_index=event_index,
         neural_timestamp_path=assets_dir / "neural_data" / "neural_timestamp.csv",
-        behavior_position_path=assets_dir / "behavior" / "behavior_position.csv",
-        behavior_timestamp_path=assets_dir / "behavior" / "behavior_timestamp.csv",
-        bodypart="LED_clean",
+        behavior_with_speed=behavior_with_speed,
         behavior_fps=20.0,
         speed_threshold=0.0,
-        speed_window_frames=5,
     )
 
     reference = pd.read_csv(assets_dir / "reference_event_place.csv")
 
-    # Same shape and columns
     assert list(result.columns) == list(reference.columns)
     assert len(result) == len(reference)
 
-    # Values match (with float tolerance)
     pd.testing.assert_frame_equal(result, reference, rtol=1e-5)
 
 
-def test_load_traces_shape(neural_path: Path) -> None:
-    """load_traces should return correct dimensions."""
-    C = load_traces(neural_path, trace_name="C")
+def test_load_calcium_traces_shape(neural_path: Path) -> None:
+    """load_calcium_traces should return correct dimensions."""
+    C = load_calcium_traces(neural_path, trace_name="C")
 
     assert C.dims == ("unit_id", "frame")
     assert C.sizes["unit_id"] == 10

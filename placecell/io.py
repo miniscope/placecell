@@ -9,7 +9,7 @@ import xarray as xr
 from mio.logging import init_logger
 
 from placecell.behavior import _load_behavior_xy, compute_behavior_speed
-from placecell.neural import load_traces
+from placecell.neural import load_calcium_traces
 
 logger = init_logger(__name__)
 
@@ -69,11 +69,11 @@ def load_behavior_data(
     return trajectory_with_speed, trajectory_filtered
 
 
-def load_neural_data(
+def load_visualization_data(
     neural_path: Path | None,
     trace_name: str,
 ) -> tuple[Any, np.ndarray | None, Any]:
-    """Load neural data including traces, max projection, and footprints.
+    """Load visualization data: traces, max projection, and footprints.
 
     Parameters
     ----------
@@ -98,7 +98,7 @@ def load_neural_data(
 
     # Load traces
     try:
-        traces = load_traces(neural_path, trace_name=trace_name)
+        traces = load_calcium_traces(neural_path, trace_name=trace_name)
     except FileNotFoundError:
         logger.warning(f"{trace_name}.zarr not found at {neural_path}. Trace display disabled.")
     except (KeyError, ValueError) as e:

@@ -189,11 +189,7 @@ def compute_spatial_information(
     if unit_events.empty:
         return 0.0, 1.0, np.zeros(n_shuffles)
 
-    # Choose weights based on mode
-    if si_weight_mode == "binary":
-        weights = np.ones(len(unit_events))
-    else:
-        weights = unit_events["s"].values
+    weights = np.ones(len(unit_events)) if si_weight_mode == "binary" else unit_events["s"].values
 
     event_weights, _, _ = np.histogram2d(
         unit_events["x"],
@@ -569,16 +565,20 @@ def compute_stability_score(
             shifted = np.roll(aligned_events, shift)
 
             ew1, _, _ = np.histogram2d(
-                traj_x[first_half], traj_y[first_half],
-                bins=[x_edges, y_edges], weights=shifted[first_half],
+                traj_x[first_half],
+                traj_y[first_half],
+                bins=[x_edges, y_edges],
+                weights=shifted[first_half],
             )
             rm1 = np.zeros_like(occ_first)
             rm1[valid_first] = ew1[valid_first] / occ_first[valid_first]
             rm1 = gaussian_filter_normalized(rm1, sigma=activity_sigma)
 
             ew2, _, _ = np.histogram2d(
-                traj_x[second_half], traj_y[second_half],
-                bins=[x_edges, y_edges], weights=shifted[second_half],
+                traj_x[second_half],
+                traj_y[second_half],
+                bins=[x_edges, y_edges],
+                weights=shifted[second_half],
             )
             rm2 = np.zeros_like(occ_second)
             rm2[valid_second] = ew2[valid_second] / occ_second[valid_second]
@@ -682,9 +682,7 @@ def compute_unit_analysis(
     rate_map = compute_rate_map(
         unit_data, occupancy_time, valid_mask, x_edges, y_edges, activity_sigma
     )
-    rate_map_raw = compute_raw_rate_map(
-        unit_data, occupancy_time, valid_mask, x_edges, y_edges
-    )
+    rate_map_raw = compute_raw_rate_map(unit_data, occupancy_time, valid_mask, x_edges, y_edges)
 
     # Spatial information
     si, p_val, shuffled_sis = compute_spatial_information(
@@ -937,7 +935,7 @@ def compute_coverage_map(
         Integer array of place field overlap counts at each bin.
     """
     coverage = None
-    for uid, result in unit_results.items():
+    for _uid, result in unit_results.items():
         rm = result["rate_map"]
         if coverage is None:
             coverage = np.zeros_like(rm, dtype=int)
@@ -987,7 +985,7 @@ def compute_coverage_curve(
 
     # Collect per-unit field masks and sort by field size (largest first)
     masks = []
-    for uid, result in unit_results.items():
+    for _uid, result in unit_results.items():
         m = compute_place_field_mask(
             result["rate_map"],
             threshold=threshold,

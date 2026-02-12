@@ -1,297 +1,22 @@
-"""Visualization functions for place cell data."""
+"""Visualization functions for place cell analysis."""
 
-from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
 import xarray as xr
 from mio.logging import init_logger
-from tqdm import tqdm
-
-from placecell.analysis import (
-    compute_occupancy_map,
-    compute_place_field_mask,
-    compute_unit_analysis,
-)
-from placecell.io import load_behavior_data, load_neural_data
 
 try:
     import matplotlib.pyplot as plt
 
     if TYPE_CHECKING:
-        from matplotlib.axes import Axes
         from matplotlib.figure import Figure
 except ImportError:
     plt = None
-    Axes = None
     Figure = None
 
 logger = init_logger(__name__)
-
-
-def _display_occupancy_preview(
-    trajectory_df: pd.DataFrame,
-    trajectory_with_speed: pd.DataFrame,
-    occupancy_time: np.ndarray,
-    valid_mask: np.ndarray,
-    x_edges: np.ndarray,
-    y_edges: np.ndarray,
-    occupancy_sigma: float,
-    min_occupancy: float,
-    speed_threshold: float,
-) -> None:
-    """
-    Display occupancy map preview with trajectory and speed histogram.
-
-    Parameters
-    ----------
-    trajectory_df : pd.DataFrame
-        Speed-filtered trajectory.
-    trajectory_with_speed : pd.DataFrame
-        Full trajectory with speed.
-    occupancy_time : np.ndarray
-        Occupancy time map.
-    valid_mask : np.ndarray
-        Valid occupancy mask.
-    x_edges, y_edges : np.ndarray
-        Spatial bin edges.
-    occupancy_sigma : float
-        Gaussian smoothing sigma used.
-    min_occupancy : float
-        Minimum occupancy threshold.
-    speed_threshold : float
-        Speed threshold used.
-    """
-    fig_occ, axes_occ = plt.subplots(1, 3, figsize=(14, 4))
-
-    # Left: trajectory
-    axes_occ[0].plot(trajectory_df["x"], trajectory_df["y"], "k-", alpha=0.5, linewidth=0.5)
-    axes_occ[0].set_title("Trajectory (filtered)")
-    axes_occ[0].set_aspect("equal")
-    axes_occ[0].axis("off")
-
-    # Middle: occupancy map
-    im = axes_occ[1].imshow(
-        occupancy_time.T,
-        origin="lower",
-        extent=[x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]],
-        cmap="hot",
-        aspect="equal",
-    )
-    axes_occ[1].contour(
-        valid_mask.T.astype(float),
-        levels=[0.5],
-        colors="white",
-        linewidths=1.5,
-        extent=[x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]],
-        origin="lower",
-    )
-    axes_occ[1].set_title(f"Occupancy (sigma={occupancy_sigma}, min={min_occupancy}s)")
-    plt.colorbar(im, ax=axes_occ[1], label="Time (s)")
-
-    # Right: speed histogram
-    all_speeds = trajectory_with_speed["speed"].dropna()
-    speed_max = np.percentile(all_speeds, 99)
-    axes_occ[2].hist(
-        all_speeds.clip(upper=speed_max),
-        bins=50,
-        color="gray",
-        edgecolor="black",
-        alpha=0.7,
-    )
-    axes_occ[2].axvline(
-        speed_threshold,
-        color="red",
-        linestyle="--",
-        linewidth=2,
-        label=f"Threshold: {speed_threshold}",
-    )
-    axes_occ[2].set_xlim(0, speed_max)
-    axes_occ[2].set_xlabel("Speed (px/s)")
-    axes_occ[2].set_ylabel("Count")
-    axes_occ[2].set_title("Speed Distribution")
-    axes_occ[2].legend()
-
-    fig_occ.tight_layout()
-    plt.show(block=False)
-    plt.pause(0.1)
-
-
-def plot_trajectory(
-    csv_path: str | Path,
-    bodypart: str,
-    ax: "Axes | None" = None,
-) -> "Axes":
-    """
-    Plot trajectory from DeepLabCut CSV file.
-
-    Parameters
-    ----------
-    csv_path : str | Path
-        Path to the DLC CSV file
-    bodypart : str
-        Body part to plot (default: "LED")
-    ax : matplotlib.Axes, optional
-        Matplotlib axes to plot on
-
-    Returns
-    -------
-    matplotlib.Axes
-        The axes object
-
-    Raises
-    ------
-    ImportError
-        If matplotlib is not installed
-    """
-    if plt is None:
-        raise ImportError(
-            "matplotlib is required for trajectory plotting. "
-            "Install it with: pip install matplotlib"
-        )
-
-    # Read CSV with multi-index header
-    df = pd.read_csv(csv_path, header=[0, 1, 2])
-
-    # Find scorer name by searching for a column with the bodypart
-    # Skip the first column which is the header row identifier
-    scorer_name = None
-    for col in df.columns[1:]:
-        if col[1] == bodypart and col[2] == "x":
-            scorer_name = col[0]
-            break
-
-    if scorer_name is None:
-        available_bodyparts = {col[1] for col in df.columns[1:]}
-        raise ValueError(
-            f"Bodypart '{bodypart}' not found in CSV. "
-            f"Available bodyparts: {sorted(available_bodyparts)}"
-        )
-
-    # Extract x and y coordinates for the specified bodypart
-    x_col = (scorer_name, bodypart, "x")
-    y_col = (scorer_name, bodypart, "y")
-
-    x = df[x_col].values
-    y = df[y_col].values
-
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(8, 8))
-
-    ax.plot(x, y, linewidth=0.5, alpha=0.7)
-    ax.set_xlabel("X position (pixels)")
-    ax.set_ylabel("Y position (pixels)")
-    ax.set_title(f"{bodypart} trajectory")
-    ax.set_aspect("equal")
-    ax.grid(True, alpha=0.3)
-
-    return ax
-
-
-def plot_max_projection_with_unit_footprint(
-    neural_path: Path,
-    unit_id: int,
-    max_proj_name: str = "max_proj",
-    A_name: str = "A",
-    figsize: tuple[float, float] = (6, 6),
-    dpi: int = 150,
-    contour_level: float = 0.3,
-) -> "Figure":
-    """
-    Plot max projection with overlaid spatial footprint for a single unit.
-
-    Parameters
-    ----------
-    neural_path : Path
-        Directory containing max_proj.zarr and A.zarr files.
-    unit_id : int
-        Unit ID to plot footprint for.
-    max_proj_name : str
-        Name of the max projection zarr file (default: "max_proj").
-    A_name : str
-        Name of the spatial footprint zarr file (default: "A").
-    figsize : tuple[float, float]
-        Figure size (width, height) in inches.
-    dpi : int
-        Resolution for saved figures.
-    contour_level : float
-        Contour level for footprint visualization (default: 0.3).
-
-    Returns
-    -------
-    Figure
-        The figure object with max projection and single unit footprint overlay.
-
-    Raises
-    ------
-    ImportError
-        If matplotlib is not installed.
-    """
-    if plt is None:
-        raise ImportError(
-            "matplotlib is required for plotting. " "Install it with: pip install matplotlib"
-        )
-
-    max_proj_path = neural_path / f"{max_proj_name}.zarr"
-    A_path = neural_path / f"{A_name}.zarr"
-
-    if not max_proj_path.exists():
-        raise FileNotFoundError(f"Max projection file not found: {max_proj_path}")
-    if not A_path.exists():
-        raise FileNotFoundError(f"Spatial footprint file not found: {A_path}")
-
-    # Load max projection
-    max_proj_ds = xr.open_zarr(max_proj_path, consolidated=False)
-    if "max_proj" in max_proj_ds:
-        max_proj = max_proj_ds["max_proj"]
-    else:
-        # Try to get the first data variable
-        max_proj = max_proj_ds[list(max_proj_ds.data_vars)[0]]
-
-    # Handle quantile dimension if present
-    if "quantile" in max_proj.dims:
-        max_proj = max_proj.isel(quantile=0)  # Use first quantile
-
-    max_proj_data = np.asarray(max_proj.values, dtype=float)
-
-    # Load spatial footprints
-    A_ds = xr.open_zarr(A_path, consolidated=False)
-    A = A_ds[A_name] if A_name in A_ds else A_ds[list(A_ds.data_vars)[0]]
-
-    # Create single figure with overlay
-    fig, ax = plt.subplots(1, 1, figsize=figsize, dpi=dpi)
-
-    # Plot max projection as background
-    ax.imshow(max_proj_data, cmap="gray", origin="upper", alpha=0.7)
-
-    # Overlay footprint for the specified unit
-    try:
-        footprint = np.asarray(A.sel(unit_id=unit_id).values, dtype=float)
-        if footprint.max() > 0:
-            footprint_norm = footprint / footprint.max()
-            # Use filled contour (contourf) instead of just contour lines
-            ax.contourf(
-                footprint_norm,
-                levels=[contour_level, 1.0],
-                colors=["red"],
-                alpha=0.4,
-            )
-            # Also add a contour line for better visibility
-            ax.contour(
-                footprint_norm,
-                levels=[contour_level],
-                colors=["red"],
-                linewidths=2,
-                alpha=0.8,
-            )
-    except (KeyError, IndexError, ValueError) as e:
-        logger.warning(f"Failed to load footprint for unit {unit_id} from A.zarr: {e}")
-
-    ax.axis("off")
-
-    plt.tight_layout()
-    return fig
 
 
 def plot_summary_scatter(
@@ -299,21 +24,16 @@ def plot_summary_scatter(
     p_value_threshold: float = 0.05,
     stability_threshold: float = 0.5,
 ) -> "Figure":
-    """Create side-by-side scatter plots: significance vs stability and SI vs Fisher Z.
+    """Scatter plots: significance vs stability and SI vs Fisher Z.
 
     Parameters
     ----------
-    unit_results : dict
+    unit_results:
         Dictionary mapping unit_id to analysis results.
-    p_value_threshold : float
-        Threshold for significance test (default 0.05).
-    stability_threshold : float
-        Threshold for stability test (default 0.5).
-
-    Returns
-    -------
-    Figure
-        Matplotlib figure with two scatter plots side by side.
+    p_value_threshold:
+        Threshold for significance test.
+    stability_threshold:
+        Threshold for stability test.
     """
     if plt is None:
         raise ImportError("matplotlib is required for plotting.")
@@ -326,7 +46,6 @@ def plot_summary_scatter(
 
     stab_pvals = [unit_results[uid].get("stability_p_val", np.nan) for uid in unit_ids]
 
-    # Determine colors based on pass/fail both tests
     colors = []
     for p, s, sp in zip(p_vals, stab_corrs, stab_pvals):
         sig_pass = p < p_value_threshold
@@ -335,20 +54,17 @@ def plot_summary_scatter(
         else:
             stab_pass = not np.isnan(s) and s >= stability_threshold
         if sig_pass and stab_pass:
-            colors.append("green")  # Both pass
+            colors.append("green")
         elif sig_pass and not stab_pass:
-            colors.append("orange")  # Only significance passes
+            colors.append("orange")
         elif not sig_pass and stab_pass:
-            colors.append("blue")  # Only stability passes
+            colors.append("blue")
         else:
-            colors.append("red")  # Both fail
+            colors.append("red")
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
 
-    # Left plot: Significance vs Stability
     ax1.scatter(p_vals, stab_corrs, c=colors, s=50, alpha=0.7, edgecolors="black", linewidths=0.5)
-
-    # Add threshold lines
     ax1.axvline(
         p_value_threshold,
         color="gray",
@@ -364,24 +80,18 @@ def plot_summary_scatter(
         label=f"r={stability_threshold}",
     )
 
-    # Shade quadrants
     xlim = ax1.get_xlim()
     ylim = ax1.get_ylim()
-    # Top-left (sig pass, stab pass) - green
     ax1.fill_between([0, p_value_threshold], stability_threshold, ylim[1], alpha=0.1, color="green")
-    # Top-right (sig fail, stab pass) - blue
     ax1.fill_between(
         [p_value_threshold, xlim[1]], stability_threshold, ylim[1], alpha=0.1, color="blue"
     )
-    # Bottom-left (sig pass, stab fail) - orange
     ax1.fill_between(
         [0, p_value_threshold], ylim[0], stability_threshold, alpha=0.1, color="orange"
     )
-    # Bottom-right (sig fail, stab fail) - red
     ax1.fill_between(
         [p_value_threshold, xlim[1]], ylim[0], stability_threshold, alpha=0.1, color="red"
     )
-
     ax1.set_xlim(xlim)
     ax1.set_ylim(ylim)
 
@@ -389,13 +99,11 @@ def plot_summary_scatter(
     ax1.set_ylabel("Correlation (stability test)", fontsize=12)
     ax1.set_title("Significance vs Stability", fontsize=12)
 
-    # Count units in each quadrant
     n_both = sum(1 for c in colors if c == "green")
     n_sig_only = sum(1 for c in colors if c == "orange")
     n_stab_only = sum(1 for c in colors if c == "blue")
     n_neither = sum(1 for c in colors if c == "red")
 
-    # Add legend with counts
     from matplotlib.patches import Patch
 
     legend_elements = [
@@ -406,35 +114,21 @@ def plot_summary_scatter(
     ]
     ax1.legend(handles=legend_elements, loc="upper right", fontsize=10)
 
-    # Right plot: SI vs Fisher Z (same colors as left plot)
-    ax2.scatter(
-        si_vals,
-        fisher_z,
-        s=50,
-        alpha=0.7,
-        edgecolors="black",
-        linewidths=0.5,
-        c=colors,
-    )
+    ax2.scatter(si_vals, fisher_z, s=50, alpha=0.7, edgecolors="black", linewidths=0.5, c=colors)
 
-    # Linear regression
     si_arr = np.array(si_vals)
     z_arr = np.array(fisher_z)
-    # Filter out NaN values for regression
     valid_mask = ~(np.isnan(si_arr) | np.isnan(z_arr))
     si_valid = si_arr[valid_mask]
     z_valid = z_arr[valid_mask]
 
     if len(si_valid) > 1:
-        # Compute linear regression
         slope, intercept = np.polyfit(si_valid, z_valid, 1)
-        # Compute R²
         y_pred = slope * si_valid + intercept
         ss_res = np.sum((z_valid - y_pred) ** 2)
         ss_tot = np.sum((z_valid - np.mean(z_valid)) ** 2)
         r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
 
-        # Plot regression line
         x_line = np.array([si_valid.min(), si_valid.max()])
         y_line = slope * x_line + intercept
         ax2.plot(
@@ -450,644 +144,385 @@ def plot_summary_scatter(
     ax2.set_xlabel("Spatial Information (bits/s)", fontsize=12)
     ax2.set_ylabel("Fisher Z score (stability)", fontsize=12)
     ax2.set_title("Spatial Information vs Stability (Fisher Z)", fontsize=12)
-
-    # Add grid for readability
     ax2.grid(True, alpha=0.3, linestyle="--")
-
-    # Add zero line for Fisher Z reference
     ax2.axhline(0, color="gray", linestyle=":", linewidth=1, alpha=0.5)
 
     plt.tight_layout()
     return fig
 
 
-def browse_place_cells(
-    event_place_csv: str | Path,
-    behavior_position: str | Path,
-    behavior_timestamp: str | Path,
-    bodypart: str,
-    neural_path: str | Path | None = None,
-    event_index_csv: str | Path | None = None,
-    trace_name: str = "C",
-    speed_threshold: float = 1.0,
-    min_occupancy: float = 0.1,
-    bins: int = 30,
-    occupancy_sigma: float = 0.0,
-    activity_sigma: float = 1.0,
-    behavior_fps: float = 20.0,
-    neural_fps: float = 20.0,
-    speed_window_frames: int = 5,
-    n_shuffles: int = 100,
-    random_seed: int | None = None,
-    trace_time_window: float = 600.0,
-    event_threshold_sigma: float = 2.0,
-    p_value_threshold: float | None = None,
-    stability_threshold: float = 0.5,
-    min_shift_seconds: float = 0.0,
-    si_weight_mode: str = "amplitude",
-) -> None:
-    """
-    Interactive browser for place cell analysis with keyboard navigation.
-
-    Layout:
-    - Top row (4 quarters): Max projection, Trajectory+events, Rate map, SI histogram
-    - Bottom row (full width): Trace
-
-    Navigation:
-    - Left/Right arrows or A/D: Previous/Next unit
-    - Q: Quit
+def plot_diagnostics(
+    unit_results: dict,
+    p_value_threshold: float = 0.05,
+) -> "Figure":
+    """Event count diagnostics: histogram, SI vs events, p-value vs events.
 
     Parameters
     ----------
-    event_place_csv : str or Path
-        Path to event_place CSV file (speed-filtered).
-    behavior_position : str or Path
-        Path to behavior position CSV file (behavior_position.csv).
-    behavior_timestamp : str or Path
-        Path to behavior timestamp CSV file (behavior_timestamp.csv).
-    bodypart : str
-        Body part name to use for trajectory (e.g. "LED").
-    neural_path : str or Path, optional
-        Path to neural data directory (for traces and max projection).
-    event_index_csv : str or Path, optional
-        Path to event_index CSV (all events). If provided, shows all events on trace plot (gray).
-    trace_name : str
-        Name of trace zarr to load (default "C").
-    speed_threshold : float
-        Minimum speed threshold (default 1.0).
-    min_occupancy : float
-        Minimum occupancy time in seconds (default 0.1).
-    bins : int
-        Number of spatial bins (default 30).
-    occupancy_sigma : float
-        Gaussian smoothing sigma for occupancy map (default 0.0 = no smoothing).
-    activity_sigma : float
-        Gaussian smoothing sigma for spatial activity map (default 1.0).
-    behavior_fps : float
-        Behavior sampling rate (default 20.0).
-    neural_fps : float
-        Neural data sampling rate (default 20.0).
-    n_shuffles : int
-        Number of shuffles for significance test (default 100).
-    trace_time_window : float
-        Time window for trace display in seconds (default 600.0, i.e., 10 minutes).
-    random_seed : int, optional
-        Random seed for reproducible shuffling. If None, results vary between runs.
-    event_threshold_sigma : float
-        Sigma multiplier for event amplitude threshold in trajectory visualization (default 2.0).
+    unit_results:
+        Dictionary mapping unit_id to analysis results.
+    p_value_threshold:
+        Threshold for significance test.
     """
     if plt is None:
-        raise ImportError(
-            "matplotlib is required for plotting. Install it with: pip install matplotlib"
-        )
+        raise ImportError("matplotlib is required for plotting.")
 
-    # Set random seed for reproducibility
-    if random_seed is not None:
-        np.random.seed(random_seed)
+    uids = list(unit_results.keys())
+    n_events = [len(unit_results[u]["unit_data"]) for u in uids]
+    si_vals = [unit_results[u]["si"] for u in uids]
+    p_vals = [unit_results[u]["p_val"] for u in uids]
 
-    # Load event data
-    df = pd.read_csv(event_place_csv)
-    df_filtered = df[df["speed"] > speed_threshold].copy()
+    fig, (ax_hist, ax_si, ax_pv) = plt.subplots(1, 3, figsize=(12, 3.5))
 
-    # Load all events from event_index if provided (for trace plot only)
-    df_all_events = None
-    if event_index_csv is not None:
-        df_all_events = pd.read_csv(event_index_csv)
+    ax_hist.hist(n_events, bins=30, color="steelblue", edgecolor="black", alpha=0.7)
+    ax_hist.set_xlabel("Event count")
+    ax_hist.set_ylabel("Units")
+    ax_hist.axvline(
+        np.median(n_events),
+        color="red",
+        linestyle="--",
+        lw=1.5,
+        label=f"Median: {int(np.median(n_events))}",
+    )
+    ax_hist.legend(fontsize=8)
 
-    # Load behavior data
-    trajectory_with_speed, trajectory_df = load_behavior_data(
-        behavior_position=Path(behavior_position),
-        behavior_timestamp=Path(behavior_timestamp),
-        bodypart=bodypart,
-        speed_window_frames=speed_window_frames,
-        speed_threshold=speed_threshold,
+    sig_mask = np.array([p < p_value_threshold for p in p_vals])
+    ns_mask = ~sig_mask
+    n_ev = np.array(n_events)
+    si = np.array(si_vals)
+    ax_si.scatter(
+        n_ev[ns_mask],
+        si[ns_mask],
+        c="gray",
+        s=20,
+        alpha=0.5,
+        edgecolors="black",
+        linewidths=0.3,
+        label=f"Not sig (p>={p_value_threshold})",
+    )
+    ax_si.scatter(
+        n_ev[sig_mask],
+        si[sig_mask],
+        c="green",
+        s=20,
+        alpha=0.6,
+        edgecolors="black",
+        linewidths=0.3,
+        label=f"Significant (p<{p_value_threshold})",
+    )
+    ax_si.set_xlabel("Event count")
+    ax_si.set_ylabel("Spatial Information (bits/s)")
+    ax_si.set_xscale("log")
+    ax_si.legend(fontsize=7)
+
+    ax_pv.scatter(
+        n_events,
+        p_vals,
+        c="steelblue",
+        s=20,
+        alpha=0.6,
+        edgecolors="black",
+        linewidths=0.3,
+    )
+    ax_pv.axhline(
+        p_value_threshold,
+        color="red",
+        linestyle="--",
+        lw=1.5,
+        label=f"p={p_value_threshold}",
+    )
+    ax_pv.set_xlabel("Event count")
+    ax_pv.set_ylabel("P-value")
+    ax_pv.set_xscale("log")
+    ax_pv.legend(fontsize=8)
+
+    fig.tight_layout()
+
+    n_sig = int(sig_mask.sum())
+    logger.info("Total units: %d", len(uids))
+    logger.info(
+        "Significant (p<%s): %d (%.1f%%)", p_value_threshold, n_sig, 100 * n_sig / len(uids)
+    )
+    logger.info(
+        "Event count: median=%d, min=%d, max=%d",
+        int(np.median(n_events)),
+        min(n_events),
+        max(n_events),
     )
 
-    # Compute occupancy map
-    occupancy_time, valid_mask, x_edges, y_edges = compute_occupancy_map(
-        trajectory_df=trajectory_df,
-        bins=bins,
-        behavior_fps=behavior_fps,
-        occupancy_sigma=occupancy_sigma,
-        min_occupancy=min_occupancy,
+    return fig
+
+
+def plot_behavior_preview(
+    trajectory: pd.DataFrame,
+    trajectory_filtered: pd.DataFrame,
+    speed_threshold: float,
+) -> "Figure":
+    """Raw vs filtered trajectory and speed histogram.
+
+    Parameters
+    ----------
+    trajectory:
+        Full trajectory with columns x, y, speed.
+    trajectory_filtered:
+        Speed-filtered trajectory.
+    speed_threshold:
+        Speed cutoff used for filtering (px/s).
+    """
+    fig, (ax_raw, ax_filt, ax_hist) = plt.subplots(1, 3, figsize=(10, 3.5))
+
+    ax_raw.plot(trajectory["x"], trajectory["y"], "k-", linewidth=0.3, alpha=0.5)
+    ax_raw.set_title(f"All frames ({len(trajectory)})")
+    ax_raw.set_aspect("equal")
+    ax_raw.axis("off")
+
+    ax_filt.plot(
+        trajectory_filtered["x"],
+        trajectory_filtered["y"],
+        "k-",
+        linewidth=0.3,
+        alpha=0.5,
     )
+    ax_filt.set_title(f"Speed > {speed_threshold} px/s ({len(trajectory_filtered)})")
+    ax_filt.set_aspect("equal")
+    ax_filt.axis("off")
 
-    # Display occupancy preview
-    _display_occupancy_preview(
-        trajectory_df=trajectory_df,
-        trajectory_with_speed=trajectory_with_speed,
-        occupancy_time=occupancy_time,
-        valid_mask=valid_mask,
-        x_edges=x_edges,
-        y_edges=y_edges,
-        occupancy_sigma=occupancy_sigma,
-        min_occupancy=min_occupancy,
-        speed_threshold=speed_threshold,
+    all_speeds = trajectory["speed"].dropna()
+    speed_max = np.percentile(all_speeds, 99)
+    ax_hist.hist(
+        all_speeds.clip(upper=speed_max),
+        bins=50,
+        color="gray",
+        edgecolor="black",
+        alpha=0.7,
     )
-
-    # Load neural data
-    traces, max_proj, footprints = load_neural_data(
-        neural_path=Path(neural_path) if neural_path else None,
-        trace_name=trace_name,
+    ax_hist.axvline(
+        speed_threshold,
+        color="red",
+        linestyle="--",
+        linewidth=2,
+        label=f"Threshold: {speed_threshold}",
     )
-    trace_fps = neural_fps
+    ax_hist.set_xlabel("Speed (px/s)")
+    ax_hist.set_ylabel("Count")
+    ax_hist.set_title("Speed Distribution")
+    ax_hist.legend()
 
-    # Compute analysis for each unit
-    unique_units = sorted(df_filtered["unit_id"].unique())
-    n_units = len(unique_units)
-    logger.info(f"Loaded {n_units} units, computing analysis...")
+    fig.tight_layout()
+    return fig
 
-    unit_results = {}
-    for unit_id in tqdm(unique_units, desc="Computing unit analysis", unit="unit"):
-        # Core analysis from analysis module
-        result = compute_unit_analysis(
-            unit_id=unit_id,
-            df_filtered=df_filtered,
-            trajectory_df=trajectory_df,
-            occupancy_time=occupancy_time,
-            valid_mask=valid_mask,
-            x_edges=x_edges,
-            y_edges=y_edges,
-            activity_sigma=activity_sigma,
-            event_threshold_sigma=event_threshold_sigma,
-            n_shuffles=n_shuffles,
-            random_seed=random_seed,
-            behavior_fps=behavior_fps,
-            min_occupancy=min_occupancy,
-            occupancy_sigma=occupancy_sigma,
-            stability_threshold=stability_threshold,
-            min_shift_seconds=min_shift_seconds,
-            si_weight_mode=si_weight_mode,
-        )
 
-        # Visualization-specific: events above threshold for this unit
-        vis_data_above = result["events_above_threshold"]
+def plot_occupancy_preview(
+    trajectory_filtered: pd.DataFrame,
+    occupancy_time: np.ndarray,
+    valid_mask: np.ndarray,
+    x_edges: np.ndarray,
+    y_edges: np.ndarray,
+) -> "Figure":
+    """Filtered trajectory alongside occupancy heatmap.
 
-        # Visualization-specific: below-threshold events from all events (non-speed-filtered)
-        vis_data_below = pd.DataFrame()
-        if df_all_events is not None:
-            unit_all_events = df_all_events[df_all_events["unit_id"] == unit_id]
-            vis_data_below = unit_all_events[unit_all_events["s"] > result["vis_threshold"]]
+    Parameters
+    ----------
+    trajectory_filtered:
+        Speed-filtered trajectory.
+    occupancy_time:
+        Occupancy time map (bins x bins).
+    valid_mask:
+        Boolean mask of valid spatial bins.
+    x_edges, y_edges:
+        Spatial bin edges.
+    """
+    ext = [x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]]
+    fig, (ax_traj, ax_occ) = plt.subplots(1, 2, figsize=(8, 3.5))
 
-        # Visualization-specific: trace data
-        trace_data = None
-        trace_times = None
-        if traces is not None:
-            try:
-                trace_data = traces.sel(unit_id=int(unit_id)).values
-                trace_times = np.arange(len(trace_data)) / trace_fps
-            except (KeyError, IndexError) as e:
-                logger.warning(f"Failed to load trace for unit {unit_id}: {e}")
-
-        unit_results[unit_id] = {
-            "rate_map": result["rate_map"],
-            "si": result["si"],
-            "shuffled_sis": result["shuffled_sis"],
-            "p_val": result["p_val"],
-            "stability_corr": result["stability_corr"],
-            "stability_z": result["stability_z"],
-            "stability_p_val": result["stability_p_val"],
-            "rate_map_first": result["rate_map_first"],
-            "rate_map_second": result["rate_map_second"],
-            "vis_data_above": vis_data_above,
-            "vis_data_below": vis_data_below,
-            "unit_data": result["unit_data"],
-            "trace_data": trace_data,
-            "trace_times": trace_times,
-        }
-
-    # p_value_threshold is used to determine pass/fail status (not for filtering)
-    # All units are shown, with significance test result displayed
-
-    # Show summary scatter plots (side by side)
-    threshold_p = p_value_threshold if p_value_threshold is not None else 0.05
-    fig_scatter = plot_summary_scatter(
-        unit_results,
-        p_value_threshold=threshold_p,
-        stability_threshold=stability_threshold,
+    ax_traj.plot(
+        trajectory_filtered["x"],
+        trajectory_filtered["y"],
+        "k-",
+        alpha=0.5,
+        linewidth=0.3,
     )
-    fig_scatter.show()
-
-    logger.info("Ready.")
-
-    # Create figure
-    from matplotlib.widgets import Slider
-
-    fig = plt.figure(figsize=(18, 9))
-    current_idx = [0]  # Use list to allow modification in nested function
-    trace_scroll_pos = [0.0]  # Current scroll position for trace
-
-    # Unit info at top
-    min_uid, max_uid = min(unique_units), max(unique_units)
-
-    # Create axes - unit info at top, more space for trace
-    ax1 = fig.add_axes([0.03, 0.42, 0.18, 0.45])  # Max projection
-    ax2 = fig.add_axes([0.25, 0.42, 0.18, 0.45])  # Trajectory
-    ax3 = fig.add_axes([0.47, 0.42, 0.16, 0.45])  # Rate map (slightly smaller for colorbar)
-    ax3_cbar = fig.add_axes([0.635, 0.49, 0.015, 0.315])  # Colorbar (70% height, centered)
-    ax4 = fig.add_axes([0.74, 0.42, 0.18, 0.45])  # SI histogram (square)
-    ax5 = fig.add_axes([0.05, 0.20, 0.90, 0.20])  # Trace
-    ax_trace_slider = fig.add_axes(
-        [0.15, 0.12, 0.70, 0.02]
-    )  # Trace scrollbar (moved up to avoid x label)
-
-    # Create trace scrollbar (will be initialized in render function)
-    trace_slider = None
-
-    def render(idx: int) -> None:
-        nonlocal trace_slider
-        # Clamp index to valid range
-        idx = max(0, min(idx, n_units - 1))
-        unit_id = unique_units[idx]
-        result = unit_results[unit_id]
-
-        # Reset trace scroll position when unit changes
-        if idx != current_idx[0]:
-            trace_scroll_pos[0] = 0.0
-            if trace_slider is not None:
-                trace_slider.set_val(0.0)
-
-        # Clear all axes
-        for ax in [ax1, ax2, ax3, ax3_cbar, ax4, ax5]:
-            ax.clear()
-
-        # 1. Max projection with neuron position
-        if max_proj is not None:
-            ax1.imshow(max_proj, cmap="gray", aspect="equal")
-            if footprints is not None:
-                try:
-                    unit_fp = footprints.sel(unit_id=unit_id).values
-                    if unit_fp.max() > 0:
-                        ax1.contour(
-                            unit_fp, levels=[unit_fp.max() * 0.3], colors="red", linewidths=1.5
-                        )
-                except (KeyError, IndexError, ValueError) as e:
-                    logger.warning(f"Failed to load footprint for unit {unit_id}: {e}")
-            ax1.set_title(f"Unit {unit_id}")
-        else:
-            ax1.text(
-                0.5, 0.5, "No max projection", ha="center", va="center", transform=ax1.transAxes
-            )
-            ax1.set_title(f"Unit {unit_id}")
-        ax1.axis("off")
-
-        # 2. Trajectory + spikes (only above speed threshold)
-        vis_data_above = result["vis_data_above"]
-        ax2.plot(trajectory_df["x"], trajectory_df["y"], "k-", alpha=1.0, linewidth=1, zorder=1)
-
-        # Plot above-threshold spikes with alpha proportional to amplitude/occupancy
-        if not vis_data_above.empty:
-            amps = vis_data_above["s"].values
-            x_vals = vis_data_above["x"].values
-            y_vals = vis_data_above["y"].values
-
-            # Find spatial bin index for each event
-            x_bin_idx = np.digitize(x_vals, x_edges) - 1
-            y_bin_idx = np.digitize(y_vals, y_edges) - 1
-
-            # Clip to valid bin indices
-            x_bin_idx = np.clip(x_bin_idx, 0, len(x_edges) - 2)
-            y_bin_idx = np.clip(y_bin_idx, 0, len(y_edges) - 2)
-
-            # Look up occupancy at each event location
-            event_occupancy = occupancy_time[x_bin_idx, y_bin_idx]
-
-            # Normalize amplitude by occupancy (avoid division by zero)
-            normalized_amps = amps / np.maximum(event_occupancy, 0.01)
-
-            # Scale to 0-1 range
-            norm_max = np.max(normalized_amps) if len(normalized_amps) > 0 and np.max(normalized_amps) > 0 else 1.0
-            alphas = normalized_amps / norm_max
-
-            ax2.scatter(
-                x_vals,
-                y_vals,
-                c="red",
-                s=30,
-                alpha=alphas,
-                zorder=2,
-            )
-
-        ax2.set_title(f"Trajectory ({len(vis_data_above)} events)")
-        ax2.set_aspect("equal")
-        ax2.axis("off")
-
-        # 3. Rate map
-        rate_map_data = result["rate_map"].T
-        im = ax3.imshow(
-            rate_map_data,
+    if np.any(valid_mask) and not np.all(valid_mask):
+        ax_traj.contour(
+            valid_mask.T.astype(float),
+            levels=[0.5],
+            colors="white",
+            linewidths=2,
+            extent=ext,
             origin="lower",
-            extent=[x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]],
-            aspect="equal",
-            cmap="jet",
         )
-        field_mask = compute_place_field_mask(
-            result["rate_map"],
-            threshold=0.05,
-            shuffled_rate_p95=result.get("shuffled_rate_p95"),
+    ax_traj.set_title("Trajectory (filtered)")
+    ax_traj.set_aspect("equal")
+    ax_traj.axis("off")
+
+    im = ax_occ.imshow(
+        occupancy_time.T,
+        origin="lower",
+        extent=ext,
+        cmap="hot",
+        aspect="equal",
+    )
+    if np.any(valid_mask) and not np.all(valid_mask):
+        ax_occ.contour(
+            valid_mask.T.astype(float),
+            levels=[0.5],
+            colors="white",
+            linewidths=2,
+            extent=ext,
+            origin="lower",
         )
-        if np.any(field_mask):
-            ax3.contour(
-                field_mask.T.astype(float),
-                levels=[0.5],
-                colors="red",
-                linewidths=1.5,
-                extent=[x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]],
-                origin="lower",
+    ax_occ.set_title(f"Occupancy ({valid_mask.sum()}/{valid_mask.size} valid bins)")
+    plt.colorbar(im, ax=ax_occ, label="Time (s)")
+
+    fig.tight_layout()
+    return fig
+
+
+def plot_footprints(
+    max_proj: np.ndarray,
+    footprints: xr.DataArray,
+) -> "Figure":
+    """Max projection, cell footprint contours, and overlay.
+
+    Parameters
+    ----------
+    max_proj:
+        Max-projection image.
+    footprints:
+        Spatial footprints DataArray with unit_id coordinate.
+    """
+    unit_ids = footprints.coords["unit_id"].values
+    colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+
+    fig, (ax_mp, ax_fp, ax_ov) = plt.subplots(1, 3, figsize=(10, 3.5))
+
+    ax_mp.imshow(max_proj, cmap="gray", aspect="equal")
+    ax_mp.set_title("Max Projection")
+    ax_mp.axis("off")
+
+    ax_fp.imshow(np.zeros_like(max_proj), cmap="gray", aspect="equal")
+    for i, uid in enumerate(unit_ids):
+        fp = footprints.sel(unit_id=uid).values
+        if fp.max() > 0:
+            ax_fp.contour(
+                fp,
+                levels=[fp.max() * 0.3],
+                colors=[colors[i % len(colors)]],
+                linewidths=1,
             )
-        ax3.set_title("Rate map")
-        ax3.axis("off")
+    ax_fp.set_title(f"Cell Footprints ({len(unit_ids)})")
+    ax_fp.axis("off")
 
-        # Add colorbar for rate map using dedicated axes
-        im.set_clim(0.0, 1.0)
-        plt.colorbar(im, cax=ax3_cbar)
-        ax3_cbar.set_ylabel("Norm. rate", rotation=270, labelpad=10)
-
-        # 4. SI histogram
-        ax4.hist(result["shuffled_sis"], bins=15, color="gray", alpha=0.7, edgecolor="black")
-        ax4.axvline(result["si"], color="red", linestyle="--", linewidth=2)
-        ax4.set_title(f"SI: {result['si']:.2f}, p={result['p_val']:.3f}")
-        ax4.set_xlabel("SI (bits/s)")
-        ax4.set_ylabel("Count")
-        ax4.set_aspect("auto")
-        ax4.set_box_aspect(1)  # Square
-
-        # 5. Trace (scrollable window)
-        if result["trace_data"] is not None and result["trace_times"] is not None:
-            trace = result["trace_data"]
-            t_full = result["trace_times"]
-
-            # Calculate visible window
-            t_max = t_full[-1] if len(t_full) > 0 else trace_time_window
-            scroll_pos = trace_scroll_pos[0]
-            t_start = max(0, scroll_pos)
-            t_end = min(t_max, t_start + trace_time_window)
-
-            # Get indices for visible window
-            mask = (t_full >= t_start) & (t_full <= t_end)
-            t_visible = t_full[mask]
-            trace_visible = trace[mask]
-
-            # Plot trace
-            ax5.plot(t_visible, trace_visible, "b-", linewidth=0.5, label="Fluorescence")
-
-            # Collect deconvolved event data for plotting as dots
-            event_times_gray = []
-            event_amplitudes_gray = []
-            event_times_red = []
-            event_amplitudes_red = []
-
-            # Gray: all deconvolved events from event_index (below speed threshold)
-            if df_all_events is not None:
-                unit_all_events = df_all_events[df_all_events["unit_id"] == unit_id]
-                has_frame = "frame" in unit_all_events.columns
-                has_amp = "s" in unit_all_events.columns
-                if has_frame and has_amp and not unit_all_events.empty:
-                    event_frames = unit_all_events["frame"].values
-                    event_amplitudes = unit_all_events["s"].values
-                    event_times = event_frames / trace_fps
-                    event_mask = (event_times >= t_start) & (event_times <= t_end)
-                    if np.any(event_mask):
-                        event_times_gray = event_times[event_mask]
-                        event_amplitudes_gray = event_amplitudes[event_mask]
-
-            # Red: deconvolved events from event_place (above speed threshold)
-            vis_data_above = result["vis_data_above"]
-            has_required_cols = "frame" in vis_data_above.columns and "s" in vis_data_above.columns
-            if has_required_cols and not vis_data_above.empty:
-                event_frames = vis_data_above["frame"].values
-                event_amplitudes = vis_data_above["s"].values
-                event_times = event_frames / trace_fps
-                event_mask = (event_times >= t_start) & (event_times <= t_end)
-                if np.any(event_mask):
-                    event_times_red = event_times[event_mask]
-                    event_amplitudes_red = event_amplitudes[event_mask]
-
-            # Plot deconvolved events as vertical spikes with height proportional to amplitude
-            y_min, y_max = ax5.get_ylim()
-            baseline = y_min  # Start spikes from bottom
-
-            # Combine all amplitudes for normalization
-            all_amps = np.concatenate(
-                [
-                    event_amplitudes_gray if len(event_amplitudes_gray) > 0 else [],
-                    event_amplitudes_red if len(event_amplitudes_red) > 0 else [],
-                ]
+    ax_ov.imshow(max_proj, cmap="gray", aspect="equal")
+    for i, uid in enumerate(unit_ids):
+        fp = footprints.sel(unit_id=uid).values
+        if fp.max() > 0:
+            ax_ov.contour(
+                fp,
+                levels=[fp.max() * 0.3],
+                colors=[colors[i % len(colors)]],
+                linewidths=1,
             )
-            amp_max = np.max(all_amps) if len(all_amps) > 0 else 1.0
+    ax_ov.set_title("Overlay")
+    ax_ov.axis("off")
 
-            # Scale spike heights to use ~30% of the y-axis range
-            y_range = y_max - y_min
-            max_spike_height = y_range * 0.3
+    fig.tight_layout()
+    return fig
 
-            def scale_height(amp: float) -> float:
-                if amp_max > 0:
-                    return (amp / amp_max) * max_spike_height
-                return 0.0
 
-            # Draw gray spikes (all events)
-            if len(event_times_gray) > 0:
-                for t, amp in zip(event_times_gray, event_amplitudes_gray):
-                    h = scale_height(amp)
-                    ax5.plot([t, t], [baseline, baseline + h], color="gray", lw=1.5)
+def plot_coverage(
+    coverage_map: np.ndarray,
+    n_cells_arr: np.ndarray,
+    coverage_frac: np.ndarray,
+    x_edges: np.ndarray,
+    y_edges: np.ndarray,
+    valid_mask: np.ndarray,
+    n_place_cells: int,
+) -> "Figure":
+    """Place field coverage map and cumulative coverage curve.
 
-            # Draw red spikes (speed-filtered events) on top
-            if len(event_times_red) > 0:
-                for t, amp in zip(event_times_red, event_amplitudes_red):
-                    h = scale_height(amp)
-                    ax5.plot([t, t], [baseline, baseline + h], color="red", lw=1.5)
+    Parameters
+    ----------
+    coverage_map:
+        Overlap count per spatial bin.
+    n_cells_arr:
+        Number of place cells at each step of the cumulative curve.
+    coverage_frac:
+        Fraction of environment covered at each step.
+    x_edges, y_edges:
+        Spatial bin edges.
+    valid_mask:
+        Boolean mask of valid spatial bins.
+    n_place_cells:
+        Total number of place cells.
+    """
+    ext = [x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]]
+    fig, (ax_map, ax_curve) = plt.subplots(1, 2, figsize=(10, 4))
 
-            ax5.set_xlim(t_start, t_end)
-            ax5.set_xlabel("Time (s)")
-            ax5.set_ylabel(trace_name)
-
-            # Legend
-            from matplotlib.lines import Line2D
-
-            legend_elements = [
-                Line2D([0], [0], color="blue", linewidth=0.5, label="Fluorescence"),
-            ]
-            has_gray = len(event_times_gray) > 0
-            has_red = len(event_times_red) > 0
-            if has_gray:
-                legend_elements.append(
-                    Line2D(
-                        [0],
-                        [0],
-                        color="gray",
-                        linewidth=1.5,
-                        label=f"Deconv events (< {speed_threshold:.1f} px/s)",
-                    )
-                )
-            if has_red:
-                legend_elements.append(
-                    Line2D(
-                        [0],
-                        [0],
-                        color="red",
-                        linewidth=1.5,
-                        label=f"Deconv events (≥ {speed_threshold:.1f} px/s)",
-                    )
-                )
-            ax5.legend(handles=legend_elements, loc="upper left", fontsize=8, framealpha=0.9)
-
-            # Update trace slider range if needed
-            if trace_slider is None and t_max > trace_time_window:
-                trace_slider_max = max(0, t_max - trace_time_window)
-                trace_slider = Slider(
-                    ax_trace_slider,
-                    "Time",
-                    0.0,
-                    trace_slider_max,
-                    valinit=0.0,
-                    valfmt="%.0f s",
-                )
-
-                def on_trace_slider(val: float) -> None:
-                    trace_scroll_pos[0] = val
-                    render(current_idx[0])
-
-                trace_slider.on_changed(on_trace_slider)
-            elif trace_slider is not None:
-                if t_max > trace_time_window:
-                    trace_slider_max = max(0, t_max - trace_time_window)
-                    trace_slider.valmax = trace_slider_max
-                    trace_slider.ax.set_xlim(0, trace_slider_max)
-                    trace_slider.ax.set_visible(True)
-                else:
-                    trace_slider.ax.set_visible(False)
-        else:
-            ax5.text(0.5, 0.5, "No trace data", ha="center", va="center", transform=ax5.transAxes)
-            ax5.set_xlabel("Time (s)")
-            if trace_slider is not None:
-                trace_slider.ax.set_visible(False)
-
-        # Determine significance test pass/fail
-        p_val = result["p_val"]
-        threshold = p_value_threshold if p_value_threshold is not None else 0.05
-        sig_pass = p_val < threshold
-        sig_text = "pass" if sig_pass else "fail"
-        sig_color = "green" if sig_pass else "red"
-
-        # Determine stability test pass/fail
-        stab_corr = result["stability_corr"]
-        stab_p = result.get("stability_p_val", np.nan)
-        if np.isnan(stab_corr):
-            stab_pass = None  # N/A
-            stab_text = "N/A"
-            stab_color = "gray"
-        elif not np.isnan(stab_p):
-            stab_pass = stab_p < threshold
-            stab_text = "pass" if stab_pass else "fail"
-            stab_color = "green" if stab_pass else "red"
-        else:
-            stab_pass = stab_corr >= stability_threshold
-            stab_text = "pass" if stab_pass else "fail"
-            stab_color = "green" if stab_pass else "red"
-
-        # Clear any existing text annotations for test results
-        for txt in fig.texts[:]:
-            if hasattr(txt, "_is_test_status"):
-                txt.remove()
-
-        # Get event count for this unit
-        n_events = len(result["unit_data"]) if not result["unit_data"].empty else 0
-
-        # Unit info at top left (with event count)
-        unit_info = fig.text(
-            0.02,
-            0.98,
-            (
-                f"Unit ID: {unit_id} ({idx + 1}/{n_units}) | N={n_events} events | "
-                f"Range: {min_uid}-{max_uid} | Use ←/→ keys"
-            ),
-            ha="left",
-            va="top",
-            fontsize=11,
-            fontweight="bold",
-            transform=fig.transFigure,
+    im = ax_map.imshow(
+        coverage_map.T,
+        origin="lower",
+        extent=ext,
+        cmap="hot",
+        aspect="equal",
+    )
+    if np.any(coverage_map > 0):
+        ax_map.contour(
+            (coverage_map > 0).T.astype(float),
+            levels=[0.5],
+            colors="white",
+            linewidths=1.5,
+            extent=ext,
+            origin="lower",
         )
-        unit_info._is_test_status = True
+    plt.colorbar(im, ax=ax_map, label="Overlapping fields")
+    ax_map.set_title(f"Place Field Coverage ({n_place_cells} cells)")
+    ax_map.axis("off")
 
-        # Significance test (stacked below unit info)
-        sig_label = fig.text(
-            0.02,
-            0.95,
-            f"Significance test (p={p_val:.3f}): ",
-            ha="left",
-            va="top",
-            fontsize=10,
-            transform=fig.transFigure,
+    ax_curve.plot(n_cells_arr, coverage_frac * 100, "k-", linewidth=2)
+    ax_curve.fill_between(
+        n_cells_arr,
+        0,
+        coverage_frac * 100,
+        alpha=0.15,
+        color="steelblue",
+    )
+    ax_curve.set_xlabel("Number of place cells (sorted by field size)")
+    ax_curve.set_ylabel("Environment coverage (%)")
+    ax_curve.set_title("Cumulative Coverage")
+    ax_curve.set_ylim(0, 105)
+    ax_curve.set_xlim(0, n_place_cells)
+    ax_curve.axhline(100, color="gray", linestyle="--", linewidth=1, alpha=0.5)
+    ax_curve.grid(True, alpha=0.3, linestyle="--")
+
+    for pct in [90, 100]:
+        idx = np.searchsorted(coverage_frac, pct / 100.0)
+        if idx < len(n_cells_arr):
+            ax_curve.axvline(
+                n_cells_arr[idx],
+                color="red",
+                linestyle=":",
+                linewidth=1,
+                alpha=0.7,
+            )
+            ax_curve.text(
+                n_cells_arr[idx] + 1,
+                pct - 5,
+                f"{pct}% at {n_cells_arr[idx]} cells",
+                fontsize=8,
+                color="red",
+            )
+
+    fig.tight_layout()
+
+    n_valid = int(valid_mask.sum())
+    n_covered = int(np.sum((coverage_map > 0) & valid_mask))
+    logger.info("Covered: %d/%d bins (%.1f%%)", n_covered, n_valid, 100 * n_covered / n_valid)
+    if np.any(coverage_map > 0):
+        logger.info(
+            "Max overlap: %d, mean overlap: %.1f",
+            coverage_map.max(),
+            coverage_map[coverage_map > 0].mean(),
         )
-        sig_label._is_test_status = True
 
-        sig_status = fig.text(
-            0.185,
-            0.95,
-            sig_text,
-            ha="left",
-            va="top",
-            fontsize=10,
-            fontweight="bold",
-            color=sig_color,
-            transform=fig.transFigure,
-        )
-        sig_status._is_test_status = True
-
-        # Stability test (stacked below significance test)
-        stab_parts = []
-        if not np.isnan(stab_corr):
-            stab_parts.append(f"r={stab_corr:.2f}")
-        if not np.isnan(stab_p):
-            stab_parts.append(f"p={stab_p:.3f}")
-        stab_corr_str = ", ".join(stab_parts)
-        stab_label = fig.text(
-            0.02,
-            0.92,
-            f"Stability test ({stab_corr_str}): ",
-            ha="left",
-            va="top",
-            fontsize=10,
-            transform=fig.transFigure,
-        )
-        stab_label._is_test_status = True
-
-        stab_status = fig.text(
-            0.175,
-            0.92,
-            stab_text,
-            ha="left",
-            va="top",
-            fontsize=10,
-            fontweight="bold",
-            color=stab_color,
-            transform=fig.transFigure,
-        )
-        stab_status._is_test_status = True
-
-        fig.canvas.draw_idle()
-
-    def change_unit(new_idx: int) -> None:
-        """Change to a new unit index."""
-        # Loop around the list
-        num_units = len(unique_units)
-        new_idx = new_idx % num_units
-        current_idx[0] = new_idx
-        render(new_idx)
-
-    def on_key(event: Any) -> None:
-        """Keyboard navigation handler."""
-        num_units = len(unique_units)
-        if event.key in ["right", "d"]:
-            new_idx = (current_idx[0] + 1) % num_units
-            change_unit(new_idx)
-        elif event.key in ["left", "a"]:
-            new_idx = (current_idx[0] - 1) % num_units
-            change_unit(new_idx)
-        elif event.key == "q":
-            plt.close(fig)
-
-    # Connect keyboard
-    fig.canvas.mpl_connect("key_press_event", on_key)
-    render(0)
-    plt.show()
+    return fig

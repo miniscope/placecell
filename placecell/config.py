@@ -167,6 +167,11 @@ class SpatialMapConfig(MiniscopeConfig, ConfigYAMLMixin):
             "threshold-only algorithm (faster)."
         ),
     )
+    trace_time_window: float = Field(
+        600.0,
+        gt=0.0,
+        description="Time window in seconds for trace display in the interactive browser.",
+    )
 
 
 class BehaviorConfig(MiniscopeConfig, ConfigYAMLMixin):
@@ -235,13 +240,13 @@ class DataPathsConfig(MiniscopeConfig, ConfigYAMLMixin):
     )
 
 
-class AppConfig(MiniscopeConfig, ConfigYAMLMixin):
+class AnalysisConfig(MiniscopeConfig, ConfigYAMLMixin):
     """Top-level application configuration."""
 
     neural: NeuralConfig
     behavior: BehaviorConfig | None = None
 
-    def with_data_overrides(self, data_cfg: DataPathsConfig) -> "AppConfig":
+    def with_data_overrides(self, data_cfg: DataPathsConfig) -> "AnalysisConfig":
         """Create a new config with data-specific overrides applied.
 
         Parameters
@@ -251,7 +256,7 @@ class AppConfig(MiniscopeConfig, ConfigYAMLMixin):
 
         Returns
         -------
-        AppConfig
+        AnalysisConfig
             New config with overrides applied. Original config is unchanged.
         """
         if data_cfg.oasis is not None:
