@@ -6,6 +6,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import xarray as xr
+from mio.logging import init_logger
 
 from placecell.analysis import (
     compute_coverage_curve,
@@ -14,9 +15,11 @@ from placecell.analysis import (
     compute_unit_analysis,
 )
 from placecell.behavior import build_event_place_dataframe, load_curated_unit_ids
-from placecell.config import AnalysisConfig, DataPathsConfig, SpatialMapConfig  # noqa: F401
-from placecell.io import load_behavior_data, load_neural_data
-from placecell.neural import build_event_index_dataframe, load_traces, run_deconvolution
+from placecell.config import AnalysisConfig, DataPathsConfig, SpatialMapConfig
+from placecell.io import load_behavior_data, load_visualization_data
+from placecell.neural import build_event_index_dataframe, load_calcium_traces, run_deconvolution
+
+logger = init_logger(__name__)
 
 
 class PlaceCellDataset:
@@ -129,10 +132,11 @@ class PlaceCellDataset:
         bcfg = self.cfg.behavior
 
         # Traces
-        self.traces = load_traces(self.neural_path, trace_name=ncfg.trace_name)
-        print(
-            f"Loaded traces: {self.traces.sizes['unit_id']} units, "
-            f"{self.traces.sizes['frame']} frames"
+        self.traces = load_calcium_traces(self.neural_path, trace_name=ncfg.trace_name)
+        logger.info(
+            "Loaded traces: %d units, %d frames",
+            self.traces.sizes["unit_id"],
+            self.traces.sizes["frame"],
         )
 
         # Behavior
@@ -143,13 +147,14 @@ class PlaceCellDataset:
             speed_window_frames=bcfg.speed_window_frames,
             speed_threshold=bcfg.speed_threshold,
         )
-        print(
-            f"Trajectory: {len(self.trajectory)} frames "
-            f"({len(self.trajectory_filtered)} after speed filter)"
+        logger.info(
+            "Trajectory: %d frames (%d after speed filter)",
+            len(self.trajectory),
+            len(self.trajectory_filtered),
         )
 
         # Visualization assets (max projection, footprints)
-        self.traces, self.max_proj, self.footprints = load_neural_data(
+        self.traces, self.max_proj, self.footprints = load_visualization_data(
             neural_path=self.neural_path,
             trace_name=ncfg.trace_name,
         )
@@ -180,7 +185,7 @@ class PlaceCellDataset:
         if self.curation_csv_path is not None and self.curation_csv_path.exists():
             curated = set(load_curated_unit_ids(self.curation_csv_path))
             all_unit_ids = [uid for uid in all_unit_ids if uid in curated]
-            print(f"After curation filter: {len(all_unit_ids)} units")
+            logger.info("After curation filter: %d units", len(all_unit_ids))
 
         # User-specified subset
         if unit_ids is not None:
@@ -188,13 +193,13 @@ class PlaceCellDataset:
             all_unit_ids = [uid for uid in unit_ids if uid in available]
             missing = set(unit_ids) - available
             if missing:
-                print(f"Warning: unit IDs not found: {sorted(missing)}")
-            print(f"Selected {len(all_unit_ids)} units")
+                logger.warning("Unit IDs not found: %s", sorted(missing))
+            logger.info("Selected %d units", len(all_unit_ids))
         elif ncfg.max_units is not None and len(all_unit_ids) > ncfg.max_units:
             all_unit_ids = all_unit_ids[: ncfg.max_units]
-            print(f"Limited to first {ncfg.max_units} units")
+            logger.info("Limited to first %d units", ncfg.max_units)
 
-        print(f"Deconvolving {len(all_unit_ids)} units (g={oasis.g})...")
+        logger.info("Deconvolving %d units (g=%s)...", len(all_unit_ids), oasis.g)
 
         self.good_unit_ids, self.C_list, self.S_list = run_deconvolution(
             C_da=self.traces,
@@ -207,7 +212,9 @@ class PlaceCellDataset:
         )
 
         self.event_index = build_event_index_dataframe(self.good_unit_ids, self.S_list)
-        print(f"Deconvolved {len(self.good_unit_ids)} units, " f"{len(self.event_index)} events")
+        logger.info(
+            "Deconvolved %d units, %d events", len(self.good_unit_ids), len(self.event_index)
+        )
 
     def match_events(self) -> None:
         """Match neural events to behavior positions."""
@@ -225,9 +232,10 @@ class PlaceCellDataset:
             behavior_fps=bcfg.behavior_fps,
             speed_threshold=bcfg.speed_threshold,
         )
-        print(
-            f"Matched {len(self.event_place)} events "
-            f"({self.event_place['unit_id'].nunique()} units)"
+        logger.info(
+            "Matched %d events (%d units)",
+            len(self.event_place),
+            self.event_place["unit_id"].nunique(),
         )
 
     def compute_occupancy(self) -> None:
@@ -244,9 +252,11 @@ class PlaceCellDataset:
             occupancy_sigma=scfg.occupancy_sigma,
             min_occupancy=scfg.min_occupancy,
         )
-        print(
-            f"Occupancy map: {self.occupancy_time.shape}, "
-            f"{self.valid_mask.sum()}/{self.valid_mask.size} valid bins"
+        logger.info(
+            "Occupancy map: %s, %d/%d valid bins",
+            self.occupancy_time.shape,
+            self.valid_mask.sum(),
+            self.valid_mask.size,
         )
 
     def analyze_units(self, progress_bar: Any = None) -> None:
@@ -273,7 +283,7 @@ class PlaceCellDataset:
         unique_units = sorted(df_filtered["unit_id"].unique())
         unique_units = [uid for uid in unique_units if uid in self.good_unit_ids]
         n_units = len(unique_units)
-        print(f"Analyzing {n_units} units...")
+        logger.info("Analyzing %d units...", n_units)
 
         iterator = unique_units
         if progress_bar is not None:
@@ -338,7 +348,7 @@ class PlaceCellDataset:
                 "trace_times": trace_times,
             }
 
-        print(f"Done. {len(self.unit_results)} units analyzed.")
+        logger.info("Done. %d units analyzed.", len(self.unit_results))
 
     def place_cells(self) -> dict[int, dict]:
         """Return units passing both significance and stability tests."""

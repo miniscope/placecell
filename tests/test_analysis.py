@@ -20,7 +20,7 @@ from placecell.behavior import (
     compute_behavior_speed,
     load_curated_unit_ids,
 )
-from placecell.neural import load_traces
+from placecell.neural import load_calcium_traces
 
 
 def test_event_place_regression(assets_dir: Path) -> None:
@@ -48,9 +48,9 @@ def test_event_place_regression(assets_dir: Path) -> None:
     pd.testing.assert_frame_equal(result, reference, rtol=1e-5)
 
 
-def test_load_traces_shape(neural_path: Path) -> None:
-    """load_traces should return correct dimensions."""
-    C = load_traces(neural_path, trace_name="C")
+def test_load_calcium_traces_shape(neural_path: Path) -> None:
+    """load_calcium_traces should return correct dimensions."""
+    C = load_calcium_traces(neural_path, trace_name="C")
 
     assert C.dims == ("unit_id", "frame")
     assert C.sizes["unit_id"] == 10

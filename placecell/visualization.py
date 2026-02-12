@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pandas as pd
 import xarray as xr
+from mio.logging import init_logger
 
 try:
     import matplotlib.pyplot as plt
@@ -14,6 +15,8 @@ try:
 except ImportError:
     plt = None
     Figure = None
+
+logger = init_logger(__name__)
 
 
 def plot_summary_scatter(
@@ -236,11 +239,15 @@ def plot_diagnostics(
     fig.tight_layout()
 
     n_sig = int(sig_mask.sum())
-    print(f"Total units: {len(uids)}")
-    print(f"Significant (p<{p_value_threshold}): {n_sig} ({100 * n_sig / len(uids):.1f}%)")
-    print(
-        f"Event count: median={int(np.median(n_events))}, "
-        f"min={min(n_events)}, max={max(n_events)}"
+    logger.info("Total units: %d", len(uids))
+    logger.info(
+        "Significant (p<%s): %d (%.1f%%)", p_value_threshold, n_sig, 100 * n_sig / len(uids)
+    )
+    logger.info(
+        "Event count: median=%d, min=%d, max=%d",
+        int(np.median(n_events)),
+        min(n_events),
+        max(n_events),
     )
 
     return fig
@@ -510,11 +517,12 @@ def plot_coverage(
 
     n_valid = int(valid_mask.sum())
     n_covered = int(np.sum((coverage_map > 0) & valid_mask))
-    print(f"Covered: {n_covered}/{n_valid} bins ({100 * n_covered / n_valid:.1f}%)")
+    logger.info("Covered: %d/%d bins (%.1f%%)", n_covered, n_valid, 100 * n_covered / n_valid)
     if np.any(coverage_map > 0):
-        print(
-            f"Max overlap: {coverage_map.max()}, "
-            f"mean overlap: {coverage_map[coverage_map > 0].mean():.1f}"
+        logger.info(
+            "Max overlap: %d, mean overlap: %.1f",
+            coverage_map.max(),
+            coverage_map[coverage_map > 0].mean(),
         )
 
     return fig
