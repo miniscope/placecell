@@ -45,7 +45,7 @@ Create `config.yaml` with analysis parameters:
 :::{dropdown} config.yaml
 ```yaml
 id: your_config
-mio_model: placecell.config.AppConfig
+mio_model: placecell.config.AnalysisConfig
 mio_version: 0.8.1
 neural:
   id: neural

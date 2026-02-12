@@ -4,12 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from placecell.config import AppConfig, DataPathsConfig, OasisConfig
+from placecell.config import AnalysisConfig, DataPathsConfig, OasisConfig
 
 
 def test_config_loads(example_config_path: Path) -> None:
     """Config file should load and have required sections."""
-    cfg = AppConfig.from_yaml(example_config_path)
+    cfg = AnalysisConfig.from_yaml(example_config_path)
 
     assert cfg.neural is not None
     assert cfg.behavior is not None

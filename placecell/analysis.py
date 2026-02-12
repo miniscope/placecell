@@ -189,11 +189,7 @@ def compute_spatial_information(
     if unit_events.empty:
         return 0.0, 1.0, np.zeros(n_shuffles)
 
-    # Choose weights based on mode
-    if si_weight_mode == "binary":
-        weights = np.ones(len(unit_events))
-    else:
-        weights = unit_events["s"].values
+    weights = np.ones(len(unit_events)) if si_weight_mode == "binary" else unit_events["s"].values
 
     event_weights, _, _ = np.histogram2d(
         unit_events["x"],
@@ -939,7 +935,7 @@ def compute_coverage_map(
         Integer array of place field overlap counts at each bin.
     """
     coverage = None
-    for uid, result in unit_results.items():
+    for _uid, result in unit_results.items():
         rm = result["rate_map"]
         if coverage is None:
             coverage = np.zeros_like(rm, dtype=int)
@@ -989,7 +985,7 @@ def compute_coverage_curve(
 
     # Collect per-unit field masks and sort by field size (largest first)
     masks = []
-    for uid, result in unit_results.items():
+    for _uid, result in unit_results.items():
         m = compute_place_field_mask(
             result["rate_map"],
             threshold=threshold,

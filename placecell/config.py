@@ -240,13 +240,13 @@ class DataPathsConfig(MiniscopeConfig, ConfigYAMLMixin):
     )
 
 
-class AppConfig(MiniscopeConfig, ConfigYAMLMixin):
+class AnalysisConfig(MiniscopeConfig, ConfigYAMLMixin):
     """Top-level application configuration."""
 
     neural: NeuralConfig
     behavior: BehaviorConfig | None = None
 
-    def with_data_overrides(self, data_cfg: DataPathsConfig) -> "AppConfig":
+    def with_data_overrides(self, data_cfg: DataPathsConfig) -> "AnalysisConfig":
         """Create a new config with data-specific overrides applied.
 
         Parameters
@@ -256,7 +256,7 @@ class AppConfig(MiniscopeConfig, ConfigYAMLMixin):
 
         Returns
         -------
-        AppConfig
+        AnalysisConfig
             New config with overrides applied. Original config is unchanged.
         """
         if data_cfg.oasis is not None:

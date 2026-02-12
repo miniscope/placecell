@@ -14,7 +14,7 @@ from placecell.analysis import (
     compute_unit_analysis,
 )
 from placecell.behavior import build_event_place_dataframe, load_curated_unit_ids
-from placecell.config import AppConfig, DataPathsConfig, SpatialMapConfig
+from placecell.config import AnalysisConfig, DataPathsConfig, SpatialMapConfig  # noqa: F401
 from placecell.io import load_behavior_data, load_neural_data
 from placecell.neural import build_event_index_dataframe, load_traces, run_deconvolution
 
@@ -33,18 +33,36 @@ class PlaceCellDataset:
 
     Parameters
     ----------
-    cfg : AppConfig
+    cfg : AnalysisConfig
         Merged analysis config (pipeline + data-specific overrides).
-    data_cfg : DataPathsConfig
-        Paths to neural / behavior files relative to ``data_dir``.
-    data_dir : Path
-        Root directory for the recording session.
+    neural_path : Path
+        Directory containing neural zarr files.
+    neural_timestamp_path : Path
+        Path to neural timestamp CSV.
+    behavior_position_path : Path
+        Path to behavior position CSV.
+    behavior_timestamp_path : Path
+        Path to behavior timestamp CSV.
+    curation_csv_path : Path or None
+        Path to curation CSV, or None to use all units.
     """
 
-    def __init__(self, cfg: AppConfig, data_cfg: DataPathsConfig, data_dir: Path) -> None:
+    def __init__(
+        self,
+        cfg: AnalysisConfig,
+        *,
+        neural_path: Path,
+        neural_timestamp_path: Path,
+        behavior_position_path: Path,
+        behavior_timestamp_path: Path,
+        curation_csv_path: Path | None = None,
+    ) -> None:
         self.cfg = cfg
-        self.data_cfg = data_cfg
-        self.data_dir = data_dir
+        self.neural_path = neural_path
+        self.neural_timestamp_path = neural_timestamp_path
+        self.behavior_position_path = behavior_position_path
+        self.behavior_timestamp_path = behavior_timestamp_path
+        self.curation_csv_path = curation_csv_path
 
         # Neural data
         self.traces: xr.DataArray | None = None
@@ -78,12 +96,22 @@ class PlaceCellDataset:
         """Create dataset from YAML config and data paths files."""
         config_path = Path(config_path)
         data_path = Path(data_path)
+        data_dir = data_path.parent
 
-        cfg = AppConfig.from_yaml(config_path)
+        cfg = AnalysisConfig.from_yaml(config_path)
         data_cfg = DataPathsConfig.from_yaml(data_path)
         cfg = cfg.with_data_overrides(data_cfg)
 
-        return cls(cfg=cfg, data_cfg=data_cfg, data_dir=data_path.parent)
+        return cls(
+            cfg=cfg,
+            neural_path=data_dir / data_cfg.neural_path,
+            neural_timestamp_path=data_dir / data_cfg.neural_timestamp,
+            behavior_position_path=data_dir / data_cfg.behavior_position,
+            behavior_timestamp_path=data_dir / data_cfg.behavior_timestamp,
+            curation_csv_path=(
+                data_dir / data_cfg.curation_csv if data_cfg.curation_csv else None
+            ),
+        )
 
     @property
     def spatial(self) -> SpatialMapConfig:
@@ -95,17 +123,13 @@ class PlaceCellDataset:
         """Neural sampling rate in Hz."""
         return self.cfg.neural.fps
 
-    def _resolve(self, rel_path: str) -> Path:
-        return self.data_dir / rel_path
-
     def load(self) -> None:
         """Load neural traces, behavior data, and visualization assets."""
         ncfg = self.cfg.neural
         bcfg = self.cfg.behavior
 
         # Traces
-        neural_path = self._resolve(self.data_cfg.neural_path)
-        self.traces = load_traces(neural_path, trace_name=ncfg.trace_name)
+        self.traces = load_traces(self.neural_path, trace_name=ncfg.trace_name)
         print(
             f"Loaded traces: {self.traces.sizes['unit_id']} units, "
             f"{self.traces.sizes['frame']} frames"
@@ -113,8 +137,8 @@ class PlaceCellDataset:
 
         # Behavior
         self.trajectory, self.trajectory_filtered = load_behavior_data(
-            behavior_position=self._resolve(self.data_cfg.behavior_position),
-            behavior_timestamp=self._resolve(self.data_cfg.behavior_timestamp),
+            behavior_position=self.behavior_position_path,
+            behavior_timestamp=self.behavior_timestamp_path,
             bodypart=bcfg.bodypart,
             speed_window_frames=bcfg.speed_window_frames,
             speed_threshold=bcfg.speed_threshold,
@@ -126,7 +150,7 @@ class PlaceCellDataset:
 
         # Visualization assets (max projection, footprints)
         self.traces, self.max_proj, self.footprints = load_neural_data(
-            neural_path=neural_path,
+            neural_path=self.neural_path,
             trace_name=ncfg.trace_name,
         )
 
@@ -153,13 +177,10 @@ class PlaceCellDataset:
         all_unit_ids = list(map(int, self.traces["unit_id"].values))
 
         # Curation filter
-        curation_csv = self.data_cfg.curation_csv
-        if curation_csv is not None:
-            curation_path = self._resolve(curation_csv)
-            if curation_path.exists():
-                curated = set(load_curated_unit_ids(curation_path))
-                all_unit_ids = [uid for uid in all_unit_ids if uid in curated]
-                print(f"After curation filter: {len(all_unit_ids)} units")
+        if self.curation_csv_path is not None and self.curation_csv_path.exists():
+            curated = set(load_curated_unit_ids(self.curation_csv_path))
+            all_unit_ids = [uid for uid in all_unit_ids if uid in curated]
+            print(f"After curation filter: {len(all_unit_ids)} units")
 
         # User-specified subset
         if unit_ids is not None:
@@ -199,7 +220,7 @@ class PlaceCellDataset:
 
         self.event_place = build_event_place_dataframe(
             event_index=self.event_index,
-            neural_timestamp_path=self._resolve(self.data_cfg.neural_timestamp),
+            neural_timestamp_path=self.neural_timestamp_path,
             behavior_with_speed=self.trajectory,
             behavior_fps=bcfg.behavior_fps,
             speed_threshold=bcfg.speed_threshold,
