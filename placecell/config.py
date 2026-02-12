@@ -167,6 +167,11 @@ class SpatialMapConfig(MiniscopeConfig, ConfigYAMLMixin):
             "threshold-only algorithm (faster)."
         ),
     )
+    trace_time_window: float = Field(
+        600.0,
+        gt=0.0,
+        description="Time window in seconds for trace display in the interactive browser.",
+    )
 
 
 class BehaviorConfig(MiniscopeConfig, ConfigYAMLMixin):
