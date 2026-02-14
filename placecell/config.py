@@ -192,8 +192,7 @@ class BehaviorConfig(BaseModel):
     )
     speed_threshold: float = Field(
         50.0,
-        description="Minimum running speed to keep events (mm/s when arena is calibrated, "
-        "otherwise pixels/s).",
+        description="Minimum running speed to keep events (mm/s).",
     )
     speed_window_frames: int = Field(
         5,

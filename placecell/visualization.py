@@ -341,6 +341,7 @@ def plot_behavior_preview(
     trajectory: pd.DataFrame,
     trajectory_filtered: pd.DataFrame,
     speed_threshold: float,
+    speed_unit: str = "mm/s",
 ) -> "Figure":
     """Raw vs filtered trajectory and speed histogram.
 
@@ -351,7 +352,9 @@ def plot_behavior_preview(
     trajectory_filtered:
         Speed-filtered trajectory.
     speed_threshold:
-        Speed cutoff used for filtering (px/s).
+        Speed cutoff used for filtering.
+    speed_unit:
+        Label for speed axis (e.g. 'mm/s' or 'px/s').
     """
     fig, (ax_raw, ax_filt, ax_hist) = plt.subplots(1, 3, figsize=(10, 3.5))
 
@@ -367,7 +370,9 @@ def plot_behavior_preview(
         linewidth=0.3,
         alpha=0.5,
     )
-    ax_filt.set_title(f"Speed > {speed_threshold} px/s ({len(trajectory_filtered)})")
+    ax_filt.set_title(
+        f"Speed > {speed_threshold} {speed_unit} ({len(trajectory_filtered)})"
+    )
     ax_filt.set_aspect("equal")
     ax_filt.axis("off")
 
@@ -387,7 +392,7 @@ def plot_behavior_preview(
         linewidth=2,
         label=f"Threshold: {speed_threshold}",
     )
-    ax_hist.set_xlabel("Speed (px/s)")
+    ax_hist.set_xlabel(f"Speed ({speed_unit})")
     ax_hist.set_ylabel("Count")
     ax_hist.set_title("Speed Distribution")
     ax_hist.legend()

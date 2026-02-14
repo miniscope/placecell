@@ -219,33 +219,34 @@ class PlaceCellDataset:
             self.traces.sizes["frame"],
         )
 
-        # Behavior — load positions and compute speed (initially in px/s)
-        self.trajectory, self.trajectory_filtered = load_behavior_data(
+        # Behavior — load positions and compute speed
+        self.trajectory, _ = load_behavior_data(
             behavior_position=self.behavior_position_path,
             behavior_timestamp=self.behavior_timestamp_path,
             bodypart=bcfg.bodypart,
             speed_window_frames=bcfg.speed_window_frames,
-            speed_threshold=bcfg.speed_threshold,
+            speed_threshold=0.0,  # no filtering here; filter below after unit conversion
         )
 
-        # Convert speed to mm/s when arena calibration is available
+        # Convert speed from px/s to mm/s when arena calibration is available
         scale = self.mm_per_px
         if scale is not None:
             self.trajectory["speed"] = self.trajectory["speed"] * scale
-            self.trajectory_filtered = self.trajectory[
-                self.trajectory["speed"] >= bcfg.speed_threshold
-            ].copy()
-            self.trajectory_filtered = self.trajectory_filtered.sort_values(
-                "frame_index"
-            ).rename(columns={"frame_index": "beh_frame_index"})
-            logger.info(
-                "Speed converted to mm/s (%.3f mm/px)", scale
-            )
+            logger.info("Speed converted to mm/s (%.3f mm/px)", scale)
 
+        # Apply speed filter (mm/s if calibrated, px/s otherwise)
+        self.trajectory_filtered = self.trajectory[
+            self.trajectory["speed"] >= bcfg.speed_threshold
+        ].copy()
+        self.trajectory_filtered = self.trajectory_filtered.sort_values(
+            "frame_index"
+        ).rename(columns={"frame_index": "beh_frame_index"})
         logger.info(
-            "Trajectory: %d frames (%d after speed filter)",
+            "Trajectory: %d frames (%d after speed filter at %.1f %s)",
             len(self.trajectory),
             len(self.trajectory_filtered),
+            bcfg.speed_threshold,
+            "mm/s" if scale else "px/s",
         )
 
         # Visualization assets (max projection, footprints)
