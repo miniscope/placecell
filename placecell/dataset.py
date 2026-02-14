@@ -539,8 +539,6 @@ class PlaceCellDataset:
                 behavior_fps=bcfg.behavior_fps,
                 min_occupancy=scfg.min_occupancy,
                 occupancy_sigma=scfg.occupancy_sigma,
-                stability_threshold=scfg.stability_threshold,
-                stability_method=scfg.stability_method,
                 min_shift_seconds=scfg.min_shift_seconds,
                 si_weight_mode=scfg.si_weight_mode,
                 place_field_seed_percentile=scfg.place_field_seed_percentile,
@@ -586,22 +584,13 @@ class PlaceCellDataset:
     def place_cells(self) -> dict[int, UnitResult]:
         """Return units passing both significance and stability tests."""
         p_thresh = self.spatial.p_value_threshold or 0.05
-        stab_thresh = self.spatial.stability_threshold
 
         out: dict[int, UnitResult] = {}
         for uid, res in self.unit_results.items():
             if res.p_val >= p_thresh:
                 continue
-            stab_corr = res.stability_corr
-            stab_p = res.stability_p_val
-            if np.isnan(stab_corr):
+            if np.isnan(res.stability_p_val) or res.stability_p_val >= p_thresh:
                 continue
-            if not np.isnan(stab_p):
-                if stab_p >= p_thresh:
-                    continue
-            else:
-                if stab_corr < stab_thresh:
-                    continue
             out[uid] = res
         return out
 
@@ -611,44 +600,30 @@ class PlaceCellDataset:
         Returns
         -------
         dict
-            Keys: ``n_total``, ``n_sig``, ``n_stable_thresh``,
-            ``n_stable_shuffle``, ``n_both_thresh``, ``n_both_shuffle``.
+            Keys: ``n_total``, ``n_sig``, ``n_stable``, ``n_place_cells``.
         """
         p_thresh = self.spatial.p_value_threshold or 0.05
-        stab_thresh = self.spatial.stability_threshold
 
         n_sig = 0
-        n_stable_thresh = 0
-        n_stable_shuffle = 0
-        n_both_thresh = 0
-        n_both_shuffle = 0
+        n_stable = 0
+        n_place_cells = 0
 
         for res in self.unit_results.values():
             is_sig = res.p_val < p_thresh
-            corr = res.stability_corr
-            stab_p = res.stability_p_val
-
-            is_stable_thresh = not np.isnan(corr) and corr >= stab_thresh
-            is_stable_shuffle = not np.isnan(stab_p) and stab_p < p_thresh
+            is_stable = not np.isnan(res.stability_p_val) and res.stability_p_val < p_thresh
 
             if is_sig:
                 n_sig += 1
-            if is_stable_thresh:
-                n_stable_thresh += 1
-            if is_stable_shuffle:
-                n_stable_shuffle += 1
-            if is_sig and is_stable_thresh:
-                n_both_thresh += 1
-            if is_sig and is_stable_shuffle:
-                n_both_shuffle += 1
+            if is_stable:
+                n_stable += 1
+            if is_sig and is_stable:
+                n_place_cells += 1
 
         return {
             "n_total": len(self.unit_results),
             "n_sig": n_sig,
-            "n_stable_thresh": n_stable_thresh,
-            "n_stable_shuffle": n_stable_shuffle,
-            "n_both_thresh": n_both_thresh,
-            "n_both_shuffle": n_both_shuffle,
+            "n_stable": n_stable,
+            "n_place_cells": n_place_cells,
         }
 
     def coverage(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:

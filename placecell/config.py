@@ -106,24 +106,6 @@ class SpatialMapConfig(BaseModel):
             "Units with p-value < threshold pass. Default 0.05 if None."
         ),
     )
-    stability_threshold: float = Field(
-        0.5,
-        ge=-1.0,
-        le=1.0,
-        description=(
-            "Correlation threshold for stability test pass/fail (used when "
-            "stability_method='threshold'). "
-            "Units with first/second half rate map correlation >= threshold pass."
-        ),
-    )
-    stability_method: str = Field(
-        "shuffle",
-        description=(
-            "Stability test method: "
-            "'shuffle' uses circular-shift significance test (Shuman et al. 2020), "
-            "'threshold' uses a fixed correlation threshold (stability_threshold)."
-        ),
-    )
     min_shift_seconds: float = Field(
         20.0,
         ge=0.0,

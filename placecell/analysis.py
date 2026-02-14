@@ -617,8 +617,6 @@ def compute_unit_analysis(
     behavior_fps: float = 20.0,
     min_occupancy: float = 0.1,
     occupancy_sigma: float = 0.0,
-    stability_threshold: float = 0.5,
-    stability_method: str = "shuffle",
     min_shift_seconds: float = 0.0,
     si_weight_mode: str = "amplitude",
     place_field_seed_percentile: float | None = 95.0,
@@ -653,11 +651,6 @@ def compute_unit_analysis(
         Minimum occupancy time for stability computation.
     occupancy_sigma:
         Gaussian smoothing sigma for occupancy maps in stability computation.
-    stability_threshold:
-        Correlation threshold for stability test pass/fail.
-    stability_method:
-        ``"shuffle"`` runs circular-shift significance test for stability;
-        ``"threshold"`` uses a fixed correlation threshold only.
     min_shift_seconds:
         Minimum circular shift in seconds for shuffle significance test.
     si_weight_mode:
@@ -728,7 +721,6 @@ def compute_unit_analysis(
         shuffled_rate_p95 = None
 
     # Stability test
-    stab_shuffles = n_shuffles if stability_method == "shuffle" else 0
     stability_corr, stability_z, stability_p_val, rate_map_first, rate_map_second = (
         compute_stability_score(
             unit_data,
@@ -741,7 +733,7 @@ def compute_unit_analysis(
             behavior_fps=behavior_fps,
             min_occupancy=min_occupancy,
             occupancy_sigma=occupancy_sigma,
-            n_shuffles=stab_shuffles,
+            n_shuffles=n_shuffles,
             random_seed=random_seed,
             min_shift_seconds=min_shift_seconds,
             si_weight_mode=si_weight_mode,

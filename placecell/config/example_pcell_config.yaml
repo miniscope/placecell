@@ -6,7 +6,7 @@ neural:
   fps: 20.0
   oasis:
     id: oasis
-    g: [1.60, -0.63]  # AR(2) coefficients (required)
+    g: [1.60, -0.63]  # AR(2) coefficients (required, usually overridden by data config)
     baseline: p10
     penalty: 0.8  # Sparsity penalty (higher = fewer events). Default 0.
     s_min: 0  # Minimum event size threshold. Default 0.
@@ -25,12 +25,10 @@ behavior:
     min_occupancy: 0.025 # Minimum occupancy (in seconds) to include a bin in spatial map
     occupancy_sigma: 3  # Gaussian smoothing (in bins) for occupancy map (0 = no smoothing)
     activity_sigma: 3  # Gaussian smoothing (in bins) for spatial activity map
-    n_shuffles: 500
+    n_shuffles: 1000
     random_seed: 1
     event_threshold_sigma: 0  # Sigma multiplier for event amplitude threshold in trajectory visualization
     p_value_threshold: 0.05 # P-value threshold. Units with p < threshold pass.
-    stability_threshold: 0.5 # Correlation threshold (used when stability_method='threshold').
-    stability_method: shuffle  # Stability test: 'shuffle' (p-value via circular shift) or 'threshold' (fixed r cutoff)
     min_shift_seconds: 20  # Minimum circular shift (seconds) for shuffle test. 0 = no minimum.
     si_weight_mode: amplitude  # SI weight mode: 'amplitude' (event amplitudes) or 'binary' (event counts)
     place_field_threshold: 0.35  # Fraction of peak rate for place field boundary (red contour). Applied to smoothed rate map.

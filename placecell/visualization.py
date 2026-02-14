@@ -27,8 +27,7 @@ def plot_session_summary(summary_df: "pd.DataFrame") -> "Figure":
     ----------
     summary_df:
         DataFrame with columns ``dataset``, ``n_total``, ``n_sig``,
-        ``n_stable_thresh``, ``n_stable_shuffle``, ``n_both_thresh``,
-        ``n_both_shuffle``.  One row per session.
+        ``n_stable``, ``n_place_cells``.  One row per session.
     """
     if plt is None:
         raise ImportError("matplotlib is required for plotting.")
@@ -37,13 +36,7 @@ def plot_session_summary(summary_df: "pd.DataFrame") -> "Figure":
     session = range(1, len(df) + 1)
 
     # Add proportion columns
-    for col in [
-        "n_sig",
-        "n_stable_thresh",
-        "n_stable_shuffle",
-        "n_both_thresh",
-        "n_both_shuffle",
-    ]:
+    for col in ["n_sig", "n_stable", "n_place_cells"]:
         df[col.replace("n_", "pct_")] = (df[col] / df["n_total"] * 100).round(1)
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.5), sharex=True)
@@ -51,19 +44,8 @@ def plot_session_summary(summary_df: "pd.DataFrame") -> "Figure":
     # Left: counts
     ax = axes[0]
     ax.plot(session, df["n_sig"], "o-", label="Significant", color="tab:orange")
-    ax.plot(
-        session,
-        df["n_stable_thresh"],
-        "s--",
-        label="Stable (threshold)",
-        color="tab:blue",
-        alpha=0.6,
-    )
-    ax.plot(session, df["n_stable_shuffle"], "s-", label="Stable (shuffle)", color="tab:blue")
-    ax.plot(
-        session, df["n_both_thresh"], "D--", label="Both (threshold)", color="tab:green", alpha=0.6
-    )
-    ax.plot(session, df["n_both_shuffle"], "D-", label="Both (shuffle)", color="tab:green")
+    ax.plot(session, df["n_stable"], "s-", label="Stable", color="tab:blue")
+    ax.plot(session, df["n_place_cells"], "D-", label="Place cells", color="tab:green")
     ax.set_ylabel("Number of units")
     ax.set_xlabel("Session")
     ax.set_title("Counts")
@@ -74,24 +56,8 @@ def plot_session_summary(summary_df: "pd.DataFrame") -> "Figure":
     # Right: proportions
     ax = axes[1]
     ax.plot(session, df["pct_sig"], "o-", label="Significant", color="tab:orange")
-    ax.plot(
-        session,
-        df["pct_stable_thresh"],
-        "s--",
-        label="Stable (threshold)",
-        color="tab:blue",
-        alpha=0.6,
-    )
-    ax.plot(session, df["pct_stable_shuffle"], "s-", label="Stable (shuffle)", color="tab:blue")
-    ax.plot(
-        session,
-        df["pct_both_thresh"],
-        "D--",
-        label="Both (threshold)",
-        color="tab:green",
-        alpha=0.6,
-    )
-    ax.plot(session, df["pct_both_shuffle"], "D-", label="Both (shuffle)", color="tab:green")
+    ax.plot(session, df["pct_stable"], "s-", label="Stable", color="tab:blue")
+    ax.plot(session, df["pct_place_cells"], "D-", label="Place cells", color="tab:green")
     ax.set_ylabel("Proportion (%)")
     ax.set_xlabel("Session")
     ax.set_title("Proportions")
@@ -106,7 +72,6 @@ def plot_session_summary(summary_df: "pd.DataFrame") -> "Figure":
 def plot_summary_scatter(
     unit_results: dict,
     p_value_threshold: float = 0.05,
-    stability_threshold: float = 0.5,
 ) -> "Figure":
     """Scatter plots: significance vs stability and SI vs Fisher Z.
 
@@ -116,27 +81,20 @@ def plot_summary_scatter(
         Dictionary mapping unit_id to analysis results.
     p_value_threshold:
         Threshold for significance test.
-    stability_threshold:
-        Threshold for stability test.
     """
     if plt is None:
         raise ImportError("matplotlib is required for plotting.")
 
     unit_ids = list(unit_results.keys())
     p_vals = [unit_results[uid].p_val for uid in unit_ids]
-    stab_corrs = [unit_results[uid].stability_corr for uid in unit_ids]
+    stab_pvals = [unit_results[uid].stability_p_val for uid in unit_ids]
     fisher_z = [unit_results[uid].stability_z for uid in unit_ids]
     si_vals = [unit_results[uid].si for uid in unit_ids]
 
-    stab_pvals = [unit_results[uid].stability_p_val for uid in unit_ids]
-
     colors = []
-    for p, s, sp in zip(p_vals, stab_corrs, stab_pvals):
+    for p, sp in zip(p_vals, stab_pvals):
         sig_pass = p < p_value_threshold
-        if not np.isnan(sp):
-            stab_pass = sp < p_value_threshold
-        else:
-            stab_pass = not np.isnan(s) and s >= stability_threshold
+        stab_pass = not np.isnan(sp) and sp < p_value_threshold
         if sig_pass and stab_pass:
             colors.append("green")
         elif sig_pass and not stab_pass:
@@ -148,7 +106,7 @@ def plot_summary_scatter(
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
 
-    ax1.scatter(p_vals, stab_corrs, c=colors, s=50, alpha=0.7, edgecolors="black", linewidths=0.5)
+    ax1.scatter(p_vals, stab_pvals, c=colors, s=50, alpha=0.7, edgecolors="black", linewidths=0.5)
     ax1.axvline(
         p_value_threshold,
         color="gray",
@@ -157,30 +115,15 @@ def plot_summary_scatter(
         label=f"p={p_value_threshold}",
     )
     ax1.axhline(
-        stability_threshold,
+        p_value_threshold,
         color="gray",
         linestyle=":",
         linewidth=1.5,
-        label=f"r={stability_threshold}",
+        label=f"stab p={p_value_threshold}",
     )
-
-    xlim = ax1.get_xlim()
-    ylim = ax1.get_ylim()
-    ax1.fill_between([0, p_value_threshold], stability_threshold, ylim[1], alpha=0.1, color="green")
-    ax1.fill_between(
-        [p_value_threshold, xlim[1]], stability_threshold, ylim[1], alpha=0.1, color="blue"
-    )
-    ax1.fill_between(
-        [0, p_value_threshold], ylim[0], stability_threshold, alpha=0.1, color="orange"
-    )
-    ax1.fill_between(
-        [p_value_threshold, xlim[1]], ylim[0], stability_threshold, alpha=0.1, color="red"
-    )
-    ax1.set_xlim(xlim)
-    ax1.set_ylim(ylim)
 
     ax1.set_xlabel("P-value (significance test)", fontsize=12)
-    ax1.set_ylabel("Correlation (stability test)", fontsize=12)
+    ax1.set_ylabel("P-value (stability test)", fontsize=12)
     ax1.set_title("Significance vs Stability", fontsize=12)
 
     n_both = sum(1 for c in colors if c == "green")

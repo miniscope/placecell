@@ -145,8 +145,6 @@ Launches `pcell plot` with the processed data.
 - `activity_sigma`: Gaussian smoothing sigma for rate map (in bins)
 - `n_shuffles`: number of shuffle iterations for p-value calculation
 - `p_value_threshold`: filter units by spatial information significance
-- `stability_threshold`: correlation threshold for stability test (compares first/second half rate maps)
-- `stability_method`: `'shuffle'` (circular-shift significance) or `'threshold'` (fixed correlation cutoff)
 - `place_field_threshold`: fraction of peak rate for place field boundary (red contour)
 - `place_field_min_bins`: minimum contiguous bins for a place field component (filters isolated spots)
 
@@ -203,8 +201,6 @@ behavior:
     random_seed: 1
     event_threshold_sigma: 0  # Sigma multiplier for event amplitude threshold in trajectory visualization
     p_value_threshold: 0.05  # P-value threshold. Only units with p < threshold are plotted.
-    stability_threshold: 0.5  # Correlation threshold for stability test (first/second half rate maps)
-    stability_method: shuffle  # 'shuffle' (p-value via circular shift) or 'threshold' (fixed r cutoff)
     min_shift_seconds: 20  # Minimum circular shift (seconds) for shuffle test
     si_weight_mode: amplitude  # 'amplitude' (event amplitudes) or 'binary' (event counts)
     place_field_threshold: 0.2  # Fraction of peak rate for place field boundary (red contour)
