@@ -87,15 +87,12 @@ def run_deconvolution(
     -------
     good_unit_ids : list[int]
         Unit IDs that were successfully deconvolved.
-    C_list : list[np.ndarray]
-        Deconvolved calcium traces.
     S_list : list[np.ndarray]
         Spike trains.
     """
     from oasis.oasis_methods import oasisAR2
 
     good_unit_ids: list[int] = []
-    C_list: list[np.ndarray] = []
     S_list: list[np.ndarray] = []
 
     iterator = progress_bar(unit_ids) if progress_bar else unit_ids
@@ -115,12 +112,11 @@ def run_deconvolution(
         try:
             c, s = oasisAR2(y_corrected, g1=g[0], g2=g[1], lam=penalty, s_min=s_min)
             good_unit_ids.append(int(uid))
-            C_list.append(np.asarray(c, dtype=float))
             S_list.append(np.asarray(s, dtype=float))
         except Exception:
             continue
 
-    return good_unit_ids, C_list, S_list
+    return good_unit_ids, S_list
 
 
 def build_event_index_dataframe(

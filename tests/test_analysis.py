@@ -1,6 +1,5 @@
 """Regression tests for analysis pipeline."""
 
-import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -18,7 +17,6 @@ from placecell.analysis import (
 from placecell.behavior import (
     build_event_place_dataframe,
     compute_behavior_speed,
-    load_curated_unit_ids,
 )
 from placecell.neural import load_calcium_traces
 
@@ -84,25 +82,6 @@ def test_compute_behavior_speed_shape(assets_dir: Path) -> None:
     assert len(result) == 5
     # Speed should be ~100 pixels/s (10 pixels / 0.1 s)
     assert result["speed"].iloc[0] == pytest.approx(100.0, rel=0.01)
-
-
-def test_load_curated_unit_ids(assets_dir: Path) -> None:
-    """load_curated_unit_ids should filter and sort unit IDs."""
-    # Create a temporary curation CSV
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
-        f.write("unit_id,keep\n")
-        f.write("5,1\n")
-        f.write("2,0\n")
-        f.write("3,1\n")
-        f.write("1,1\n")
-        f.write("4,0\n")
-        temp_path = Path(f.name)
-
-    try:
-        result = load_curated_unit_ids(temp_path)
-        assert result == [1, 3, 5]  # Sorted, only keep=1
-    finally:
-        temp_path.unlink()
 
 
 def test_gaussian_filter_normalized(assets_dir: Path) -> None:

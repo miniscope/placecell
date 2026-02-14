@@ -6,28 +6,6 @@ import numpy as np
 import pandas as pd
 
 
-def load_curated_unit_ids(curation_csv: Path) -> list[int]:
-    """Load curated unit IDs from a curation results CSV.
-
-    Parameters
-    ----------
-    curation_csv:
-        Path to CSV file with columns 'unit_id' and 'keep'.
-        Units with keep=1 are included.
-
-    Returns
-    -------
-    List of unit IDs to keep, sorted.
-    """
-    df = pd.read_csv(curation_csv)
-    if "unit_id" not in df.columns or "keep" not in df.columns:
-        raise ValueError(
-            f"Curation CSV must have 'unit_id' and 'keep' columns, " f"got: {list(df.columns)}"
-        )
-    keep_ids = df.loc[df["keep"] == 1, "unit_id"].tolist()
-    return sorted(int(uid) for uid in keep_ids)
-
-
 def _load_behavior_xy(csv_path: Path, bodypart: str) -> pd.DataFrame:
     """Load DeepLabCut-style behavior CSV and return x/y coordinates per frame.
 
@@ -176,6 +154,69 @@ def clip_to_arena(
     df["x"] = df["x"].clip(x_min, x_max)
     df["y"] = df["y"].clip(y_min, y_max)
     return df
+
+
+def recompute_speed(
+    trajectory: pd.DataFrame,
+    window_frames: int,
+) -> pd.DataFrame:
+    """Recompute speed on a trajectory that already has ``x``, ``y``, ``unix_time``.
+
+    Use this after spatial corrections (jump removal, perspective, clipping)
+    to update the ``speed`` column from the corrected positions.
+
+    Parameters
+    ----------
+    trajectory:
+        DataFrame with columns ``x``, ``y``, ``unix_time``.
+    window_frames:
+        Number of frames to look ahead for speed calculation.
+
+    Returns
+    -------
+    DataFrame with ``speed`` column overwritten (in position-units / s).
+    """
+    df = trajectory.sort_values("frame_index")
+    x_vals = df["x"].values
+    y_vals = df["y"].values
+    t_vals = df["unix_time"].values
+    n = len(df)
+    speed = np.zeros(n)
+    for i in range(n):
+        end_idx = min(i + window_frames, n - 1)
+        if end_idx > i:
+            dx = x_vals[end_idx] - x_vals[i]
+            dy = y_vals[end_idx] - y_vals[i]
+            dt = t_vals[end_idx] - t_vals[i]
+            if dt > 0:
+                speed[i] = np.sqrt(dx**2 + dy**2) / dt
+    trajectory = trajectory.copy()
+    trajectory.loc[df.index, "speed"] = speed
+    return trajectory
+
+
+def filter_by_speed(
+    trajectory: pd.DataFrame,
+    speed_threshold: float,
+) -> pd.DataFrame:
+    """Filter trajectory to frames above a speed threshold.
+
+    Parameters
+    ----------
+    trajectory:
+        DataFrame with columns ``frame_index`` and ``speed``.
+    speed_threshold:
+        Minimum speed to keep.
+
+    Returns
+    -------
+    Filtered copy, sorted by frame index, with ``frame_index`` renamed
+    to ``beh_frame_index``.
+    """
+    filtered = trajectory[trajectory["speed"] >= speed_threshold].copy()
+    filtered = filtered.sort_values("frame_index")
+    filtered = filtered.rename(columns={"frame_index": "beh_frame_index"})
+    return filtered
 
 
 def compute_behavior_speed(

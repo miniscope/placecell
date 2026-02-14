@@ -45,15 +45,6 @@ class NeuralConfig(BaseModel):
         "C",
         description="Base name of the zarr group (e.g. 'C' or 'C_lp').",
     )
-    max_units: int | None = Field(
-        None,
-        ge=1,
-        description=(
-            "Maximum number of units to include in a visualization. "
-            "If omitted/null, use all available units unless a CLI max-units "
-            "override is provided."
-        ),
-    )
 
 
 class SpatialMapConfig(BaseModel):
@@ -97,31 +88,13 @@ class SpatialMapConfig(BaseModel):
         description="Sigma multiplier for event amplitude threshold in trajectory plot. "
         "Can be negative to include lower-amplitude events.",
     )
-    p_value_threshold: float | None = Field(
-        None,
+    p_value_threshold: float = Field(
+        0.05,
         ge=0.0,
         le=1.0,
         description=(
             "P-value threshold for significance test pass/fail. "
-            "Units with p-value < threshold pass. Default 0.05 if None."
-        ),
-    )
-    stability_threshold: float = Field(
-        0.5,
-        ge=-1.0,
-        le=1.0,
-        description=(
-            "Correlation threshold for stability test pass/fail (used when "
-            "stability_method='threshold'). "
-            "Units with first/second half rate map correlation >= threshold pass."
-        ),
-    )
-    stability_method: str = Field(
-        "shuffle",
-        description=(
-            "Stability test method: "
-            "'shuffle' uses circular-shift significance test (Shuman et al. 2020), "
-            "'threshold' uses a fixed correlation threshold (stability_threshold)."
+            "Units with p-value < threshold pass."
         ),
     )
     min_shift_seconds: float = Field(
@@ -162,14 +135,12 @@ class SpatialMapConfig(BaseModel):
             "disconnected regions are discarded. Set to 1 to disable."
         ),
     )
-    place_field_seed_percentile: float | None = Field(
+    place_field_seed_percentile: float = Field(
         95.0,
         description=(
             "Percentile of shuffled rate maps for place field seed detection "
             "(Guo et al. 2023). Bins exceeding this percentile form seeds; "
-            "seeds extend to contiguous bins above place_field_threshold. "
-            "Set to null to skip seed detection and use simplified "
-            "threshold-only algorithm (faster)."
+            "seeds extend to contiguous bins above place_field_threshold."
         ),
     )
     trace_time_window: float = Field(
@@ -245,13 +216,6 @@ class DataPathsConfig(BaseModel):
     behavior_video: str | None = Field(
         None,
         description="Path to behavior video file (e.g. .mp4). Used for arena bounds verification.",
-    )
-    curation_csv: str | None = Field(
-        None,
-        description=(
-            "Path to curation results CSV file with columns 'unit_id' and 'keep'. "
-            "Only units with keep=1 will be processed. If None, all units are used."
-        ),
     )
     arena_bounds: tuple[float, float, float, float] | None = Field(
         None,

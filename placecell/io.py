@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from placecell.behavior import _load_behavior_xy, compute_behavior_speed
+from placecell.behavior import _load_behavior_xy, compute_behavior_speed, filter_by_speed
 from placecell.logging import init_logger
 from placecell.neural import load_calcium_traces
 
@@ -62,9 +62,7 @@ def load_behavior_data(
         window_frames=speed_window_frames,
     )
 
-    trajectory_filtered = trajectory_with_speed[trajectory_with_speed["speed"] >= speed_threshold]
-    trajectory_filtered = trajectory_filtered.sort_values("frame_index")
-    trajectory_filtered = trajectory_filtered.rename(columns={"frame_index": "beh_frame_index"})
+    trajectory_filtered = filter_by_speed(trajectory_with_speed, speed_threshold)
 
     return trajectory_with_speed, trajectory_filtered
 

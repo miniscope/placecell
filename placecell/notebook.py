@@ -149,7 +149,6 @@ def create_unit_browser(
     neural_fps: float,
     speed_threshold: float,
     p_value_threshold: float,
-    stability_threshold: float,
     trace_time_window: float = 600.0,
     place_field_threshold: float = 0.05,
     place_field_min_bins: int = 5,
@@ -183,8 +182,6 @@ def create_unit_browser(
         Speed threshold for event filtering.
     p_value_threshold : float
         P-value threshold for significance.
-    stability_threshold : float
-        Correlation threshold for stability.
     trace_time_window : float
         Time window for trace display in seconds.
     place_field_threshold : float
@@ -429,14 +426,10 @@ def create_unit_browser(
         sig_text = "pass" if sig_pass else "fail"
         sig_color = "green" if sig_pass else "red"
 
-        if np.isnan(stab_corr):
+        if np.isnan(stab_p):
             stab_text, stab_color = "N/A", "gray"
-        elif not np.isnan(stab_p):
-            stab_pass = stab_p < p_value_threshold
-            stab_text = "pass" if stab_pass else "fail"
-            stab_color = "green" if stab_pass else "red"
         else:
-            stab_pass = stab_corr >= stability_threshold
+            stab_pass = stab_p < p_value_threshold
             stab_text = "pass" if stab_pass else "fail"
             stab_color = "green" if stab_pass else "red"
 
@@ -573,8 +566,7 @@ def browse_units(
         trace_name=ds.cfg.neural.trace_name,
         neural_fps=ds.neural_fps,
         speed_threshold=ds.cfg.behavior.speed_threshold,
-        p_value_threshold=scfg.p_value_threshold or 0.05,
-        stability_threshold=scfg.stability_threshold,
+        p_value_threshold=scfg.p_value_threshold,
         trace_time_window=scfg.trace_time_window,
         place_field_threshold=place_field_threshold or scfg.place_field_threshold,
         place_field_min_bins=scfg.place_field_min_bins,

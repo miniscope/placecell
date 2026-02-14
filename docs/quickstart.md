@@ -34,7 +34,6 @@ neural_path: path/to/minian_output
 neural_timestamp: path/to/neural_timestamp.csv
 behavior_position: path/to/behavior_position.csv
 behavior_timestamp: path/to/behavior_timestamp.csv
-curation_csv: path/to/curation.csv  # optional: filter units by curation
 ```
 :::
 
@@ -70,7 +69,6 @@ behavior:
     activity_sigma: 3
     n_shuffles: 500
     p_value_threshold: 0.05
-    stability_threshold: 0.5
 ```
 :::
 

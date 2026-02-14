@@ -20,7 +20,8 @@ from placecell.behavior import (
     build_event_place_dataframe,
     clip_to_arena,
     correct_perspective,
-    load_curated_unit_ids,
+    filter_by_speed,
+    recompute_speed,
     remove_position_jumps,
 )
 from placecell.config import AnalysisConfig, DataPathsConfig, SpatialMapConfig
@@ -69,14 +70,13 @@ class UnitResult:
     si: float
     p_val: float
     shuffled_sis: np.ndarray
-    shuffled_rate_p95: np.ndarray | None
+    shuffled_rate_p95: np.ndarray
     stability_corr: float
     stability_z: float
     stability_p_val: float
     rate_map_first: np.ndarray
     rate_map_second: np.ndarray
     vis_data_above: pd.DataFrame
-    vis_data_below: pd.DataFrame
     unit_data: pd.DataFrame
     trace_data: np.ndarray | None
     trace_times: np.ndarray | None
@@ -89,7 +89,7 @@ class PlaceCellDataset:
 
         ds = PlaceCellDataset.from_yaml(config_path, data_path)
         ds.load()                            # traces, trajectory, footprints
-        ds.preprocess_behavior()             # jump/perspective/clip corrections
+        ds.preprocess_behavior()             # corrections + speed filter
         ds.deconvolve(progress_bar=tqdm)     # good_unit_ids, S_list, event_index
         ds.match_events()                    # event_place
         ds.compute_occupancy()               # occupancy_time, valid_mask, edges
@@ -107,8 +107,6 @@ class PlaceCellDataset:
         Path to behavior position CSV.
     behavior_timestamp_path : Path
         Path to behavior timestamp CSV.
-    curation_csv_path : Path or None
-        Path to curation CSV, or None to use all units.
     """
 
     def __init__(
@@ -120,7 +118,6 @@ class PlaceCellDataset:
         behavior_position_path: Path | None = None,
         behavior_timestamp_path: Path | None = None,
         behavior_video_path: Path | None = None,
-        curation_csv_path: Path | None = None,
         data_cfg: DataPathsConfig | None = None,
     ) -> None:
         self.cfg = cfg
@@ -129,13 +126,11 @@ class PlaceCellDataset:
         self.behavior_position_path = behavior_position_path
         self.behavior_timestamp_path = behavior_timestamp_path
         self.behavior_video_path = behavior_video_path
-        self.curation_csv_path = curation_csv_path
         self.data_cfg = data_cfg
 
         # Neural data
         self.traces: xr.DataArray | None = None
         self.good_unit_ids: list[int] = []
-        self.C_list: list[np.ndarray] = []
         self.S_list: list[np.ndarray] = []
 
         # Event data
@@ -143,6 +138,7 @@ class PlaceCellDataset:
         self.event_place: pd.DataFrame | None = None
 
         # Behavior data
+        self.trajectory_raw: pd.DataFrame | None = None
         self.trajectory: pd.DataFrame | None = None
         self.trajectory_filtered: pd.DataFrame | None = None
 
@@ -192,7 +188,6 @@ class PlaceCellDataset:
             behavior_video_path=(
                 data_dir / data_cfg.behavior_video if data_cfg.behavior_video else None
             ),
-            curation_csv_path=(data_dir / data_cfg.curation_csv if data_cfg.curation_csv else None),
             data_cfg=data_cfg,
         )
 
@@ -219,35 +214,15 @@ class PlaceCellDataset:
             self.traces.sizes["frame"],
         )
 
-        # Behavior — load positions and compute speed
+        # Behavior — load positions and compute speed (px/s)
         self.trajectory, _ = load_behavior_data(
             behavior_position=self.behavior_position_path,
             behavior_timestamp=self.behavior_timestamp_path,
             bodypart=bcfg.bodypart,
             speed_window_frames=bcfg.speed_window_frames,
-            speed_threshold=0.0,  # no filtering here; filter below after unit conversion
+            speed_threshold=0.0,
         )
-
-        # Convert speed from px/s to mm/s when arena calibration is available
-        scale = self.mm_per_px
-        if scale is not None:
-            self.trajectory["speed"] = self.trajectory["speed"] * scale
-            logger.info("Speed converted to mm/s (%.3f mm/px)", scale)
-
-        # Apply speed filter (mm/s if calibrated, px/s otherwise)
-        self.trajectory_filtered = self.trajectory[
-            self.trajectory["speed"] >= bcfg.speed_threshold
-        ].copy()
-        self.trajectory_filtered = self.trajectory_filtered.sort_values("frame_index").rename(
-            columns={"frame_index": "beh_frame_index"}
-        )
-        logger.info(
-            "Trajectory: %d frames (%d after speed filter at %.1f %s)",
-            len(self.trajectory),
-            len(self.trajectory_filtered),
-            bcfg.speed_threshold,
-            "mm/s" if scale else "px/s",
-        )
+        logger.info("Loaded trajectory: %d frames", len(self.trajectory))
 
         # Visualization assets (max projection, footprints)
         self.traces, self.max_proj, self.footprints = load_visualization_data(
@@ -288,153 +263,126 @@ class PlaceCellDataset:
         return (scale_x + scale_y) / 2.0
 
     def preprocess_behavior(self) -> None:
-        """Apply data-integrity corrections and recompute speed.
+        """Apply data-integrity corrections, convert units, and speed-filter.
 
-        Pipeline: jump removal → perspective correction → boundary clipping
-        → recompute speed (mm/s) → re-filter by speed threshold.
+        When ``arena_bounds`` is configured:
+            jump removal → perspective correction → boundary clipping
+            → recompute speed (mm/s) → speed filter.
 
-        Requires ``load()`` to have been called first.  Skipped automatically
-        when ``arena_bounds`` is not set in the data config.
+        When ``arena_bounds`` is **not** configured:
+            warnings are logged and speed filtering is applied in px/s.
+
+        Requires ``load()`` to have been called first.
         """
         if self.trajectory is None:
             raise RuntimeError("Call load() first.")
 
-        dcfg = self.data_cfg
-        if dcfg is None or dcfg.arena_bounds is None:
-            logger.info("No arena_bounds configured — skipping behavior preprocessing")
-            return
-
-        missing = [
-            name
-            for name, val in [
-                ("arena_size_mm", dcfg.arena_size_mm),
-                ("camera_height_mm", dcfg.camera_height_mm),
-                ("tracking_height_mm", dcfg.tracking_height_mm),
-            ]
-            if val is None
-        ]
-        if missing:
-            raise ValueError(
-                f"arena_bounds is set but missing required fields: {', '.join(missing)}"
-            )
-
         bcfg = self.cfg.behavior
-        scale = self.mm_per_px
 
-        # Store intermediate snapshots for visualization
-        self._preprocess_steps: dict[str, pd.DataFrame] = {}
-        self._preprocess_steps["Raw"] = self.trajectory[["x", "y"]].copy()
+        # Preserve the raw trajectory before any corrections
+        self.trajectory_raw = self.trajectory.copy()
 
-        # 1. Jump removal (threshold in mm → convert to px)
-        jump_px = bcfg.jump_threshold_mm / scale
-        self.trajectory, n_jumps = remove_position_jumps(self.trajectory, threshold_px=jump_px)
+        dcfg = self.data_cfg
+        has_arena = dcfg is not None and dcfg.arena_bounds is not None
+
+        if has_arena:
+            missing = [
+                name
+                for name, val in [
+                    ("arena_size_mm", dcfg.arena_size_mm),
+                    ("camera_height_mm", dcfg.camera_height_mm),
+                    ("tracking_height_mm", dcfg.tracking_height_mm),
+                ]
+                if val is None
+            ]
+            if missing:
+                raise ValueError(
+                    f"arena_bounds is set but missing required fields: {', '.join(missing)}"
+                )
+
+            scale = self.mm_per_px
+
+            # Store intermediate snapshots for visualization
+            self._preprocess_steps: dict[str, pd.DataFrame] = {}
+            self._preprocess_steps["Raw"] = self.trajectory[["x", "y"]].copy()
+
+            # 1. Jump removal (threshold in mm → convert to px)
+            jump_px = bcfg.jump_threshold_mm / scale
+            self.trajectory, n_jumps = remove_position_jumps(self.trajectory, threshold_px=jump_px)
+            logger.info(
+                "Jump removal: %d frames interpolated (threshold %.0f mm = %.1f px)",
+                n_jumps,
+                bcfg.jump_threshold_mm,
+                jump_px,
+            )
+            self._preprocess_steps["Jump removal"] = self.trajectory[["x", "y"]].copy()
+
+            # 2. Perspective correction
+            self.trajectory = correct_perspective(
+                self.trajectory,
+                arena_bounds=dcfg.arena_bounds,
+                camera_height_mm=dcfg.camera_height_mm,
+                tracking_height_mm=dcfg.tracking_height_mm,
+            )
+            factor = (dcfg.camera_height_mm - dcfg.tracking_height_mm) / dcfg.camera_height_mm
+            logger.info(
+                "Perspective correction: factor=%.3f (H=%.0f mm, h=%.0f mm)",
+                factor,
+                dcfg.camera_height_mm,
+                dcfg.tracking_height_mm,
+            )
+            self._preprocess_steps["Perspective"] = self.trajectory[["x", "y"]].copy()
+
+            # 3. Boundary clipping
+            self.trajectory = clip_to_arena(self.trajectory, arena_bounds=dcfg.arena_bounds)
+            logger.info("Boundary clipping to arena_bounds=%s", dcfg.arena_bounds)
+            self._preprocess_steps["Clipped"] = self.trajectory[["x", "y"]].copy()
+
+            # 4. Recompute speed in mm/s on corrected positions
+            self.trajectory = recompute_speed(
+                self.trajectory, window_frames=bcfg.speed_window_frames
+            )
+            self.trajectory["speed"] *= scale
+            logger.info("Speed recomputed in mm/s (%.3f mm/px)", scale)
+            speed_unit = "mm/s"
+        else:
+            logger.warning(
+                "No arena_bounds — skipping spatial corrections "
+                "(jump removal, perspective correction, boundary clipping)"
+            )
+            logger.warning("No arena calibration — speed and position remain in pixels")
+            speed_unit = "px/s"
+
+        # Speed filter (always applied)
+        self.trajectory_filtered = filter_by_speed(self.trajectory, bcfg.speed_threshold)
         logger.info(
-            "Jump removal: %d frames interpolated (threshold %.0f mm = %.1f px)",
-            n_jumps,
-            bcfg.jump_threshold_mm,
-            jump_px,
-        )
-        self._preprocess_steps["Jump removal"] = self.trajectory[["x", "y"]].copy()
-
-        # 2. Perspective correction
-        self.trajectory = correct_perspective(
-            self.trajectory,
-            arena_bounds=dcfg.arena_bounds,
-            camera_height_mm=dcfg.camera_height_mm,
-            tracking_height_mm=dcfg.tracking_height_mm,
-        )
-        factor = (dcfg.camera_height_mm - dcfg.tracking_height_mm) / dcfg.camera_height_mm
-        logger.info(
-            "Perspective correction: factor=%.3f (H=%.0f mm, h=%.0f mm)",
-            factor,
-            dcfg.camera_height_mm,
-            dcfg.tracking_height_mm,
-        )
-        self._preprocess_steps["Perspective"] = self.trajectory[["x", "y"]].copy()
-
-        # 3. Boundary clipping
-        self.trajectory = clip_to_arena(self.trajectory, arena_bounds=dcfg.arena_bounds)
-        logger.info("Boundary clipping to arena_bounds=%s", dcfg.arena_bounds)
-        self._preprocess_steps["Clipped"] = self.trajectory[["x", "y"]].copy()
-
-        # 4. Recompute speed in-place on corrected positions (preserves index)
-        traj = self.trajectory.sort_values("frame_index")
-        x_vals = traj["x"].values
-        y_vals = traj["y"].values
-        t_vals = traj["unix_time"].values
-        n = len(traj)
-        w = bcfg.speed_window_frames
-        speed = np.zeros(n)
-        for i in range(n):
-            end_idx = min(i + w, n - 1)
-            if end_idx > i:
-                dx = x_vals[end_idx] - x_vals[i]
-                dy = y_vals[end_idx] - y_vals[i]
-                dt = t_vals[end_idx] - t_vals[i]
-                if dt > 0:
-                    speed[i] = np.sqrt(dx**2 + dy**2) / dt
-        # Scale pixel speed to mm/s
-        self.trajectory.loc[traj.index, "speed"] = speed * scale
-        logger.info("Speed recomputed in mm/s (%.3f mm/px)", scale)
-
-        # 5. Re-filter with mm/s threshold
-        self.trajectory_filtered = self.trajectory[
-            self.trajectory["speed"] >= bcfg.speed_threshold
-        ].copy()
-        self.trajectory_filtered = self.trajectory_filtered.sort_values("frame_index")
-        self.trajectory_filtered = self.trajectory_filtered.rename(
-            columns={"frame_index": "beh_frame_index"}
-        )
-        logger.info(
-            "Trajectory after preprocessing: %d frames (%d after speed filter at %.1f mm/s)",
+            "Trajectory: %d frames (%d after speed filter at %.1f %s)",
             len(self.trajectory),
             len(self.trajectory_filtered),
             bcfg.speed_threshold,
+            speed_unit,
         )
 
     def deconvolve(
         self,
-        unit_ids: list[int] | None = None,
         progress_bar: Any = None,
     ) -> None:
         """Run OASIS deconvolution on calcium traces.
 
         Parameters
         ----------
-        unit_ids:
-            Specific unit IDs to process. None = all (respecting curation + max_units).
         progress_bar:
             Progress bar wrapper, e.g. ``tqdm``.
         """
         if self.traces is None:
             raise RuntimeError("Call load() first.")
 
-        ncfg = self.cfg.neural
-        oasis = ncfg.oasis
+        oasis = self.cfg.neural.oasis
 
         all_unit_ids = list(map(int, self.traces["unit_id"].values))
-
-        # Curation filter
-        if self.curation_csv_path is not None and self.curation_csv_path.exists():
-            curated = set(load_curated_unit_ids(self.curation_csv_path))
-            all_unit_ids = [uid for uid in all_unit_ids if uid in curated]
-            logger.info("After curation filter: %d units", len(all_unit_ids))
-
-        # User-specified subset
-        if unit_ids is not None:
-            available = set(all_unit_ids)
-            all_unit_ids = [uid for uid in unit_ids if uid in available]
-            missing = set(unit_ids) - available
-            if missing:
-                logger.warning("Unit IDs not found: %s", sorted(missing))
-            logger.info("Selected %d units", len(all_unit_ids))
-        elif ncfg.max_units is not None and len(all_unit_ids) > ncfg.max_units:
-            all_unit_ids = all_unit_ids[: ncfg.max_units]
-            logger.info("Limited to first %d units", ncfg.max_units)
-
         logger.info("Deconvolving %d units (g=%s)...", len(all_unit_ids), oasis.g)
 
-        self.good_unit_ids, self.C_list, self.S_list = run_deconvolution(
+        self.good_unit_ids, self.S_list = run_deconvolution(
             C_da=self.traces,
             unit_ids=all_unit_ids,
             g=oasis.g,
@@ -474,7 +422,7 @@ class PlaceCellDataset:
     def compute_occupancy(self) -> None:
         """Compute occupancy map from speed-filtered trajectory."""
         if self.trajectory_filtered is None:
-            raise RuntimeError("Call load() first.")
+            raise RuntimeError("Call preprocess_behavior() first.")
 
         scfg = self.spatial
 
@@ -539,8 +487,6 @@ class PlaceCellDataset:
                 behavior_fps=bcfg.behavior_fps,
                 min_occupancy=scfg.min_occupancy,
                 occupancy_sigma=scfg.occupancy_sigma,
-                stability_threshold=scfg.stability_threshold,
-                stability_method=scfg.stability_method,
                 min_shift_seconds=scfg.min_shift_seconds,
                 si_weight_mode=scfg.si_weight_mode,
                 place_field_seed_percentile=scfg.place_field_seed_percentile,
@@ -548,10 +494,6 @@ class PlaceCellDataset:
 
             # Attach visualization data
             vis_data_above = result["events_above_threshold"]
-            vis_data_below = pd.DataFrame()
-            if self.event_index is not None:
-                unit_all = self.event_index[self.event_index["unit_id"] == unit_id]
-                vis_data_below = unit_all[unit_all["s"] > result["vis_threshold"]]
 
             trace_data = None
             trace_times = None
@@ -575,7 +517,6 @@ class PlaceCellDataset:
                 rate_map_first=result["rate_map_first"],
                 rate_map_second=result["rate_map_second"],
                 vis_data_above=vis_data_above,
-                vis_data_below=vis_data_below,
                 unit_data=result["unit_data"],
                 trace_data=trace_data,
                 trace_times=trace_times,
@@ -585,23 +526,14 @@ class PlaceCellDataset:
 
     def place_cells(self) -> dict[int, UnitResult]:
         """Return units passing both significance and stability tests."""
-        p_thresh = self.spatial.p_value_threshold or 0.05
-        stab_thresh = self.spatial.stability_threshold
+        p_thresh = self.spatial.p_value_threshold
 
         out: dict[int, UnitResult] = {}
         for uid, res in self.unit_results.items():
             if res.p_val >= p_thresh:
                 continue
-            stab_corr = res.stability_corr
-            stab_p = res.stability_p_val
-            if np.isnan(stab_corr):
+            if np.isnan(res.stability_p_val) or res.stability_p_val >= p_thresh:
                 continue
-            if not np.isnan(stab_p):
-                if stab_p >= p_thresh:
-                    continue
-            else:
-                if stab_corr < stab_thresh:
-                    continue
             out[uid] = res
         return out
 
@@ -611,44 +543,30 @@ class PlaceCellDataset:
         Returns
         -------
         dict
-            Keys: ``n_total``, ``n_sig``, ``n_stable_thresh``,
-            ``n_stable_shuffle``, ``n_both_thresh``, ``n_both_shuffle``.
+            Keys: ``n_total``, ``n_sig``, ``n_stable``, ``n_place_cells``.
         """
-        p_thresh = self.spatial.p_value_threshold or 0.05
-        stab_thresh = self.spatial.stability_threshold
+        p_thresh = self.spatial.p_value_threshold
 
         n_sig = 0
-        n_stable_thresh = 0
-        n_stable_shuffle = 0
-        n_both_thresh = 0
-        n_both_shuffle = 0
+        n_stable = 0
+        n_place_cells = 0
 
         for res in self.unit_results.values():
             is_sig = res.p_val < p_thresh
-            corr = res.stability_corr
-            stab_p = res.stability_p_val
-
-            is_stable_thresh = not np.isnan(corr) and corr >= stab_thresh
-            is_stable_shuffle = not np.isnan(stab_p) and stab_p < p_thresh
+            is_stable = not np.isnan(res.stability_p_val) and res.stability_p_val < p_thresh
 
             if is_sig:
                 n_sig += 1
-            if is_stable_thresh:
-                n_stable_thresh += 1
-            if is_stable_shuffle:
-                n_stable_shuffle += 1
-            if is_sig and is_stable_thresh:
-                n_both_thresh += 1
-            if is_sig and is_stable_shuffle:
-                n_both_shuffle += 1
+            if is_stable:
+                n_stable += 1
+            if is_sig and is_stable:
+                n_place_cells += 1
 
         return {
             "n_total": len(self.unit_results),
             "n_sig": n_sig,
-            "n_stable_thresh": n_stable_thresh,
-            "n_stable_shuffle": n_stable_shuffle,
-            "n_both_thresh": n_both_thresh,
-            "n_both_shuffle": n_both_shuffle,
+            "n_stable": n_stable,
+            "n_place_cells": n_place_cells,
         }
 
     def coverage(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -731,6 +649,7 @@ class PlaceCellDataset:
 
         # DataFrames
         for name, df in [
+            ("trajectory_raw", self.trajectory_raw),
             ("trajectory", self.trajectory),
             ("trajectory_filtered", self.trajectory_filtered),
             ("event_index", self.event_index),
@@ -743,8 +662,6 @@ class PlaceCellDataset:
         deconv_kw: dict[str, np.ndarray] = {}
         if self.good_unit_ids:
             deconv_kw["good_unit_ids"] = np.array(self.good_unit_ids)
-        for i, c in enumerate(self.C_list):
-            deconv_kw[f"C_{i}"] = c
         for i, s in enumerate(self.S_list):
             deconv_kw[f"S_{i}"] = s
         if deconv_kw:
@@ -778,7 +695,7 @@ class PlaceCellDataset:
             "trace_data",
             "trace_times",
         ]
-        df_fields = ["vis_data_above", "vis_data_below", "unit_data"]
+        df_fields = ["vis_data_above", "unit_data"]
 
         # Scalars → CSV
         rows = []
@@ -863,7 +780,14 @@ class PlaceCellDataset:
             ds.traces = xr.open_dataarray(tr_path).load()
 
         # DataFrames
-        for name in ["trajectory", "trajectory_filtered", "event_index", "event_place"]:
+        df_names = [
+            "trajectory_raw",
+            "trajectory",
+            "trajectory_filtered",
+            "event_index",
+            "event_place",
+        ]
+        for name in df_names:
             pq = path / f"{name}.parquet"
             if pq.exists():
                 setattr(ds, name, pd.read_parquet(pq))
@@ -874,10 +798,6 @@ class PlaceCellDataset:
             deconv = np.load(deconv_path)
             if "good_unit_ids" in deconv:
                 ds.good_unit_ids = list(deconv["good_unit_ids"])
-            i = 0
-            while f"C_{i}" in deconv:
-                ds.C_list.append(deconv[f"C_{i}"])
-                i += 1
             i = 0
             while f"S_{i}" in deconv:
                 ds.S_list.append(deconv[f"S_{i}"])
@@ -951,14 +871,13 @@ class PlaceCellDataset:
                 si=float(sc["si"]),
                 p_val=float(sc["p_val"]),
                 shuffled_sis=ar.get("shuffled_sis", np.array([])),
-                shuffled_rate_p95=ar.get("shuffled_rate_p95"),
+                shuffled_rate_p95=ar.get("shuffled_rate_p95", np.array([])),
                 stability_corr=float(sc["stability_corr"]),
                 stability_z=float(sc["stability_z"]),
                 stability_p_val=float(sc["stability_p_val"]),
                 rate_map_first=ar.get("rate_map_first", np.array([])),
                 rate_map_second=ar.get("rate_map_second", np.array([])),
                 vis_data_above=ev.get("vis_data_above", pd.DataFrame()),
-                vis_data_below=ev.get("vis_data_below", pd.DataFrame()),
                 unit_data=ev.get("unit_data", pd.DataFrame()),
                 trace_data=ar.get("trace_data"),
                 trace_times=ar.get("trace_times"),
