@@ -10,7 +10,6 @@ from pydantic import BaseModel, ConfigDict, Field
 CONFIG_DIR = Path(__file__).parent / "config"
 
 
-
 class OasisConfig(BaseModel):
     """OASIS deconvolution parameters."""
 

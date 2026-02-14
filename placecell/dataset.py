@@ -9,7 +9,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import xarray as xr
-from placecell.logging import init_logger
 
 from placecell.analysis import (
     compute_coverage_curve,
@@ -20,6 +19,7 @@ from placecell.analysis import (
 from placecell.behavior import build_event_place_dataframe, load_curated_unit_ids
 from placecell.config import AnalysisConfig, DataPathsConfig, SpatialMapConfig
 from placecell.io import load_behavior_data, load_visualization_data
+from placecell.logging import init_logger
 from placecell.neural import build_event_index_dataframe, load_calcium_traces, run_deconvolution
 
 logger = init_logger(__name__)
@@ -733,18 +733,6 @@ class PlaceCellDataset:
             "stability_z",
             "stability_p_val",
         ]
-        array_fields = [
-            "rate_map",
-            "rate_map_raw",
-            "shuffled_sis",
-            "shuffled_rate_p95",
-            "rate_map_first",
-            "rate_map_second",
-            "trace_data",
-            "trace_times",
-        ]
-        df_fields = ["vis_data_above", "vis_data_below", "unit_data"]
-
         # Read scalars
         scalars_df = pd.read_csv(ur_dir / "scalars.csv")
         unit_ids = scalars_df["unit_id"].tolist()

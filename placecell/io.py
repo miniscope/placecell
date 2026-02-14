@@ -6,9 +6,9 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import xarray as xr
-from placecell.logging import init_logger
 
 from placecell.behavior import _load_behavior_xy, compute_behavior_speed
+from placecell.logging import init_logger
 from placecell.neural import load_calcium_traces
 
 logger = init_logger(__name__)
