@@ -380,7 +380,8 @@ def compute_stability_score(
     behavior_fps: float = 20.0,
     min_occupancy: float = 0.1,
     occupancy_sigma: float = 0.0,
-    split_method: str = "half",
+    n_split_blocks: int = 10,
+    block_shift: float = 0.0,
     n_shuffles: int = 0,
     random_seed: int | None = None,
     min_shift_seconds: float = 0.0,
@@ -388,9 +389,9 @@ def compute_stability_score(
 ) -> tuple[float, float, float, np.ndarray, np.ndarray]:
     """Compute stability score by comparing rate maps from split data.
 
-    Splits the recording into two halves based on behavior frame index,
-    computes rate maps for each half, and returns the Pearson correlation
-    between them (using valid bins in both halves).
+    Divides the session into ``n_split_blocks`` interleaved temporal
+    blocks, assigns odd/even blocks to each half, computes rate maps,
+    and returns the Pearson correlation between them.
 
     Optionally runs a shuffle significance test (Shuman et al. 2020):
     circularly shifts events and computes the split-half correlation for
@@ -416,8 +417,11 @@ def compute_stability_score(
         Minimum occupancy time in seconds for a bin to be valid.
     occupancy_sigma:
         Gaussian smoothing sigma for occupancy maps (default 0.0 = no smoothing).
-    split_method:
-        Splitting method. Currently only "half" is supported.
+    n_split_blocks:
+        Number of temporal blocks for interleaved splitting.
+    block_shift:
+        Fraction of one block width (0.0 to <1.0) to shift block
+        boundaries.  Shifts are circular with period 1.0.
     n_shuffles:
         Number of shuffles for stability significance test.
         0 means no shuffle test (return NaN for p-value).
@@ -448,15 +452,36 @@ def compute_stability_score(
         unit_events = unit_events.copy()
         unit_events["s"] = 1.0
 
-    # Split trajectory by frame index
+    # Split trajectory into interleaved temporal blocks
     all_frames = trajectory_df["beh_frame_index"].values
-    mid_frame = np.median(all_frames)
+    frame_min = all_frames.min()
+    frame_max = all_frames.max()
+    span = frame_max - frame_min
+    if span == 0:
+        nan_map = np.full_like(occupancy_time, np.nan)
+        return np.nan, np.nan, np.nan, nan_map, nan_map
+    block_width = span / n_split_blocks
+    offset = block_shift * block_width
 
-    traj_first = trajectory_df[trajectory_df["beh_frame_index"] <= mid_frame]
-    traj_second = trajectory_df[trajectory_df["beh_frame_index"] > mid_frame]
+    traj_block_ids = np.floor(
+        (all_frames - frame_min - offset) / block_width
+    ).astype(int)
+    traj_block_ids = np.clip(traj_block_ids, 0, n_split_blocks - 1)
+    traj_first_mask = traj_block_ids % 2 == 0
+    traj_second_mask = ~traj_first_mask
 
-    events_first = unit_events[unit_events["beh_frame_index"] <= mid_frame]
-    events_second = unit_events[unit_events["beh_frame_index"] > mid_frame]
+    event_frames = unit_events["beh_frame_index"].values
+    event_block_ids = np.floor(
+        (event_frames - frame_min - offset) / block_width
+    ).astype(int)
+    event_block_ids = np.clip(event_block_ids, 0, n_split_blocks - 1)
+    events_first_mask = event_block_ids % 2 == 0
+    events_second_mask = ~events_first_mask
+
+    traj_first = trajectory_df[traj_first_mask]
+    traj_second = trajectory_df[traj_second_mask]
+    events_first = unit_events[events_first_mask]
+    events_second = unit_events[events_second_mask]
 
     # Compute occupancy maps for each half
     time_per_frame = 1.0 / behavior_fps
@@ -544,11 +569,6 @@ def compute_stability_score(
         u_grouped = unit_events.groupby("beh_frame_index")["s"].sum()
         aligned_events = u_grouped.reindex(traj_frames, fill_value=0).values.astype(float)
 
-        all_frames = trajectory_df["beh_frame_index"].values
-        mid_frame = np.median(all_frames)
-        first_half = all_frames <= mid_frame
-        second_half = all_frames > mid_frame
-
         traj_x = trajectory_df["x"].values
         traj_y = trajectory_df["y"].values
 
@@ -565,20 +585,20 @@ def compute_stability_score(
             shifted = np.roll(aligned_events, shift)
 
             ew1, _, _ = np.histogram2d(
-                traj_x[first_half],
-                traj_y[first_half],
+                traj_x[traj_first_mask],
+                traj_y[traj_first_mask],
                 bins=[x_edges, y_edges],
-                weights=shifted[first_half],
+                weights=shifted[traj_first_mask],
             )
             rm1 = np.zeros_like(occ_first)
             rm1[valid_first] = ew1[valid_first] / occ_first[valid_first]
             rm1 = gaussian_filter_normalized(rm1, sigma=activity_sigma)
 
             ew2, _, _ = np.histogram2d(
-                traj_x[second_half],
-                traj_y[second_half],
+                traj_x[traj_second_mask],
+                traj_y[traj_second_mask],
                 bins=[x_edges, y_edges],
-                weights=shifted[second_half],
+                weights=shifted[traj_second_mask],
             )
             rm2 = np.zeros_like(occ_second)
             rm2[valid_second] = ew2[valid_second] / occ_second[valid_second]
@@ -620,6 +640,8 @@ def compute_unit_analysis(
     min_shift_seconds: float = 0.0,
     si_weight_mode: str = "amplitude",
     place_field_seed_percentile: float = 95.0,
+    n_split_blocks: int = 10,
+    block_shifts: list[float] | None = None,
 ) -> dict:
     """Compute rate map, spatial information, stability, and thresholded events for a unit.
 
@@ -658,6 +680,12 @@ def compute_unit_analysis(
     place_field_seed_percentile:
         Percentile of shuffled rate maps for seed detection (Guo et al.
         2023).
+    n_split_blocks:
+        Number of temporal blocks for interleaved stability splitting.
+    block_shifts:
+        List of block boundary shifts as fractions of one block width.
+        Each produces an independent split; results are Fisher z-averaged.
+        Defaults to ``[0.0]`` (single split, no shift).
 
     Returns
     -------
@@ -716,9 +744,16 @@ def compute_unit_analysis(
         percentile=place_field_seed_percentile,
     )
 
-    # Stability test
-    stability_corr, stability_z, stability_p_val, rate_map_first, rate_map_second = (
-        compute_stability_score(
+    # Stability test — run for each block shift and Fisher z-average
+    if block_shifts is None:
+        block_shifts = [0.0]
+
+    z_scores = []
+    p_vals = []
+    rate_map_first = None
+    rate_map_second = None
+    for shift in block_shifts:
+        corr_i, z_i, p_i, rm1_i, rm2_i = compute_stability_score(
             unit_data,
             trajectory_df,
             occupancy_time,
@@ -729,12 +764,33 @@ def compute_unit_analysis(
             behavior_fps=behavior_fps,
             min_occupancy=min_occupancy,
             occupancy_sigma=occupancy_sigma,
+            n_split_blocks=n_split_blocks,
+            block_shift=shift,
             n_shuffles=n_shuffles,
             random_seed=random_seed,
             min_shift_seconds=min_shift_seconds,
             si_weight_mode=si_weight_mode,
         )
-    )
+        if np.isfinite(z_i):
+            z_scores.append(z_i)
+        if np.isfinite(p_i):
+            p_vals.append(p_i)
+        # Keep rate maps from the first shift for display
+        if rate_map_first is None:
+            rate_map_first, rate_map_second = rm1_i, rm2_i
+
+    if z_scores:
+        stability_z = float(np.mean(z_scores))
+        stability_corr = float(np.tanh(stability_z))
+    else:
+        stability_z = np.nan
+        stability_corr = np.nan
+    stability_p_val = float(np.mean(p_vals)) if p_vals else np.nan
+
+    if rate_map_first is None:
+        nan_map = np.full_like(occupancy_time, np.nan)
+        rate_map_first = nan_map
+        rate_map_second = nan_map
 
     return {
         "rate_map": rate_map,

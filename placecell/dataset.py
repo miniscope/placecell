@@ -490,6 +490,8 @@ class PlaceCellDataset:
                 min_shift_seconds=scfg.min_shift_seconds,
                 si_weight_mode=scfg.si_weight_mode,
                 place_field_seed_percentile=scfg.place_field_seed_percentile,
+                n_split_blocks=scfg.n_split_blocks,
+                block_shifts=scfg.block_shifts,
             )
 
             # Attach visualization data

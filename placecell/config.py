@@ -143,6 +143,25 @@ class SpatialMapConfig(BaseModel):
             "seeds extend to contiguous bins above place_field_threshold."
         ),
     )
+    n_split_blocks: int = Field(
+        10,
+        ge=2,
+        le=100,
+        description=(
+            "Number of temporal blocks for interleaved stability splitting. "
+            "The session is divided into this many equal-duration blocks, "
+            "and odd/even blocks are assigned to each half."
+        ),
+    )
+    block_shifts: list[float] = Field(
+        [0.0],
+        description=(
+            "List of block boundary shifts as fractions of one block width. "
+            "Each value produces an independent split; results are Fisher "
+            "z-averaged. Use [0] for a single split, [0, 0.5] for two "
+            "shifted arrangements, etc. Values are circular with period 1.0."
+        ),
+    )
     trace_time_window: float = Field(
         600.0,
         gt=0.0,

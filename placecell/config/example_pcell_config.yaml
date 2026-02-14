@@ -34,4 +34,6 @@ behavior:
     place_field_threshold: 0.35  # Fraction of peak rate for place field boundary (red contour). Applied to smoothed rate map.
     place_field_min_bins: 5  # Minimum contiguous bins for a place field component. Smaller disconnected regions are discarded.
     place_field_seed_percentile: 95  # Percentile of shuffled rates for seed detection (Guo et al. 2023).
+    n_split_blocks: 10  # Number of temporal blocks for interleaved stability splitting.
+    block_shifts: [0]  # Block boundary shifts (fractions of block width). [0, 0.5] for two arrangements.
     trace_time_window: 600  # Time window (seconds) for trace display in interactive browser.
