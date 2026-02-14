@@ -153,6 +153,7 @@ def create_unit_browser(
     trace_time_window: float = 600.0,
     place_field_threshold: float = 0.05,
     place_field_min_bins: int = 5,
+    speed_unit: str = "mm/s",
 ) -> tuple[plt.Figure, widgets.VBox]:
     """Create interactive place cell browser widget.
 
@@ -401,7 +402,7 @@ def create_unit_browser(
                         [0],
                         color="gray",
                         linewidth=1.5,
-                        label=f"Events (< {speed_threshold:.0f} px/s)",
+                        label=f"Events (< {speed_threshold:.0f} {speed_unit})",
                     )
                 )
             if len(event_times_red) > 0:
@@ -411,7 +412,7 @@ def create_unit_browser(
                         [0],
                         color="red",
                         linewidth=1.5,
-                        label=f"Events (>= {speed_threshold:.0f} px/s)",
+                        label=f"Events (>= {speed_threshold:.0f} {speed_unit})",
                     )
                 )
             ax5.legend(handles=legend_elements, loc="upper left", fontsize=7, framealpha=0.9)
@@ -577,4 +578,5 @@ def browse_units(
         trace_time_window=scfg.trace_time_window,
         place_field_threshold=place_field_threshold or scfg.place_field_threshold,
         place_field_min_bins=scfg.place_field_min_bins,
+        speed_unit="mm/s" if ds.mm_per_px else "px/s",
     )
