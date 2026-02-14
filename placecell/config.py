@@ -45,15 +45,7 @@ class NeuralConfig(BaseModel):
         "C",
         description="Base name of the zarr group (e.g. 'C' or 'C_lp').",
     )
-    max_units: int | None = Field(
-        None,
-        ge=1,
-        description=(
-            "Maximum number of units to include in a visualization. "
-            "If omitted/null, use all available units unless a CLI max-units "
-            "override is provided."
-        ),
-    )
+
 
 
 class SpatialMapConfig(BaseModel):
@@ -227,13 +219,6 @@ class DataPathsConfig(BaseModel):
     behavior_video: str | None = Field(
         None,
         description="Path to behavior video file (e.g. .mp4). Used for arena bounds verification.",
-    )
-    curation_csv: str | None = Field(
-        None,
-        description=(
-            "Path to curation results CSV file with columns 'unit_id' and 'keep'. "
-            "Only units with keep=1 will be processed. If None, all units are used."
-        ),
     )
     arena_bounds: tuple[float, float, float, float] | None = Field(
         None,

@@ -161,7 +161,6 @@ neural_path: path/to/neural
 neural_timestamp: path/to/neural_timestamp.csv
 behavior_position: path/to/behavior_position.csv
 behavior_timestamp: path/to/behavior_timestamp.csv
-curation_csv: path/to/curation.csv  # optional
 ```
 :::
 
@@ -184,7 +183,7 @@ neural:
     lambda_: null  # Regularization parameter. null = auto-determined.
     s_min: null  # Minimum event size. Positive = direct threshold, negative = calculated, 0 = auto, null = default.
   trace_name: C_lp
-  max_units: null  # Max units to process. null = process all units.
+
 behavior:
   id: behavior
   behavior_fps: 20.0

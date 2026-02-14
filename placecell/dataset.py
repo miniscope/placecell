@@ -20,7 +20,6 @@ from placecell.behavior import (
     build_event_place_dataframe,
     clip_to_arena,
     correct_perspective,
-    load_curated_unit_ids,
     remove_position_jumps,
 )
 from placecell.config import AnalysisConfig, DataPathsConfig, SpatialMapConfig
@@ -107,8 +106,6 @@ class PlaceCellDataset:
         Path to behavior position CSV.
     behavior_timestamp_path : Path
         Path to behavior timestamp CSV.
-    curation_csv_path : Path or None
-        Path to curation CSV, or None to use all units.
     """
 
     def __init__(
@@ -120,7 +117,6 @@ class PlaceCellDataset:
         behavior_position_path: Path | None = None,
         behavior_timestamp_path: Path | None = None,
         behavior_video_path: Path | None = None,
-        curation_csv_path: Path | None = None,
         data_cfg: DataPathsConfig | None = None,
     ) -> None:
         self.cfg = cfg
@@ -129,7 +125,6 @@ class PlaceCellDataset:
         self.behavior_position_path = behavior_position_path
         self.behavior_timestamp_path = behavior_timestamp_path
         self.behavior_video_path = behavior_video_path
-        self.curation_csv_path = curation_csv_path
         self.data_cfg = data_cfg
 
         # Neural data
@@ -192,7 +187,6 @@ class PlaceCellDataset:
             behavior_video_path=(
                 data_dir / data_cfg.behavior_video if data_cfg.behavior_video else None
             ),
-            curation_csv_path=(data_dir / data_cfg.curation_csv if data_cfg.curation_csv else None),
             data_cfg=data_cfg,
         )
 
@@ -394,44 +388,21 @@ class PlaceCellDataset:
 
     def deconvolve(
         self,
-        unit_ids: list[int] | None = None,
         progress_bar: Any = None,
     ) -> None:
         """Run OASIS deconvolution on calcium traces.
 
         Parameters
         ----------
-        unit_ids:
-            Specific unit IDs to process. None = all (respecting curation + max_units).
         progress_bar:
             Progress bar wrapper, e.g. ``tqdm``.
         """
         if self.traces is None:
             raise RuntimeError("Call load() first.")
 
-        ncfg = self.cfg.neural
-        oasis = ncfg.oasis
+        oasis = self.cfg.neural.oasis
 
         all_unit_ids = list(map(int, self.traces["unit_id"].values))
-
-        # Curation filter
-        if self.curation_csv_path is not None and self.curation_csv_path.exists():
-            curated = set(load_curated_unit_ids(self.curation_csv_path))
-            all_unit_ids = [uid for uid in all_unit_ids if uid in curated]
-            logger.info("After curation filter: %d units", len(all_unit_ids))
-
-        # User-specified subset
-        if unit_ids is not None:
-            available = set(all_unit_ids)
-            all_unit_ids = [uid for uid in unit_ids if uid in available]
-            missing = set(unit_ids) - available
-            if missing:
-                logger.warning("Unit IDs not found: %s", sorted(missing))
-            logger.info("Selected %d units", len(all_unit_ids))
-        elif ncfg.max_units is not None and len(all_unit_ids) > ncfg.max_units:
-            all_unit_ids = all_unit_ids[: ncfg.max_units]
-            logger.info("Limited to first %d units", ncfg.max_units)
-
         logger.info("Deconvolving %d units (g=%s)...", len(all_unit_ids), oasis.g)
 
         self.good_unit_ids, self.C_list, self.S_list = run_deconvolution(

@@ -11,7 +11,7 @@ neural:
     penalty: 0.8  # Sparsity penalty (higher = fewer events). Default 0.
     s_min: 0  # Minimum event size threshold. Default 0.
   trace_name: C_lp
-  max_units: null  # Max units to process. null = process all units.
+
 behavior:
   id: behavior
   behavior_fps: 20.0

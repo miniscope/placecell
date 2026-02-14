@@ -36,7 +36,6 @@ neural_path: neural_data
 neural_timestamp: neural_data/neural_timestamp.csv
 behavior_position: behavior/behavior_position.csv
 behavior_timestamp: behavior/behavior_timestamp.csv
-curation_csv: null
 """
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
         f.write(config_content)
@@ -48,31 +47,5 @@ curation_csv: null
         assert cfg.neural_timestamp == "neural_data/neural_timestamp.csv"
         assert cfg.behavior_position == "behavior/behavior_position.csv"
         assert cfg.behavior_timestamp == "behavior/behavior_timestamp.csv"
-        assert cfg.curation_csv is None
-    finally:
-        temp_path.unlink()
-
-
-def test_data_paths_config_with_curation(assets_dir: Path) -> None:
-    """DataPathsConfig should accept curation_csv path."""
-    import tempfile
-
-    config_content = """
-id: test_data_paths
-mio_model: placecell.config.DataPathsConfig
-mio_version: 0.8.1
-neural_path: neural_data
-neural_timestamp: neural_data/neural_timestamp.csv
-behavior_position: behavior/behavior_position.csv
-behavior_timestamp: behavior/behavior_timestamp.csv
-curation_csv: neural_data/curation_results.csv
-"""
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-        f.write(config_content)
-        temp_path = Path(f.name)
-
-    try:
-        cfg = DataPathsConfig.from_yaml(temp_path)
-        assert cfg.curation_csv == "neural_data/curation_results.csv"
     finally:
         temp_path.unlink()
