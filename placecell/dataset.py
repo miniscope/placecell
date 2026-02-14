@@ -250,7 +250,15 @@ class PlaceCellDataset:
 
     @property
     def mm_per_px(self) -> float | None:
-        """Mm-per-pixel scale, or None if arena is not calibrated."""
+        """Averaged mm-per-pixel scale, or None if arena is not calibrated."""
+        scales = self.mm_per_px_xy
+        if scales is None:
+            return None
+        return (scales[0] + scales[1]) / 2.0
+
+    @property
+    def mm_per_px_xy(self) -> tuple[float, float] | None:
+        """Per-axis (scale_x, scale_y) mm-per-pixel, or None if not calibrated."""
         if self.data_cfg is None:
             return None
         bounds = self.data_cfg.arena_bounds
@@ -260,7 +268,7 @@ class PlaceCellDataset:
         x_min, x_max, y_min, y_max = bounds
         scale_x = size_mm[0] / (x_max - x_min)
         scale_y = size_mm[1] / (y_max - y_min)
-        return (scale_x + scale_y) / 2.0
+        return (scale_x, scale_y)
 
     def preprocess_behavior(self) -> None:
         """Apply data-integrity corrections, convert units, and speed-filter.
@@ -300,14 +308,15 @@ class PlaceCellDataset:
                     f"arena_bounds is set but missing required fields: {', '.join(missing)}"
                 )
 
-            scale = self.mm_per_px
+            scale_x, scale_y = self.mm_per_px_xy
 
             # Store intermediate snapshots for visualization
             self._preprocess_steps: dict[str, pd.DataFrame] = {}
             self._preprocess_steps["Raw"] = self.trajectory[["x", "y"]].copy()
 
-            # 1. Jump removal (threshold in mm → convert to px)
-            jump_px = bcfg.jump_threshold_mm / scale
+            # 1. Jump removal (threshold in mm → convert to px using averaged scale)
+            scale_avg = (scale_x + scale_y) / 2.0
+            jump_px = bcfg.jump_threshold_mm / scale_avg
             self.trajectory, n_jumps = remove_position_jumps(self.trajectory, threshold_px=jump_px)
             logger.info(
                 "Jump removal: %d frames interpolated (threshold %.0f mm = %.1f px)",
@@ -338,12 +347,29 @@ class PlaceCellDataset:
             logger.info("Boundary clipping to arena_bounds=%s", dcfg.arena_bounds)
             self._preprocess_steps["Clipped"] = self.trajectory[["x", "y"]].copy()
 
-            # 4. Recompute speed in mm/s on corrected positions
+            # 4. Convert positions from pixels to mm (per-axis)
+            x_min = dcfg.arena_bounds[0]
+            y_min = dcfg.arena_bounds[2]
+            self.trajectory["x"] = (self.trajectory["x"] - x_min) * scale_x
+            self.trajectory["y"] = (self.trajectory["y"] - y_min) * scale_y
+            logger.info(
+                "Converted to mm (scale_x=%.4f, scale_y=%.4f mm/px)",
+                scale_x,
+                scale_y,
+            )
+
+            # Convert all preprocess snapshots to mm for consistent visualization
+            for step_name in self._preprocess_steps:
+                df = self._preprocess_steps[step_name]
+                df["x"] = (df["x"] - x_min) * scale_x
+                df["y"] = (df["y"] - y_min) * scale_y
+            self._preprocess_steps["Converted"] = self.trajectory[["x", "y"]].copy()
+
+            # 5. Recompute speed on mm-space positions (natively mm/s)
             self.trajectory = recompute_speed(
                 self.trajectory, window_frames=bcfg.speed_window_frames
             )
-            self.trajectory["speed"] *= scale
-            logger.info("Speed recomputed in mm/s (%.3f mm/px)", scale)
+            logger.info("Speed recomputed in mm/s")
             speed_unit = "mm/s"
         else:
             logger.warning(
@@ -490,6 +516,8 @@ class PlaceCellDataset:
                 min_shift_seconds=scfg.min_shift_seconds,
                 si_weight_mode=scfg.si_weight_mode,
                 place_field_seed_percentile=scfg.place_field_seed_percentile,
+                n_split_blocks=scfg.n_split_blocks,
+                block_shifts=scfg.block_shifts,
             )
 
             # Attach visualization data

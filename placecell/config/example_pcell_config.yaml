@@ -25,7 +25,7 @@ behavior:
     min_occupancy: 0.025 # Minimum occupancy (in seconds) to include a bin in spatial map
     occupancy_sigma: 3  # Gaussian smoothing (in bins) for occupancy map (0 = no smoothing)
     activity_sigma: 3  # Gaussian smoothing (in bins) for spatial activity map
-    n_shuffles: 1000
+    n_shuffles: 500
     random_seed: 1
     event_threshold_sigma: 0  # Sigma multiplier for event amplitude threshold in trajectory visualization
     p_value_threshold: 0.05 # P-value threshold. Units with p < threshold pass.
@@ -34,4 +34,6 @@ behavior:
     place_field_threshold: 0.35  # Fraction of peak rate for place field boundary (red contour). Applied to smoothed rate map.
     place_field_min_bins: 5  # Minimum contiguous bins for a place field component. Smaller disconnected regions are discarded.
     place_field_seed_percentile: 95  # Percentile of shuffled rates for seed detection (Guo et al. 2023).
+    n_split_blocks: 10  # Number of temporal blocks for interleaved stability splitting.
+    block_shifts: [0]  # Block boundary shifts (fractions of block width). [0, 0.5] for two arrangements.
     trace_time_window: 600  # Time window (seconds) for trace display in interactive browser.

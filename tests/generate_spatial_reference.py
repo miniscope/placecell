@@ -59,10 +59,10 @@ rate_map = compute_rate_map(
     unit_events, occupancy, valid_mask, x_edges, y_edges, activity_sigma=1.0
 )
 
-# 5. compute_spatial_information - using same events
+# 5. compute_spatial_information - using same events (smoothed, matching literature)
 si, p_val, shuffled_sis = compute_spatial_information(
     unit_events, trajectory_si, occupancy, valid_mask, x_edges, y_edges,
-    n_shuffles=100, random_seed=42
+    n_shuffles=100, random_seed=42, activity_sigma=1.0
 )
 
 # 6. vis_threshold for compute_unit_analysis test

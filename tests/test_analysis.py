@@ -169,7 +169,8 @@ def test_compute_spatial_information(assets_dir: Path) -> None:
 
     si, p_val, shuffled = compute_spatial_information(
         unit_events, trajectory, ref["occupancy"], ref["valid_mask"],
-        ref["x_edges"], ref["y_edges"], n_shuffles=100, random_seed=42
+        ref["x_edges"], ref["y_edges"], n_shuffles=100, random_seed=42,
+        activity_sigma=1.0,
     )
 
     assert si == pytest.approx(float(ref["spatial_info"]), rel=1e-10)
