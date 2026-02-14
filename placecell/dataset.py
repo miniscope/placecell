@@ -1,12 +1,15 @@
 """Central dataset class for place cell analysis."""
 
+import json
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
 import xarray as xr
-from mio.logging import init_logger
+from placecell.logging import init_logger
 
 from placecell.analysis import (
     compute_coverage_curve,
@@ -20,6 +23,57 @@ from placecell.io import load_behavior_data, load_visualization_data
 from placecell.neural import build_event_index_dataframe, load_calcium_traces, run_deconvolution
 
 logger = init_logger(__name__)
+
+_BUNDLE_VERSION = 1
+
+
+def unique_bundle_path(bundle_dir: str | Path, stem: str) -> Path:
+    """Return a bundle path, appending ``_1``, ``_2``, ... if it already exists.
+
+    Parameters
+    ----------
+    bundle_dir:
+        Directory where bundles are stored.
+    stem:
+        Base name for the bundle (without extension).
+
+    Returns
+    -------
+    Path
+        A path like ``bundle_dir/stem.pcellbundle`` (or ``stem_1``, ``stem_2``, ...).
+    """
+    bundle_dir = Path(bundle_dir)
+    candidate = bundle_dir / f"{stem}.pcellbundle"
+    if not candidate.exists():
+        return candidate
+    i = 1
+    while True:
+        candidate = bundle_dir / f"{stem}_{i}.pcellbundle"
+        if not candidate.exists():
+            return candidate
+        i += 1
+
+
+@dataclass
+class UnitResult:
+    """Analysis results for a single unit."""
+
+    rate_map: np.ndarray
+    rate_map_raw: np.ndarray
+    si: float
+    p_val: float
+    shuffled_sis: np.ndarray
+    shuffled_rate_p95: np.ndarray | None
+    stability_corr: float
+    stability_z: float
+    stability_p_val: float
+    rate_map_first: np.ndarray
+    rate_map_second: np.ndarray
+    vis_data_above: pd.DataFrame
+    vis_data_below: pd.DataFrame
+    unit_data: pd.DataFrame
+    trace_data: np.ndarray | None
+    trace_times: np.ndarray | None
 
 
 class PlaceCellDataset:
@@ -54,10 +108,10 @@ class PlaceCellDataset:
         self,
         cfg: AnalysisConfig,
         *,
-        neural_path: Path,
-        neural_timestamp_path: Path,
-        behavior_position_path: Path,
-        behavior_timestamp_path: Path,
+        neural_path: Path | None = None,
+        neural_timestamp_path: Path | None = None,
+        behavior_position_path: Path | None = None,
+        behavior_timestamp_path: Path | None = None,
         curation_csv_path: Path | None = None,
     ) -> None:
         self.cfg = cfg
@@ -92,16 +146,28 @@ class PlaceCellDataset:
         self.footprints: xr.DataArray | None = None
 
         # Results
-        self.unit_results: dict[int, dict] = {}
+        self.unit_results: dict[int, UnitResult] = {}
 
     @classmethod
-    def from_yaml(cls, config_path: str | Path, data_path: str | Path) -> "PlaceCellDataset":
-        """Create dataset from YAML config and data paths files."""
-        config_path = Path(config_path)
+    def from_yaml(cls, config: str | Path, data_path: str | Path) -> "PlaceCellDataset":
+        """Create dataset from analysis config and data paths file.
+
+        Parameters
+        ----------
+        config:
+            Analysis config — either a file path or a config id
+            (resolved via ``AnalysisConfig.from_id``).
+        data_path:
+            Path to the per-session data paths YAML file.
+        """
+        config_p = Path(config)
+        if config_p.exists():
+            cfg = AnalysisConfig.from_yaml(config_p)
+        else:
+            cfg = AnalysisConfig.from_id(str(config))
+
         data_path = Path(data_path)
         data_dir = data_path.parent
-
-        cfg = AnalysisConfig.from_yaml(config_path)
         data_cfg = DataPathsConfig.from_yaml(data_path)
         cfg = cfg.with_data_overrides(data_cfg)
 
@@ -111,9 +177,7 @@ class PlaceCellDataset:
             neural_timestamp_path=data_dir / data_cfg.neural_timestamp,
             behavior_position_path=data_dir / data_cfg.behavior_position,
             behavior_timestamp_path=data_dir / data_cfg.behavior_timestamp,
-            curation_csv_path=(
-                data_dir / data_cfg.curation_csv if data_cfg.curation_csv else None
-            ),
+            curation_csv_path=(data_dir / data_cfg.curation_csv if data_cfg.curation_csv else None),
         )
 
     @property
@@ -329,38 +393,38 @@ class PlaceCellDataset:
                 except (KeyError, IndexError):
                     pass
 
-            self.unit_results[unit_id] = {
-                "rate_map": result["rate_map"],
-                "rate_map_raw": result["rate_map_raw"],
-                "si": result["si"],
-                "shuffled_sis": result["shuffled_sis"],
-                "shuffled_rate_p95": result["shuffled_rate_p95"],
-                "p_val": result["p_val"],
-                "stability_corr": result["stability_corr"],
-                "stability_z": result["stability_z"],
-                "stability_p_val": result["stability_p_val"],
-                "rate_map_first": result["rate_map_first"],
-                "rate_map_second": result["rate_map_second"],
-                "vis_data_above": vis_data_above,
-                "vis_data_below": vis_data_below,
-                "unit_data": result["unit_data"],
-                "trace_data": trace_data,
-                "trace_times": trace_times,
-            }
+            self.unit_results[unit_id] = UnitResult(
+                rate_map=result["rate_map"],
+                rate_map_raw=result["rate_map_raw"],
+                si=result["si"],
+                shuffled_sis=result["shuffled_sis"],
+                shuffled_rate_p95=result["shuffled_rate_p95"],
+                p_val=result["p_val"],
+                stability_corr=result["stability_corr"],
+                stability_z=result["stability_z"],
+                stability_p_val=result["stability_p_val"],
+                rate_map_first=result["rate_map_first"],
+                rate_map_second=result["rate_map_second"],
+                vis_data_above=vis_data_above,
+                vis_data_below=vis_data_below,
+                unit_data=result["unit_data"],
+                trace_data=trace_data,
+                trace_times=trace_times,
+            )
 
         logger.info("Done. %d units analyzed.", len(self.unit_results))
 
-    def place_cells(self) -> dict[int, dict]:
+    def place_cells(self) -> dict[int, UnitResult]:
         """Return units passing both significance and stability tests."""
         p_thresh = self.spatial.p_value_threshold or 0.05
         stab_thresh = self.spatial.stability_threshold
 
-        out = {}
+        out: dict[int, UnitResult] = {}
         for uid, res in self.unit_results.items():
-            if res["p_val"] >= p_thresh:
+            if res.p_val >= p_thresh:
                 continue
-            stab_corr = res.get("stability_corr", np.nan)
-            stab_p = res.get("stability_p_val", np.nan)
+            stab_corr = res.stability_corr
+            stab_p = res.stability_p_val
             if np.isnan(stab_corr):
                 continue
             if not np.isnan(stab_p):
@@ -371,6 +435,52 @@ class PlaceCellDataset:
                     continue
             out[uid] = res
         return out
+
+    def summary(self) -> dict[str, int]:
+        """Compute summary counts of significant and stable units.
+
+        Returns
+        -------
+        dict
+            Keys: ``n_total``, ``n_sig``, ``n_stable_thresh``,
+            ``n_stable_shuffle``, ``n_both_thresh``, ``n_both_shuffle``.
+        """
+        p_thresh = self.spatial.p_value_threshold or 0.05
+        stab_thresh = self.spatial.stability_threshold
+
+        n_sig = 0
+        n_stable_thresh = 0
+        n_stable_shuffle = 0
+        n_both_thresh = 0
+        n_both_shuffle = 0
+
+        for res in self.unit_results.values():
+            is_sig = res.p_val < p_thresh
+            corr = res.stability_corr
+            stab_p = res.stability_p_val
+
+            is_stable_thresh = not np.isnan(corr) and corr >= stab_thresh
+            is_stable_shuffle = not np.isnan(stab_p) and stab_p < p_thresh
+
+            if is_sig:
+                n_sig += 1
+            if is_stable_thresh:
+                n_stable_thresh += 1
+            if is_stable_shuffle:
+                n_stable_shuffle += 1
+            if is_sig and is_stable_thresh:
+                n_both_thresh += 1
+            if is_sig and is_stable_shuffle:
+                n_both_shuffle += 1
+
+        return {
+            "n_total": len(self.unit_results),
+            "n_sig": n_sig,
+            "n_stable_thresh": n_stable_thresh,
+            "n_stable_shuffle": n_stable_shuffle,
+            "n_both_thresh": n_both_thresh,
+            "n_both_shuffle": n_both_shuffle,
+        }
 
     def coverage(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Compute place field coverage map and curve.
@@ -392,3 +502,305 @@ class PlaceCellDataset:
             min_bins=scfg.place_field_min_bins,
         )
         return coverage_map, n_cells, fractions
+
+    # ── Bundle I/O ──────────────────────────────────────────────────────
+
+    def save_bundle(self, path: str | Path) -> Path:
+        """Save all analysis results to a portable ``.pcellbundle`` directory.
+
+        The bundle is self-contained: it stores config, behavior, neural,
+        and per-unit analysis results so that visualizations can be
+        recreated without access to the original raw data.
+
+        Parameters
+        ----------
+        path:
+            Output directory. ``.pcellbundle`` is appended if not present.
+
+        Returns
+        -------
+        Path
+            The bundle directory that was created.
+        """
+        path = Path(path)
+        if path.suffix != ".pcellbundle":
+            path = path.with_suffix(".pcellbundle")
+        path.mkdir(parents=True, exist_ok=True)
+
+        # Metadata
+        meta = {
+            "version": _BUNDLE_VERSION,
+            "created": datetime.now(UTC).isoformat(),
+        }
+        (path / "metadata.json").write_text(json.dumps(meta, indent=2))
+
+        # Config
+        self.cfg.to_yaml(path / "config.yaml")
+
+        # Spatial arrays
+        spatial_kw: dict[str, np.ndarray] = {}
+        if self.occupancy_time is not None:
+            spatial_kw["occupancy_time"] = self.occupancy_time
+        if self.valid_mask is not None:
+            spatial_kw["valid_mask"] = self.valid_mask
+        if self.x_edges is not None:
+            spatial_kw["x_edges"] = self.x_edges
+        if self.y_edges is not None:
+            spatial_kw["y_edges"] = self.y_edges
+        if self.max_proj is not None:
+            spatial_kw["max_proj"] = self.max_proj
+        if spatial_kw:
+            np.savez_compressed(path / "spatial.npz", **spatial_kw)
+
+        # xarray DataArrays
+        if self.footprints is not None:
+            self.footprints.to_netcdf(path / "footprints.nc")
+        if self.traces is not None:
+            self.traces.to_netcdf(path / "traces.nc")
+
+        # DataFrames
+        for name, df in [
+            ("trajectory", self.trajectory),
+            ("trajectory_filtered", self.trajectory_filtered),
+            ("event_index", self.event_index),
+            ("event_place", self.event_place),
+        ]:
+            if df is not None:
+                df.to_parquet(path / f"{name}.parquet")
+
+        # Deconvolution data
+        deconv_kw: dict[str, np.ndarray] = {}
+        if self.good_unit_ids:
+            deconv_kw["good_unit_ids"] = np.array(self.good_unit_ids)
+        for i, c in enumerate(self.C_list):
+            deconv_kw[f"C_{i}"] = c
+        for i, s in enumerate(self.S_list):
+            deconv_kw[f"S_{i}"] = s
+        if deconv_kw:
+            np.savez_compressed(path / "deconv.npz", **deconv_kw)
+
+        # Unit results
+        if self.unit_results:
+            ur_dir = path / "unit_results"
+            ur_dir.mkdir(exist_ok=True)
+            self._save_unit_results(ur_dir)
+
+        logger.info("Bundle saved to %s", path)
+        return path
+
+    def _save_unit_results(self, ur_dir: Path) -> None:
+        """Serialize unit_results into *ur_dir*."""
+        scalar_fields = [
+            "si",
+            "p_val",
+            "stability_corr",
+            "stability_z",
+            "stability_p_val",
+        ]
+        array_fields = [
+            "rate_map",
+            "rate_map_raw",
+            "shuffled_sis",
+            "shuffled_rate_p95",
+            "rate_map_first",
+            "rate_map_second",
+            "trace_data",
+            "trace_times",
+        ]
+        df_fields = ["vis_data_above", "vis_data_below", "unit_data"]
+
+        # Scalars → CSV
+        rows = []
+        for uid, res in self.unit_results.items():
+            row = {"unit_id": uid}
+            for f in scalar_fields:
+                row[f] = getattr(res, f)
+            rows.append(row)
+        pd.DataFrame(rows).to_csv(ur_dir / "scalars.csv", index=False)
+
+        # Arrays → NPZ
+        arrays: dict[str, np.ndarray] = {}
+        for uid, res in self.unit_results.items():
+            for f in array_fields:
+                val = getattr(res, f)
+                if val is not None:
+                    arrays[f"{uid}_{f}"] = val
+        if arrays:
+            np.savez_compressed(ur_dir / "arrays.npz", **arrays)
+
+        # DataFrames → single parquet (concatenated with identifiers)
+        parts = []
+        for uid, res in self.unit_results.items():
+            for f in df_fields:
+                df = getattr(res, f)
+                if df is not None and not df.empty:
+                    chunk = df.copy()
+                    chunk["_unit_id"] = uid
+                    chunk["_field"] = f
+                    parts.append(chunk)
+        if parts:
+            pd.concat(parts, ignore_index=True).to_parquet(ur_dir / "events.parquet")
+
+    @classmethod
+    def load_bundle(cls, path: str | Path) -> "PlaceCellDataset":
+        """Load a previously saved ``.pcellbundle`` directory.
+
+        Parameters
+        ----------
+        path:
+            Path to the ``.pcellbundle`` directory.
+
+        Returns
+        -------
+        PlaceCellDataset
+            Dataset with all attributes restored. Recomputation methods
+            (``load``, ``deconvolve``, etc.) are unavailable since the
+            original raw data paths are not preserved.
+        """
+        path = Path(path)
+        if not path.is_dir():
+            raise FileNotFoundError(f"Bundle not found: {path}")
+
+        # Metadata
+        meta = json.loads((path / "metadata.json").read_text())
+        if meta["version"] > _BUNDLE_VERSION:
+            raise ValueError(
+                f"Bundle version {meta['version']} is newer than supported ({_BUNDLE_VERSION})"
+            )
+
+        # Config
+        cfg = AnalysisConfig.from_yaml(path / "config.yaml")
+        ds = cls(cfg)
+
+        # Spatial arrays
+        spatial_path = path / "spatial.npz"
+        if spatial_path.exists():
+            spatial = np.load(spatial_path)
+            ds.occupancy_time = spatial.get("occupancy_time")
+            ds.valid_mask = spatial.get("valid_mask")
+            ds.x_edges = spatial.get("x_edges")
+            ds.y_edges = spatial.get("y_edges")
+            ds.max_proj = spatial.get("max_proj")
+
+        # xarray DataArrays
+        fp_path = path / "footprints.nc"
+        if fp_path.exists():
+            ds.footprints = xr.open_dataarray(fp_path).load()
+        tr_path = path / "traces.nc"
+        if tr_path.exists():
+            ds.traces = xr.open_dataarray(tr_path).load()
+
+        # DataFrames
+        for name in ["trajectory", "trajectory_filtered", "event_index", "event_place"]:
+            pq = path / f"{name}.parquet"
+            if pq.exists():
+                setattr(ds, name, pd.read_parquet(pq))
+
+        # Deconvolution data
+        deconv_path = path / "deconv.npz"
+        if deconv_path.exists():
+            deconv = np.load(deconv_path)
+            if "good_unit_ids" in deconv:
+                ds.good_unit_ids = list(deconv["good_unit_ids"])
+            i = 0
+            while f"C_{i}" in deconv:
+                ds.C_list.append(deconv[f"C_{i}"])
+                i += 1
+            i = 0
+            while f"S_{i}" in deconv:
+                ds.S_list.append(deconv[f"S_{i}"])
+                i += 1
+
+        # Unit results
+        ur_dir = path / "unit_results"
+        if ur_dir.is_dir():
+            ds.unit_results = cls._load_unit_results(ur_dir)
+
+        logger.info(
+            "Loaded bundle: %d units, %d results",
+            len(ds.good_unit_ids),
+            len(ds.unit_results),
+        )
+        return ds
+
+    @staticmethod
+    def _load_unit_results(ur_dir: Path) -> dict[int, "UnitResult"]:
+        """Reconstruct unit_results from saved files."""
+        scalar_fields = [
+            "si",
+            "p_val",
+            "stability_corr",
+            "stability_z",
+            "stability_p_val",
+        ]
+        array_fields = [
+            "rate_map",
+            "rate_map_raw",
+            "shuffled_sis",
+            "shuffled_rate_p95",
+            "rate_map_first",
+            "rate_map_second",
+            "trace_data",
+            "trace_times",
+        ]
+        df_fields = ["vis_data_above", "vis_data_below", "unit_data"]
+
+        # Read scalars
+        scalars_df = pd.read_csv(ur_dir / "scalars.csv")
+        unit_ids = scalars_df["unit_id"].tolist()
+
+        scalars_by_uid: dict[int, dict] = {}
+        for _, row in scalars_df.iterrows():
+            uid = int(row["unit_id"])
+            scalars_by_uid[uid] = {f: row[f] for f in scalar_fields}
+
+        # Read arrays
+        arrays_by_uid: dict[int, dict] = {uid: {} for uid in unit_ids}
+        arrays_path = ur_dir / "arrays.npz"
+        if arrays_path.exists():
+            arrays_npz = np.load(arrays_path)
+            for key in arrays_npz.files:
+                # key format: "{uid}_{field}"
+                parts = key.split("_", 1)
+                uid = int(parts[0])
+                field = parts[1]
+                if uid in arrays_by_uid:
+                    arrays_by_uid[uid][field] = arrays_npz[key]
+
+        # Read events
+        events_by_uid: dict[int, dict] = {uid: {} for uid in unit_ids}
+        events_path = ur_dir / "events.parquet"
+        if events_path.exists():
+            events_df = pd.read_parquet(events_path)
+            for (uid, field), group in events_df.groupby(["_unit_id", "_field"]):
+                uid = int(uid)
+                if uid in events_by_uid:
+                    events_by_uid[uid][field] = group.drop(
+                        columns=["_unit_id", "_field"]
+                    ).reset_index(drop=True)
+
+        # Assemble UnitResult objects
+        results: dict[int, UnitResult] = {}
+        for uid in unit_ids:
+            sc = scalars_by_uid[uid]
+            ar = arrays_by_uid.get(uid, {})
+            ev = events_by_uid.get(uid, {})
+            results[uid] = UnitResult(
+                rate_map=ar.get("rate_map", np.array([])),
+                rate_map_raw=ar.get("rate_map_raw", np.array([])),
+                si=float(sc["si"]),
+                p_val=float(sc["p_val"]),
+                shuffled_sis=ar.get("shuffled_sis", np.array([])),
+                shuffled_rate_p95=ar.get("shuffled_rate_p95"),
+                stability_corr=float(sc["stability_corr"]),
+                stability_z=float(sc["stability_z"]),
+                stability_p_val=float(sc["stability_p_val"]),
+                rate_map_first=ar.get("rate_map_first", np.array([])),
+                rate_map_second=ar.get("rate_map_second", np.array([])),
+                vis_data_above=ev.get("vis_data_above", pd.DataFrame()),
+                vis_data_below=ev.get("vis_data_below", pd.DataFrame()),
+                unit_data=ev.get("unit_data", pd.DataFrame()),
+                trace_data=ar.get("trace_data"),
+                trace_times=ar.get("trace_times"),
+            )
+        return results

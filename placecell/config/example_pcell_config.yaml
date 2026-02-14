@@ -17,7 +17,7 @@ behavior:
   behavior_fps: 20.0
   speed_threshold: 10.0
   speed_window_frames: 5
-  bodypart: LED_clean
+  bodypart: LED
   spatial_map:
     id: spatial_map
     bins: 50

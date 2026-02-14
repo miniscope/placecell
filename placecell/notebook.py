@@ -252,7 +252,7 @@ def create_unit_browser(
         ax1.axis("off")
 
         # 2. Trajectory + events
-        vis_data_above = result["vis_data_above"]
+        vis_data_above = result.vis_data_above
         ax2.plot(trajectory_df["x"], trajectory_df["y"], "k-", alpha=1.0, linewidth=0.8, zorder=1)
 
         if not vis_data_above.empty:
@@ -286,9 +286,9 @@ def create_unit_browser(
         ax2.axis("off")
 
         # 3. Rate maps (first half, second half, full)
-        rate_map_first = result.get("rate_map_first", np.full_like(result["rate_map"], np.nan))
-        rate_map_second = result.get("rate_map_second", np.full_like(result["rate_map"], np.nan))
-        stab_corr = result.get("stability_corr", np.nan)
+        rate_map_first = result.rate_map_first
+        rate_map_second = result.rate_map_second
+        stab_corr = result.stability_corr
 
         # Plot first half
         im1 = ax3a.imshow(rate_map_first.T, origin="lower", cmap="jet", aspect="equal")
@@ -301,12 +301,12 @@ def create_unit_browser(
         ax3b.axis("off")
 
         # Plot full session with red contour
-        im3 = ax3c.imshow(result["rate_map"].T, origin="lower", cmap="jet", aspect="equal")
+        im3 = ax3c.imshow(result.rate_map.T, origin="lower", cmap="jet", aspect="equal")
         field_mask_full = compute_place_field_mask(
-            result["rate_map"],
+            result.rate_map,
             threshold=place_field_threshold,
             min_bins=place_field_min_bins,
-            shuffled_rate_p95=result.get("shuffled_rate_p95"),
+            shuffled_rate_p95=result.shuffled_rate_p95,
         )
         if np.any(field_mask_full):
             ax3c.contour(
@@ -322,18 +322,18 @@ def create_unit_browser(
         im3.set_clim(0.0, 1.0)
 
         # 4. SI histogram
-        ax4.hist(result["shuffled_sis"], bins=15, color="gray", alpha=0.7, edgecolor="black")
-        ax4.axvline(result["si"], color="red", linestyle="--", linewidth=2)
-        ax4.set_title(f"SI: {result['si']:.2f}, p={result['p_val']:.3f}", fontsize=9)
+        ax4.hist(result.shuffled_sis, bins=15, color="gray", alpha=0.7, edgecolor="black")
+        ax4.axvline(result.si, color="red", linestyle="--", linewidth=2)
+        ax4.set_title(f"SI: {result.si:.2f}, p={result.p_val:.3f}", fontsize=9)
         ax4.set_xlabel("SI (bits/s)", fontsize=8)
         ax4.set_ylabel("Count", fontsize=8)
         ax4.tick_params(labelsize=7)
         ax4.set_box_aspect(1)
 
         # 5. Trace
-        if result["trace_data"] is not None and result["trace_times"] is not None:
-            trace = result["trace_data"]
-            t_full = result["trace_times"]
+        if result.trace_data is not None and result.trace_times is not None:
+            trace = result.trace_data
+            t_full = result.trace_times
 
             t_max = t_full[-1] if len(t_full) > 0 else trace_time_window
             t_start = max(0, trace_start)
@@ -419,10 +419,10 @@ def create_unit_browser(
             ax5.text(0.5, 0.5, "No trace data", ha="center", va="center", fontsize=8)
 
         # Status text
-        n_events = len(result["unit_data"]) if not result["unit_data"].empty else 0
-        p_val = result["p_val"]
-        stab_corr = result.get("stability_corr", np.nan)
-        stab_p = result.get("stability_p_val", np.nan)
+        n_events = len(result.unit_data) if not result.unit_data.empty else 0
+        p_val = result.p_val
+        stab_corr = result.stability_corr
+        stab_p = result.stability_p_val
 
         sig_pass = p_val < p_value_threshold
         sig_text = "pass" if sig_pass else "fail"
@@ -489,8 +489,8 @@ def create_unit_browser(
     # Get max trace time
     max_trace_time = 0.0
     for r in unit_results.values():
-        if r["trace_times"] is not None and len(r["trace_times"]) > 0:
-            max_trace_time = max(max_trace_time, r["trace_times"][-1])
+        if r.trace_times is not None and len(r.trace_times) > 0:
+            max_trace_time = max(max_trace_time, r.trace_times[-1])
 
     # Widgets
     unit_slider = widgets.IntSlider(
