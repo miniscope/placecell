@@ -619,7 +619,7 @@ def compute_unit_analysis(
     occupancy_sigma: float = 0.0,
     min_shift_seconds: float = 0.0,
     si_weight_mode: str = "amplitude",
-    place_field_seed_percentile: float | None = 95.0,
+    place_field_seed_percentile: float = 95.0,
 ) -> dict:
     """Compute rate map, spatial information, stability, and thresholded events for a unit.
 
@@ -657,8 +657,7 @@ def compute_unit_analysis(
         Weight mode for SI: ``"amplitude"`` or ``"binary"``.
     place_field_seed_percentile:
         Percentile of shuffled rate maps for seed detection (Guo et al.
-        2023).  ``None`` skips the computation and uses the simplified
-        threshold-only algorithm (faster).
+        2023).
 
     Returns
     -------
@@ -701,24 +700,21 @@ def compute_unit_analysis(
         events_above = pd.DataFrame()
 
     # Shuffled rate percentile for place field seed detection (Guo et al. 2023)
-    if place_field_seed_percentile is not None:
-        shuffled_rate_p95 = compute_shuffled_rate_percentile(
-            unit_data,
-            trajectory_df,
-            occupancy_time,
-            valid_mask,
-            x_edges,
-            y_edges,
-            activity_sigma=activity_sigma,
-            n_shuffles=n_shuffles,
-            min_shift_seconds=min_shift_seconds,
-            behavior_fps=behavior_fps,
-            si_weight_mode=si_weight_mode,
-            random_seed=random_seed,
-            percentile=place_field_seed_percentile,
-        )
-    else:
-        shuffled_rate_p95 = None
+    shuffled_rate_p95 = compute_shuffled_rate_percentile(
+        unit_data,
+        trajectory_df,
+        occupancy_time,
+        valid_mask,
+        x_edges,
+        y_edges,
+        activity_sigma=activity_sigma,
+        n_shuffles=n_shuffles,
+        min_shift_seconds=min_shift_seconds,
+        behavior_fps=behavior_fps,
+        si_weight_mode=si_weight_mode,
+        random_seed=random_seed,
+        percentile=place_field_seed_percentile,
+    )
 
     # Stability test
     stability_corr, stability_z, stability_p_val, rate_map_first, rate_map_second = (
@@ -803,9 +799,9 @@ def compute_raw_rate_map(
 
 def compute_place_field_mask(
     rate_map: np.ndarray,
+    shuffled_rate_p95: np.ndarray,
     threshold: float = 0.05,
     min_bins: int = 5,
-    shuffled_rate_p95: np.ndarray | None = None,
 ) -> np.ndarray:
     """Compute a binary mask of the place field from a rate map.
 
@@ -818,10 +814,6 @@ def compute_place_field_mask(
     2. **Extension**: from each seed region, extend to all contiguous
        bins whose rate >= ``threshold`` × (seed region's peak rate).
 
-    If ``shuffled_rate_p95`` is not provided, falls back to the
-    simplified threshold-only algorithm (threshold + connected-component
-    size filter).
-
     Parameters
     ----------
     rate_map:
@@ -830,11 +822,9 @@ def compute_place_field_mask(
     threshold:
         Fraction of peak rate for field extension (step 2).
     min_bins:
-        Minimum number of contiguous bins for a seed region (step 1)
-        or for a component in the simplified fallback.
+        Minimum number of contiguous bins for a seed region (step 1).
     shuffled_rate_p95:
         Per-bin 95th percentile of shuffled normalized rate maps.
-        When provided, enables the full seed-extension algorithm.
 
     Returns
     -------
@@ -848,20 +838,6 @@ def compute_place_field_mask(
     peak = np.nanmax(rate_map)
     if peak <= 0:
         return mask
-
-    if shuffled_rate_p95 is None:
-        # Simplified fallback: threshold + connected-component size filter
-        raw_mask = valid & (rate_map >= threshold * peak)
-        if min_bins <= 1:
-            return raw_mask
-        labeled, n_components = label(raw_mask)
-        for comp_id in range(1, n_components + 1):
-            comp = labeled == comp_id
-            if comp.sum() >= min_bins:
-                mask |= comp
-        return mask
-
-    # --- Full Guo et al. 2023 algorithm ---
 
     # Step 1: Identify significant seed bins (rate > 95th percentile of shuffle)
     sig_bins = valid & (rate_map > shuffled_rate_p95)

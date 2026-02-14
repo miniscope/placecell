@@ -566,7 +566,7 @@ def browse_units(
         trace_name=ds.cfg.neural.trace_name,
         neural_fps=ds.neural_fps,
         speed_threshold=ds.cfg.behavior.speed_threshold,
-        p_value_threshold=scfg.p_value_threshold or 0.05,
+        p_value_threshold=scfg.p_value_threshold,
         trace_time_window=scfg.trace_time_window,
         place_field_threshold=place_field_threshold or scfg.place_field_threshold,
         place_field_min_bins=scfg.place_field_min_bins,

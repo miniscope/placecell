@@ -47,7 +47,6 @@ class NeuralConfig(BaseModel):
     )
 
 
-
 class SpatialMapConfig(BaseModel):
     """Spatial map visualization configuration."""
 
@@ -89,13 +88,13 @@ class SpatialMapConfig(BaseModel):
         description="Sigma multiplier for event amplitude threshold in trajectory plot. "
         "Can be negative to include lower-amplitude events.",
     )
-    p_value_threshold: float | None = Field(
-        None,
+    p_value_threshold: float = Field(
+        0.05,
         ge=0.0,
         le=1.0,
         description=(
             "P-value threshold for significance test pass/fail. "
-            "Units with p-value < threshold pass. Default 0.05 if None."
+            "Units with p-value < threshold pass."
         ),
     )
     min_shift_seconds: float = Field(
@@ -136,14 +135,12 @@ class SpatialMapConfig(BaseModel):
             "disconnected regions are discarded. Set to 1 to disable."
         ),
     )
-    place_field_seed_percentile: float | None = Field(
+    place_field_seed_percentile: float = Field(
         95.0,
         description=(
             "Percentile of shuffled rate maps for place field seed detection "
             "(Guo et al. 2023). Bins exceeding this percentile form seeds; "
-            "seeds extend to contiguous bins above place_field_threshold. "
-            "Set to null to skip seed detection and use simplified "
-            "threshold-only algorithm (faster)."
+            "seeds extend to contiguous bins above place_field_threshold."
         ),
     )
     trace_time_window: float = Field(

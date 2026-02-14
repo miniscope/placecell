@@ -6,147 +6,168 @@ This document explains how the spatial neural activity analysis pipeline works.
 
 :::{dropdown} Pipeline Flowchart
 ```mermaid
-flowchart LR
+flowchart TD
     subgraph Input
-        A[("{trace_name}.zarr")]
-        A2[("A.zarr (optional)")]
-        A3[("max_proj.zarr (optional)")]
-        B[(neural_timestamp.csv)]
-        C[(behavior_position.csv)]
-        D[(behavior_timestamp.csv)]
-    end
-
-    subgraph Neural Processing
-        A --> E(Deconvolution)
-        E --> F[(event_index.csv)]
-    end
-
-    subgraph Event-Behavior Alignment
-        F --> G(Event-Place Matching)
-        B --> G
-        C --> G
-        D --> G
-        G --> R(Speed Filter)
-        R --> H[(event_place.csv)]
-    end
-
-    subgraph pcell plot
-        A --> O
-        A2 --> O
-        A3 --> O
-        F --> O
-        Q --> P
-        H --> P
-        J --> P
-        K --> P
-        L --> P
-        N --> P
-        S --> P
-        subgraph Spatial Analysis
-            C --> I(Speed Filter)
-            D --> I
-            I --> Q[(Filtered Trajectory)]
-            Q --> J(Occupancy Map)
-            H --> K(Rate Map)
-            J --> K
-            K --> L(Spatial Information)
-            K --> S(Stability Test)
-            L --> N(Significance Test)
+        subgraph Neural
+            A[("traces (.zarr)")]
+            B[("timestamp (.csv)")]
         end
-
-        subgraph Display
-            O[[Neural Data]] --> M(Place Cell Viewer)
-            P[[Spatial Maps]] --> M
+        subgraph Behavior
+            C[("position (.csv)")]
+            D[("timestamp (.csv)")]
         end
+    end
 
+    subgraph load ["ds.load()"]
+        A --> traces[Calcium Traces]
+        C --> load_beh("Load Positions<br/>• Compute Speed")
+        D --> load_beh
+        load_beh --> traj["Trajectory"]
+    end
+
+    subgraph preprocess ["ds.preprocess_behavior()"]
+        traj --> PP("• Jump Removal<br/>• Perspective Correction<br/>• Boundary Clipping<br/>• Recompute Speed (mm/s)")
+        PP --> SF(Speed Filter)
+        SF --> traj_filt[Filtered Trajectory]
+    end
+
+    subgraph deconv ["ds.deconvolve()"]
+        traces --> OASIS(OASIS AR2 Deconvolution)
+        OASIS --> S_list[Event Trains]
+        OASIS --> event_idx[(event_index)]
+    end
+
+    subgraph match ["ds.match_events()"]
+        event_idx --> EM("• Timestamp Matching<br/>• Speed Filter")
+        B --> EM
+        traj --> EM
+        EM --> event_place[(event_place)]
+    end
+
+    subgraph occupancy ["ds.compute_occupancy()"]
+        traj_filt --> OCC(Occupancy Map)
+    end
+
+    event_place --> unit_input["• Events<br/>• Occupancy<br/>• Filtered Trajectory"]
+    OCC --> unit_input
+    traj_filt --> unit_input
+
+    subgraph analyze ["ds.analyze_units() — per unit"]
+        unit_input --> RM(Rate Map)
+        unit_input --> SI("Spatial Information<br/>+ Shuffle Test")
+        SI --> pval[SI p-value]
+        unit_input --> RATE_SHUF("Shuffled Rate<br/>Percentile")
+        RATE_SHUF --> PF("Place Field Detection")
+        unit_input --> STAB("Split-Half Stability<br/>+ Shuffle Test")
+        STAB --> stab_p[Stability p-value]
+    end
+
+    subgraph results [Results]
+        pval --> PC{"Place Cell<br/>Classification"}
+        stab_p --> PC
+        PF --> COV(Coverage Analysis)
+        PC --> browse(Interactive Browser)
+        COV --> browse
     end
 ```
 :::
 
 ## Data Files
 
-**Input files (in `neural_path` directory):**
-- `{trace_name}.zarr`: calcium traces (frames × units), name specified by `trace_name` in config (e.g., `C.zarr` or `C_lp.zarr`)
+**Neural inputs** (in `neural_path` directory):
+- `{trace_name}.zarr`: calcium traces (frames × units). Name set by `trace_name` in config (e.g. `C.zarr`, `C_lp.zarr`)
 - `A.zarr`: spatial footprints for cell contour overlay (optional)
 - `max_proj.zarr`: max projection image for visualization background (optional)
 
-**Other input files:**
-- `neural_timestamp.csv`: neural frame timestamps
-- `behavior_position.csv`: animal position (x, y per frame, DeepLabCut format with bodypart columns)
+**Behavior inputs:**
+- `neural_timestamp.csv`: neural frame timestamps (frame, timestamp_first, timestamp_last)
+- `behavior_position.csv`: animal position per frame (DeepLabCut format with bodypart columns)
 - `behavior_timestamp.csv`: behavior frame timestamps
 
-**Intermediate files:**
-- `event_index.csv`: deconvolved neural events (frame, unit_id, amplitude)
-- `event_place.csv`: events matched to position with speed (frame, unit_id, x, y, speed) - only includes events during movement above speed threshold
+**Intermediate DataFrames** (generated during pipeline):
+- `event_index`: deconvolved neural events (frame, unit_id, amplitude `s`)
+- `event_place`: events matched to position with speed (unit_id, frame, s, x, y, speed) — only events above `speed_threshold`
 
 ## Processing Steps
 
-### Step 1: Deconvolution
+### `ds.load()`
 
-Runs `pcell deconvolve` internally:
+- Load calcium traces from `{trace_name}.zarr`
+- Load behavior position and timestamps → compute raw speed (px/s)
+- Load visualization assets (max_proj, footprints, behavior video frame)
 
-- Load calcium traces from `neural_path`
-- Apply OASIS deconvolution to extract neural events
-- Output: `spike_index_{label}.csv` with frame, unit_id, amplitude
+### `ds.preprocess_behavior()`
 
-### Step 2: Event-Behavior Alignment
+Saves a copy of the raw trajectory in `trajectory_raw`, then applies corrections and speed filtering.
 
-Runs event-place matching internally:
+**When `arena_bounds` is configured** (full pipeline):
 
-- Load event index from step 1
-- Load behavior position and timestamps
-- Compute speed from position data
-- For each event, find corresponding behavior frame and position
-- Filter out events that occurred when animal speed was below threshold
-- Output: `spike_place_{label}.csv` with x, y, speed per event
+1. **Jump removal**: interpolate frame-to-frame displacements exceeding `jump_threshold_mm`
+2. **Perspective correction**: correct for camera angle using `camera_height_mm` and `tracking_height_mm`
+3. **Boundary clipping**: clip positions to `arena_bounds`
+4. **Recompute speed**: recalculate speed in mm/s from corrected positions
+5. **Speed filter**: apply `speed_threshold` → `trajectory_filtered`
 
-### Step 3: Spatial Analysis and Display
+**When `arena_bounds` is not configured** (fallback with warnings):
 
-Launches `pcell plot` with the processed data.
+- Spatial corrections are skipped (jump removal, perspective correction, boundary clipping)
+- Speed and position remain in pixels
+- Speed filter is still applied → `trajectory_filtered`
 
-**Inputs:**
-- `spike_place.csv` from step 2
-- `spike_index.csv` from step 1 (optional, for trace view)
-- `behavior_position.csv`, `behavior_timestamp.csv`
-- `neural_path` (C.zarr, A.zarr, max_proj.zarr)
+### `ds.deconvolve()`
 
-**Processing:**
-- **Speed Filter**: exclude trajectory time points where speed < `speed_threshold`
-- **Occupancy Map**: 2D histogram of time spent in each spatial bin
-- **Rate Map**: event counts / occupancy time, smoothed with `activity_sigma`
-- **Spatial Information**: bits/event using Skaggs formula with shuffle test
-- **Stability Test**: split-half correlation comparing first and second half rate maps
-- **P-value Filter**: if `p_value_threshold` is set, filter to significant units
+- Run OASIS AR2 deconvolution on each unit's calcium trace
+- Parameters: `g` (AR coefficients), `baseline`, `penalty`, `s_min`
+- Output: `good_unit_ids`, spike trains (`S_list`), `event_index`
 
-**Place Field Detection** (Guo et al. 2023):
-- **Shuffled rate percentile**: for each unit, circular-shift shuffles produce a per-bin 95th percentile rate threshold
-- **Seed detection**: bins exceeding the 95th percentile form seeds; only contiguous seed regions with ≥ `place_field_min_bins` bins are kept
-- **Extension**: each seed region extends to contiguous bins with rate ≥ `place_field_threshold` × (seed's peak rate)
-- Red contours on rate maps show the resulting place field boundaries
+### `ds.match_events()`
 
-**Coverage Analysis:**
-- **Coverage map**: sum of place field masks across place cells (how many cells cover each bin)
+- For each neural event, find the closest behavior frame by timestamp
+- Discard matches where timestamp difference exceeds 0.5 / `behavior_fps`
+- Filter out events where animal speed was below `speed_threshold`
+- Output: `event_place`
+
+### `ds.compute_occupancy()`
+
+- Compute 2D occupancy histogram from `trajectory_filtered`
+- Smooth with `occupancy_sigma`, mask bins below `min_occupancy`
+- Output: `occupancy_time`, `valid_mask`, bin edges
+
+### `ds.analyze_units()` — per unit
+
+Four independent computations from the same inputs (events, filtered trajectory, occupancy):
+
+- **Rate map**: event weights / occupancy time, smoothed with `activity_sigma` (for display)
+- **Spatial information + shuffle test**: Skaggs SI with circular-shift shuffle → SI p-value
+- **Shuffled rate percentile**: per-bin percentile of shuffled rate maps → used for place field seed detection
+- **Split-half stability + shuffle test**: correlation between first/second half rate maps with circular-shift shuffle → stability p-value
+
+**Place cell classification**: units with SI p-value < `p_value_threshold` AND stability p-value < `p_value_threshold`.
+
+**Place field detection** (Guo et al. 2023):
+1. **Seed detection**: bins where rate exceeds the shuffled rate percentile. Only contiguous seed regions with ≥ `place_field_min_bins` bins are kept
+2. **Extension**: each seed region extends to contiguous bins with rate ≥ `place_field_threshold` × (seed's peak rate)
+
+### Results
+
+- **Coverage map**: sum of place field masks across place cells
 - **Coverage curve**: cells sorted by field size (largest first), cumulative fraction of environment covered
-
-**Display:**
-- Max projection with cell footprint overlay
-- Trajectory with event locations (only events above speed threshold)
-- Rate map (normalized event rate) with place field contour
-- SI histogram (actual SI vs shuffle distribution)
-- Stability correlation with first/second half rate maps
-- Scrollable trace view at bottom
+- **Interactive browser**: max projection overlay, trajectory with events, rate map with place field contour, SI histogram, stability maps, trace view
 
 ## Key Parameters
 
-- `speed_threshold`: minimum speed to include data (filters both trajectory and events)
-- `min_occupancy`: minimum time per bin to be valid
-- `bins`: spatial resolution (number of bins)
+- `speed_threshold`: minimum speed to include data (mm/s)
+- `min_occupancy`: minimum time per bin to be valid (seconds)
+- `bins`: spatial resolution (number of bins per axis)
 - `occupancy_sigma`: Gaussian smoothing sigma for occupancy map (in bins)
 - `activity_sigma`: Gaussian smoothing sigma for rate map (in bins)
-- `n_shuffles`: number of shuffle iterations for p-value calculation
-- `p_value_threshold`: filter units by spatial information significance
-- `place_field_threshold`: fraction of peak rate for place field boundary (red contour)
-- `place_field_min_bins`: minimum contiguous bins for a place field component (filters isolated spots)
+- `n_shuffles`: number of circular-shift shuffle iterations
+- `min_shift_seconds`: minimum circular shift for shuffle test (seconds)
+- `p_value_threshold`: p-value threshold for both SI and stability significance
+- `si_weight_mode`: `"amplitude"` (event amplitudes) or `"binary"` (event counts)
+- `place_field_threshold`: fraction of peak rate for place field extension
+- `place_field_min_bins`: minimum contiguous bins for a place field seed
+- `place_field_seed_percentile`: percentile of shuffled rates for seed detection
 
 ## Configuration Reference
 
@@ -169,41 +190,41 @@ behavior_timestamp: path/to/behavior_timestamp.csv
 :::{dropdown} pcell_config.yaml
 ```yaml
 id: pcell_config
-mio_model: placecell.config.AnalysisConfig
+mio_model: pcell.config.AnalysisConfig
 mio_version: 0.8.1
 neural:
   id: neural
   fps: 20.0
   oasis:
     id: oasis
-    g: [1.60, -0.63]  # AR(2) coefficients, null to estimate from data
+    g: [1.60, -0.63]  # AR(2) coefficients (required, usually overridden by data config)
     baseline: p10
-    penalty: 0  # Sparsity penalty (higher = fewer events). Default 0.
-    optimize_g: 0  # Number of events to use for optimizing AR coefficients. 0 = no optimization (default).
-    lambda_: null  # Regularization parameter. null = auto-determined.
-    s_min: null  # Minimum event size. Positive = direct threshold, negative = calculated, 0 = auto, null = default.
+    penalty: 0.8  # Sparsity penalty (higher = fewer events). Default 0.
+    s_min: 0  # Minimum event size threshold. Default 0.
   trace_name: C_lp
 
 behavior:
   id: behavior
   behavior_fps: 20.0
-  speed_threshold: 10.0
+  speed_threshold: 10.0  # mm/s
   speed_window_frames: 5
-  bodypart: LED_clean
+  bodypart: LED
+  jump_threshold_mm: 100  # Max plausible frame-to-frame displacement (mm)
   spatial_map:
     id: spatial_map
     bins: 50
-    min_occupancy: 0.05  # Minimum occupancy (in seconds) to include a bin in spatial map
-    occupancy_sigma: 3  # Gaussian smoothing (in bins) for occupancy map (0 = no smoothing)
-    activity_sigma: 3  # Gaussian smoothing (in bins) for spatial activity map
-    n_shuffles: 500
+    min_occupancy: 0.025  # Minimum occupancy (in seconds) to include a bin
+    occupancy_sigma: 3  # Gaussian smoothing (in bins) for occupancy map
+    activity_sigma: 3  # Gaussian smoothing (in bins) for rate map
+    n_shuffles: 1000
     random_seed: 1
-    event_threshold_sigma: 0  # Sigma multiplier for event amplitude threshold in trajectory visualization
-    p_value_threshold: 0.05  # P-value threshold. Only units with p < threshold are plotted.
+    event_threshold_sigma: 0  # Sigma multiplier for event amplitude threshold
+    p_value_threshold: 0.05  # P-value threshold for SI and stability
     min_shift_seconds: 20  # Minimum circular shift (seconds) for shuffle test
-    si_weight_mode: amplitude  # 'amplitude' (event amplitudes) or 'binary' (event counts)
-    place_field_threshold: 0.2  # Fraction of peak rate for place field boundary (red contour)
-    place_field_min_bins: 5  # Minimum contiguous bins for a place field component
-    place_field_seed_percentile: 95  # Percentile of shuffled rates for seed detection. null = skip (faster)
+    si_weight_mode: amplitude  # 'amplitude' or 'binary'
+    place_field_threshold: 0.35  # Fraction of peak rate for place field boundary
+    place_field_min_bins: 5  # Minimum contiguous bins for a place field
+    place_field_seed_percentile: 95  # Percentile of shuffled rates for seed detection
+    trace_time_window: 600  # Time window (seconds) for trace display
 ```
 :::

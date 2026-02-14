@@ -33,5 +33,5 @@ behavior:
     si_weight_mode: amplitude  # SI weight mode: 'amplitude' (event amplitudes) or 'binary' (event counts)
     place_field_threshold: 0.35  # Fraction of peak rate for place field boundary (red contour). Applied to smoothed rate map.
     place_field_min_bins: 5  # Minimum contiguous bins for a place field component. Smaller disconnected regions are discarded.
-    place_field_seed_percentile: 95  # Percentile of shuffled rates for seed detection (Guo et al. 2023). null = skip seed detection (faster).
+    place_field_seed_percentile: 95  # Percentile of shuffled rates for seed detection (Guo et al. 2023).
     trace_time_window: 600  # Time window (seconds) for trace display in interactive browser.
