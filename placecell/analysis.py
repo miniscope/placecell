@@ -147,6 +147,7 @@ def compute_spatial_information(
     min_shift_seconds: float = 0.0,
     behavior_fps: float = 20.0,
     si_weight_mode: str = "amplitude",
+    activity_sigma: float = 0.0,
 ) -> tuple[float, float, np.ndarray]:
     """Compute spatial information and significance via shuffling.
 
@@ -176,6 +177,10 @@ def compute_spatial_information(
         ``"amplitude"`` weights events by their ``s`` value;
         ``"binary"`` counts each event as 1 regardless of amplitude,
         which is more robust to bursty firing patterns.
+    activity_sigma:
+        Gaussian smoothing sigma (in bins) applied to rate maps before
+        SI calculation. Matches the smoothing used for rate map display
+        and stability tests. Default 0.0 (no smoothing).
 
     Returns
     -------
@@ -185,7 +190,6 @@ def compute_spatial_information(
     if random_seed is not None:
         np.random.seed(random_seed)
 
-    # Compute rate map (unsmoothed for SI calculation)
     if unit_events.empty:
         return 0.0, 1.0, np.zeros(n_shuffles)
 
@@ -199,6 +203,11 @@ def compute_spatial_information(
     )
     rate_map = np.zeros_like(occupancy_time)
     rate_map[valid_mask] = event_weights[valid_mask] / occupancy_time[valid_mask]
+
+    # Apply Gaussian smoothing to match stability test and literature convention
+    if activity_sigma > 0:
+        rate_map = gaussian_filter_normalized(rate_map, sigma=activity_sigma)
+        rate_map[~valid_mask] = 0.0
 
     total_time = np.sum(occupancy_time[valid_mask])
     total_events = np.sum(event_weights[valid_mask])
@@ -246,6 +255,11 @@ def compute_spatial_information(
         )
         rate_shuf = np.zeros_like(occupancy_time)
         rate_shuf[valid_mask] = event_w_shuf[valid_mask] / occupancy_time[valid_mask]
+
+        # Apply same smoothing to shuffled rate maps
+        if activity_sigma > 0:
+            rate_shuf = gaussian_filter_normalized(rate_shuf, sigma=activity_sigma)
+            rate_shuf[~valid_mask] = 0.0
 
         valid_s = (rate_shuf > 0) & valid_mask
         if np.any(valid_s):
@@ -713,6 +727,7 @@ def compute_unit_analysis(
         min_shift_seconds=min_shift_seconds,
         behavior_fps=behavior_fps,
         si_weight_mode=si_weight_mode,
+        activity_sigma=activity_sigma,
     )
 
     # Event threshold for visualization
