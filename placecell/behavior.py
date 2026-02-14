@@ -63,6 +63,121 @@ def _load_behavior_xy(csv_path: Path, bodypart: str) -> pd.DataFrame:
     return out
 
 
+def remove_position_jumps(
+    positions: pd.DataFrame,
+    threshold_px: float,
+) -> tuple[pd.DataFrame, int]:
+    """Replace implausible position jumps with linear interpolation.
+
+    A jump is detected when the frame-to-frame displacement exceeds
+    *threshold_px*.  Jumped frames have their x/y replaced by linearly
+    interpolated values from the surrounding good frames.
+
+    Parameters
+    ----------
+    positions:
+        DataFrame with columns ``x``, ``y`` (and any others, preserved).
+    threshold_px:
+        Maximum plausible frame-to-frame displacement in pixels.
+
+    Returns
+    -------
+    tuple of (DataFrame with jumps interpolated, number of frames fixed).
+    """
+    df = positions.copy()
+    x = df["x"].values.astype(float)
+    y = df["y"].values.astype(float)
+
+    dx = np.diff(x)
+    dy = np.diff(y)
+    dist = np.sqrt(dx**2 + dy**2)
+
+    bad = np.zeros(len(x), dtype=bool)
+    # Mark frames that *arrive* via a jump.
+    bad[1:] = dist > threshold_px
+    # If a frame also *departs* via a jump (single-frame glitch), the next
+    # good frame is already fine; we only NaN the jumped-to frame.
+
+    n_bad = bad.sum()
+    if n_bad > 0:
+        x[bad] = np.nan
+        y[bad] = np.nan
+        # pandas interpolation handles NaN edges via ffill/bfill
+        df["x"] = pd.Series(x).interpolate(limit_direction="both").values
+        df["y"] = pd.Series(y).interpolate(limit_direction="both").values
+
+    return df, int(n_bad)
+
+
+def correct_perspective(
+    positions: pd.DataFrame,
+    arena_bounds: tuple[float, float, float, float],
+    camera_height_mm: float,
+    tracking_height_mm: float,
+) -> pd.DataFrame:
+    """Correct perspective distortion from overhead camera parallax.
+
+    An LED at height *h* above the floor appears shifted radially outward
+    from the optical axis.  The corrected position is::
+
+        x_corrected = cx + (x - cx) * (H - h) / H
+
+    where *cx, cy* is the arena center (midpoint of *arena_bounds*),
+    *H* is the camera height, and *h* is the tracking height.
+
+    Parameters
+    ----------
+    positions:
+        DataFrame with columns ``x``, ``y``.
+    arena_bounds:
+        (x_min, x_max, y_min, y_max) in pixels.
+    camera_height_mm:
+        Camera height above floor in mm.
+    tracking_height_mm:
+        Tracked point height above floor in mm.
+
+    Returns
+    -------
+    DataFrame with corrected ``x``, ``y``.
+    """
+    x_min, x_max, y_min, y_max = arena_bounds
+    cx = (x_min + x_max) / 2.0
+    cy = (y_min + y_max) / 2.0
+    factor = (camera_height_mm - tracking_height_mm) / camera_height_mm
+
+    df = positions.copy()
+    df["x"] = cx + (df["x"] - cx) * factor
+    df["y"] = cy + (df["y"] - cy) * factor
+    return df
+
+
+def clip_to_arena(
+    positions: pd.DataFrame,
+    arena_bounds: tuple[float, float, float, float],
+) -> pd.DataFrame:
+    """Clip positions to arena boundaries.
+
+    Points outside the arena (from detection errors) are clamped to the
+    nearest boundary edge.
+
+    Parameters
+    ----------
+    positions:
+        DataFrame with columns ``x``, ``y``.
+    arena_bounds:
+        (x_min, x_max, y_min, y_max) in pixels.
+
+    Returns
+    -------
+    DataFrame with ``x``, ``y`` clipped to arena bounds.
+    """
+    x_min, x_max, y_min, y_max = arena_bounds
+    df = positions.copy()
+    df["x"] = df["x"].clip(x_min, x_max)
+    df["y"] = df["y"].clip(y_min, y_max)
+    return df
+
+
 def compute_behavior_speed(
     positions: pd.DataFrame,
     timestamps: pd.DataFrame,

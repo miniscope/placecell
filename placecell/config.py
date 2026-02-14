@@ -192,7 +192,8 @@ class BehaviorConfig(BaseModel):
     )
     speed_threshold: float = Field(
         50.0,
-        description="Minimum running speed to keep events (pixels/s or cm/s).",
+        description="Minimum running speed to keep events (mm/s when arena is calibrated, "
+        "otherwise pixels/s).",
     )
     speed_window_frames: int = Field(
         5,
@@ -203,6 +204,12 @@ class BehaviorConfig(BaseModel):
     bodypart: str = Field(
         ...,
         description="Body part name to use for position tracking (e.g. 'LED').",
+    )
+    jump_threshold_mm: float = Field(
+        100.0,
+        gt=0.0,
+        description="Maximum plausible frame-to-frame displacement in mm. "
+        "Larger jumps are treated as tracking errors and interpolated.",
     )
     spatial_map: SpatialMapConfig = Field(
         default_factory=SpatialMapConfig,
@@ -236,12 +243,42 @@ class DataPathsConfig(BaseModel):
         ...,
         description="Path to behavior timestamp CSV file (behavior_timestamp.csv).",
     )
+    behavior_video: str | None = Field(
+        None,
+        description="Path to behavior video file (e.g. .mp4). Used for arena bounds verification.",
+    )
     curation_csv: str | None = Field(
         None,
         description=(
             "Path to curation results CSV file with columns 'unit_id' and 'keep'. "
             "Only units with keep=1 will be processed. If None, all units are used."
         ),
+    )
+    arena_bounds: tuple[float, float, float, float] | None = Field(
+        None,
+        description=(
+            "Arena bounding box in pixels: (x_min, x_max, y_min, y_max). "
+            "Used for perspective correction center and boundary clipping. "
+            "If None, no preprocessing (perspective/clipping) is applied."
+        ),
+    )
+    arena_size_mm: tuple[float, float] | None = Field(
+        None,
+        description=(
+            "Physical arena dimensions in mm: (width, height). "
+            "Required when arena_bounds is set. Used to derive mm/pixel scale."
+        ),
+    )
+    camera_height_mm: float | None = Field(
+        None,
+        gt=0.0,
+        description="Camera height above arena floor in mm. Required when arena_bounds is set.",
+    )
+    tracking_height_mm: float | None = Field(
+        None,
+        ge=0.0,
+        description="Height of tracked point (e.g. LED) above arena floor in mm. "
+        "Required when arena_bounds is set.",
     )
     oasis: OasisConfig | None = Field(
         None,

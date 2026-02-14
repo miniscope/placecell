@@ -610,3 +610,142 @@ def plot_coverage(
         )
 
     return fig
+
+
+def plot_arena_calibration(
+    trajectory: "pd.DataFrame",
+    arena_bounds: tuple[float, float, float, float],
+    arena_size_mm: tuple[float, float] | None = None,
+    mm_per_px: float | None = None,
+    video_frame: "np.ndarray | None" = None,
+) -> "Figure":
+    """Plot arena calibration overlay on trajectory and optional video frame.
+
+    Shows the arena bounding box overlaid on the raw trajectory.  If a
+    video frame is provided, a second panel shows it with the same overlay.
+
+    Parameters
+    ----------
+    trajectory:
+        DataFrame with columns ``x``, ``y``.
+    arena_bounds:
+        (x_min, x_max, y_min, y_max) in pixels.
+    arena_size_mm:
+        (width, height) in mm.  Used for the title only.
+    mm_per_px:
+        mm-per-pixel scale.  Used for the title only.
+    video_frame:
+        RGB image array (H, W, 3) from the behavior video.
+        If provided, shown alongside the trajectory.
+
+    Returns
+    -------
+    Figure
+    """
+    import matplotlib.patches as patches
+
+    x_min, x_max, y_min, y_max = arena_bounds
+
+    ncols = 2 if video_frame is not None else 1
+    fig, axes = plt.subplots(1, ncols, figsize=(6 * ncols, 5))
+    if ncols == 1:
+        axes = [axes]
+
+    col = 0
+    if video_frame is not None:
+        ax = axes[col]
+        ax.imshow(video_frame)
+        rect = patches.Rectangle(
+            (x_min, y_min),
+            x_max - x_min,
+            y_max - y_min,
+            linewidth=2,
+            edgecolor="red",
+            facecolor="none",
+            linestyle="--",
+        )
+        ax.add_patch(rect)
+        ax.set_title("Behavior video frame + arena bounds")
+        col += 1
+
+    ax = axes[col]
+    ax.plot(trajectory["x"], trajectory["y"], lw=0.3, alpha=0.5, color="steelblue")
+    rect2 = patches.Rectangle(
+        (x_min, y_min),
+        x_max - x_min,
+        y_max - y_min,
+        linewidth=2,
+        edgecolor="red",
+        facecolor="none",
+        linestyle="--",
+    )
+    ax.add_patch(rect2)
+    ax.set_aspect("equal")
+    ax.set_title("Raw trajectory + arena bounds")
+    ax.invert_yaxis()
+
+    title_parts = []
+    if arena_size_mm is not None:
+        title_parts.append(f"Arena: {arena_size_mm} mm")
+    if mm_per_px is not None:
+        title_parts.append(f"Scale: {mm_per_px:.3f} mm/px")
+    if title_parts:
+        fig.suptitle(" | ".join(title_parts))
+
+    fig.tight_layout()
+    return fig
+
+
+def plot_preprocess_steps(
+    steps: "dict[str, pd.DataFrame]",
+    arena_bounds: tuple[float, float, float, float],
+) -> "Figure":
+    """Plot trajectory at each behavior preprocessing stage.
+
+    Parameters
+    ----------
+    steps:
+        Ordered dict mapping step name → DataFrame with ``x``, ``y``.
+        Typically from ``ds._preprocess_steps``.
+    arena_bounds:
+        (x_min, x_max, y_min, y_max) in pixels.
+
+    Returns
+    -------
+    Figure
+    """
+    import matplotlib.patches as patches
+
+    x_min, x_max, y_min, y_max = arena_bounds
+    n = len(steps)
+    fig, axes = plt.subplots(1, n, figsize=(4 * n, 4))
+    if n == 1:
+        axes = [axes]
+
+    # Compute shared limits across all steps
+    all_x = np.concatenate([df["x"].values for df in steps.values()])
+    all_y = np.concatenate([df["y"].values for df in steps.values()])
+    pad = 20
+    xlim = (min(all_x.min(), x_min) - pad, max(all_x.max(), x_max) + pad)
+    ylim = (min(all_y.min(), y_min) - pad, max(all_y.max(), y_max) + pad)
+
+    for ax, (title, df) in zip(axes, steps.items()):
+        ax.plot(df["x"], df["y"], lw=0.3, alpha=0.5, color="steelblue")
+        rect = patches.Rectangle(
+            (x_min, y_min),
+            x_max - x_min,
+            y_max - y_min,
+            linewidth=1.5,
+            edgecolor="red",
+            facecolor="none",
+            linestyle="--",
+        )
+        ax.add_patch(rect)
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim[1], ylim[0])  # inverted y
+        ax.set_aspect("equal")
+        ax.set_title(title)
+        ax.tick_params(labelsize=7)
+
+    fig.tight_layout()
+    return fig

@@ -16,7 +16,13 @@ from placecell.analysis import (
     compute_occupancy_map,
     compute_unit_analysis,
 )
-from placecell.behavior import build_event_place_dataframe, load_curated_unit_ids
+from placecell.behavior import (
+    build_event_place_dataframe,
+    clip_to_arena,
+    correct_perspective,
+    load_curated_unit_ids,
+    remove_position_jumps,
+)
 from placecell.config import AnalysisConfig, DataPathsConfig, SpatialMapConfig
 from placecell.io import load_behavior_data, load_visualization_data
 from placecell.logging import init_logger
@@ -83,6 +89,7 @@ class PlaceCellDataset:
 
         ds = PlaceCellDataset.from_yaml(config_path, data_path)
         ds.load()                            # traces, trajectory, footprints
+        ds.preprocess_behavior()             # jump/perspective/clip corrections
         ds.deconvolve(progress_bar=tqdm)     # good_unit_ids, S_list, event_index
         ds.match_events()                    # event_place
         ds.compute_occupancy()               # occupancy_time, valid_mask, edges
@@ -112,14 +119,18 @@ class PlaceCellDataset:
         neural_timestamp_path: Path | None = None,
         behavior_position_path: Path | None = None,
         behavior_timestamp_path: Path | None = None,
+        behavior_video_path: Path | None = None,
         curation_csv_path: Path | None = None,
+        data_cfg: DataPathsConfig | None = None,
     ) -> None:
         self.cfg = cfg
         self.neural_path = neural_path
         self.neural_timestamp_path = neural_timestamp_path
         self.behavior_position_path = behavior_position_path
         self.behavior_timestamp_path = behavior_timestamp_path
+        self.behavior_video_path = behavior_video_path
         self.curation_csv_path = curation_csv_path
+        self.data_cfg = data_cfg
 
         # Neural data
         self.traces: xr.DataArray | None = None
@@ -144,6 +155,7 @@ class PlaceCellDataset:
         # Visualization assets
         self.max_proj: np.ndarray | None = None
         self.footprints: xr.DataArray | None = None
+        self.behavior_video_frame: np.ndarray | None = None
 
         # Results
         self.unit_results: dict[int, UnitResult] = {}
@@ -177,7 +189,11 @@ class PlaceCellDataset:
             neural_timestamp_path=data_dir / data_cfg.neural_timestamp,
             behavior_position_path=data_dir / data_cfg.behavior_position,
             behavior_timestamp_path=data_dir / data_cfg.behavior_timestamp,
+            behavior_video_path=(
+                data_dir / data_cfg.behavior_video if data_cfg.behavior_video else None
+            ),
             curation_csv_path=(data_dir / data_cfg.curation_csv if data_cfg.curation_csv else None),
+            data_cfg=data_cfg,
         )
 
     @property
@@ -203,7 +219,7 @@ class PlaceCellDataset:
             self.traces.sizes["frame"],
         )
 
-        # Behavior
+        # Behavior — load positions and compute speed (initially in px/s)
         self.trajectory, self.trajectory_filtered = load_behavior_data(
             behavior_position=self.behavior_position_path,
             behavior_timestamp=self.behavior_timestamp_path,
@@ -211,6 +227,21 @@ class PlaceCellDataset:
             speed_window_frames=bcfg.speed_window_frames,
             speed_threshold=bcfg.speed_threshold,
         )
+
+        # Convert speed to mm/s when arena calibration is available
+        scale = self.mm_per_px
+        if scale is not None:
+            self.trajectory["speed"] = self.trajectory["speed"] * scale
+            self.trajectory_filtered = self.trajectory[
+                self.trajectory["speed"] >= bcfg.speed_threshold
+            ].copy()
+            self.trajectory_filtered = self.trajectory_filtered.sort_values(
+                "frame_index"
+            ).rename(columns={"frame_index": "beh_frame_index"})
+            logger.info(
+                "Speed converted to mm/s (%.3f mm/px)", scale
+            )
+
         logger.info(
             "Trajectory: %d frames (%d after speed filter)",
             len(self.trajectory),
@@ -221,6 +252,133 @@ class PlaceCellDataset:
         self.traces, self.max_proj, self.footprints = load_visualization_data(
             neural_path=self.neural_path,
             trace_name=ncfg.trace_name,
+        )
+
+        # Behavior video frame (single frame for calibration overlay)
+        if self.behavior_video_path is not None and self.behavior_video_path.exists():
+            try:
+                import cv2
+
+                cap = cv2.VideoCapture(str(self.behavior_video_path))
+                ret, frame = cap.read()
+                cap.release()
+                if ret:
+                    self.behavior_video_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    logger.info(
+                        "Loaded behavior video frame from %s", self.behavior_video_path.name
+                    )
+                else:
+                    logger.warning("Could not read frame from %s", self.behavior_video_path)
+            except ImportError:
+                logger.warning("cv2 not installed — skipping behavior video frame")
+
+    @property
+    def mm_per_px(self) -> float | None:
+        """Mm-per-pixel scale, or None if arena is not calibrated."""
+        if self.data_cfg is None:
+            return None
+        bounds = self.data_cfg.arena_bounds
+        size_mm = self.data_cfg.arena_size_mm
+        if bounds is None or size_mm is None:
+            return None
+        x_min, x_max, y_min, y_max = bounds
+        scale_x = size_mm[0] / (x_max - x_min)
+        scale_y = size_mm[1] / (y_max - y_min)
+        return (scale_x + scale_y) / 2.0
+
+    def preprocess_behavior(self) -> None:
+        """Apply data-integrity corrections and recompute speed.
+
+        Pipeline: jump removal → perspective correction → boundary clipping
+        → recompute speed (mm/s) → re-filter by speed threshold.
+
+        Requires ``load()`` to have been called first.  Skipped automatically
+        when ``arena_bounds`` is not set in the data config.
+        """
+        if self.trajectory is None:
+            raise RuntimeError("Call load() first.")
+
+        dcfg = self.data_cfg
+        if dcfg is None or dcfg.arena_bounds is None:
+            logger.info("No arena_bounds configured — skipping behavior preprocessing")
+            return
+
+        missing = [
+            name for name, val in [
+                ("arena_size_mm", dcfg.arena_size_mm),
+                ("camera_height_mm", dcfg.camera_height_mm),
+                ("tracking_height_mm", dcfg.tracking_height_mm),
+            ] if val is None
+        ]
+        if missing:
+            raise ValueError(
+                f"arena_bounds is set but missing required fields: {', '.join(missing)}"
+            )
+
+        bcfg = self.cfg.behavior
+        scale = self.mm_per_px
+
+        # Store intermediate snapshots for visualization
+        self._preprocess_steps: dict[str, pd.DataFrame] = {}
+        self._preprocess_steps["Raw"] = self.trajectory[["x", "y"]].copy()
+
+        # 1. Jump removal (threshold in mm → convert to px)
+        jump_px = bcfg.jump_threshold_mm / scale
+        self.trajectory, n_jumps = remove_position_jumps(self.trajectory, threshold_px=jump_px)
+        logger.info("Jump removal: %d frames interpolated (threshold %.0f mm = %.1f px)",
+                     n_jumps, bcfg.jump_threshold_mm, jump_px)
+        self._preprocess_steps["Jump removal"] = self.trajectory[["x", "y"]].copy()
+
+        # 2. Perspective correction
+        self.trajectory = correct_perspective(
+            self.trajectory,
+            arena_bounds=dcfg.arena_bounds,
+            camera_height_mm=dcfg.camera_height_mm,
+            tracking_height_mm=dcfg.tracking_height_mm,
+        )
+        factor = (dcfg.camera_height_mm - dcfg.tracking_height_mm) / dcfg.camera_height_mm
+        logger.info("Perspective correction: factor=%.3f (H=%.0f mm, h=%.0f mm)",
+                     factor, dcfg.camera_height_mm, dcfg.tracking_height_mm)
+        self._preprocess_steps["Perspective"] = self.trajectory[["x", "y"]].copy()
+
+        # 3. Boundary clipping
+        self.trajectory = clip_to_arena(self.trajectory, arena_bounds=dcfg.arena_bounds)
+        logger.info("Boundary clipping to arena_bounds=%s", dcfg.arena_bounds)
+        self._preprocess_steps["Clipped"] = self.trajectory[["x", "y"]].copy()
+
+        # 4. Recompute speed in-place on corrected positions (preserves index)
+        traj = self.trajectory.sort_values("frame_index")
+        x_vals = traj["x"].values
+        y_vals = traj["y"].values
+        t_vals = traj["unix_time"].values
+        n = len(traj)
+        w = bcfg.speed_window_frames
+        speed = np.zeros(n)
+        for i in range(n):
+            end_idx = min(i + w, n - 1)
+            if end_idx > i:
+                dx = x_vals[end_idx] - x_vals[i]
+                dy = y_vals[end_idx] - y_vals[i]
+                dt = t_vals[end_idx] - t_vals[i]
+                if dt > 0:
+                    speed[i] = np.sqrt(dx**2 + dy**2) / dt
+        # Scale pixel speed to mm/s
+        self.trajectory.loc[traj.index, "speed"] = speed * scale
+        logger.info("Speed recomputed in mm/s (%.3f mm/px)", scale)
+
+        # 5. Re-filter with mm/s threshold
+        self.trajectory_filtered = self.trajectory[
+            self.trajectory["speed"] >= bcfg.speed_threshold
+        ].copy()
+        self.trajectory_filtered = self.trajectory_filtered.sort_values("frame_index")
+        self.trajectory_filtered = self.trajectory_filtered.rename(
+            columns={"frame_index": "beh_frame_index"}
+        )
+        logger.info(
+            "Trajectory after preprocessing: %d frames (%d after speed filter at %.1f mm/s)",
+            len(self.trajectory),
+            len(self.trajectory_filtered),
+            bcfg.speed_threshold,
         )
 
     def deconvolve(
@@ -549,6 +707,8 @@ class PlaceCellDataset:
             spatial_kw["y_edges"] = self.y_edges
         if self.max_proj is not None:
             spatial_kw["max_proj"] = self.max_proj
+        if self.behavior_video_frame is not None:
+            spatial_kw["behavior_video_frame"] = self.behavior_video_frame
         if spatial_kw:
             np.savez_compressed(path / "spatial.npz", **spatial_kw)
 
@@ -681,6 +841,7 @@ class PlaceCellDataset:
             ds.x_edges = spatial.get("x_edges")
             ds.y_edges = spatial.get("y_edges")
             ds.max_proj = spatial.get("max_proj")
+            ds.behavior_video_frame = spatial.get("behavior_video_frame")
 
         # xarray DataArrays
         fp_path = path / "footprints.nc"
