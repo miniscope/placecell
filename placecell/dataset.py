@@ -238,9 +238,9 @@ class PlaceCellDataset:
         self.trajectory_filtered = self.trajectory[
             self.trajectory["speed"] >= bcfg.speed_threshold
         ].copy()
-        self.trajectory_filtered = self.trajectory_filtered.sort_values(
-            "frame_index"
-        ).rename(columns={"frame_index": "beh_frame_index"})
+        self.trajectory_filtered = self.trajectory_filtered.sort_values("frame_index").rename(
+            columns={"frame_index": "beh_frame_index"}
+        )
         logger.info(
             "Trajectory: %d frames (%d after speed filter at %.1f %s)",
             len(self.trajectory),
@@ -305,11 +305,13 @@ class PlaceCellDataset:
             return
 
         missing = [
-            name for name, val in [
+            name
+            for name, val in [
                 ("arena_size_mm", dcfg.arena_size_mm),
                 ("camera_height_mm", dcfg.camera_height_mm),
                 ("tracking_height_mm", dcfg.tracking_height_mm),
-            ] if val is None
+            ]
+            if val is None
         ]
         if missing:
             raise ValueError(
@@ -326,8 +328,12 @@ class PlaceCellDataset:
         # 1. Jump removal (threshold in mm → convert to px)
         jump_px = bcfg.jump_threshold_mm / scale
         self.trajectory, n_jumps = remove_position_jumps(self.trajectory, threshold_px=jump_px)
-        logger.info("Jump removal: %d frames interpolated (threshold %.0f mm = %.1f px)",
-                     n_jumps, bcfg.jump_threshold_mm, jump_px)
+        logger.info(
+            "Jump removal: %d frames interpolated (threshold %.0f mm = %.1f px)",
+            n_jumps,
+            bcfg.jump_threshold_mm,
+            jump_px,
+        )
         self._preprocess_steps["Jump removal"] = self.trajectory[["x", "y"]].copy()
 
         # 2. Perspective correction
@@ -338,8 +344,12 @@ class PlaceCellDataset:
             tracking_height_mm=dcfg.tracking_height_mm,
         )
         factor = (dcfg.camera_height_mm - dcfg.tracking_height_mm) / dcfg.camera_height_mm
-        logger.info("Perspective correction: factor=%.3f (H=%.0f mm, h=%.0f mm)",
-                     factor, dcfg.camera_height_mm, dcfg.tracking_height_mm)
+        logger.info(
+            "Perspective correction: factor=%.3f (H=%.0f mm, h=%.0f mm)",
+            factor,
+            dcfg.camera_height_mm,
+            dcfg.tracking_height_mm,
+        )
         self._preprocess_steps["Perspective"] = self.trajectory[["x", "y"]].copy()
 
         # 3. Boundary clipping

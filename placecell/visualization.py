@@ -370,9 +370,7 @@ def plot_behavior_preview(
         linewidth=0.3,
         alpha=0.5,
     )
-    ax_filt.set_title(
-        f"Speed > {speed_threshold} {speed_unit} ({len(trajectory_filtered)})"
-    )
+    ax_filt.set_title(f"Speed > {speed_threshold} {speed_unit} ({len(trajectory_filtered)})")
     ax_filt.set_aspect("equal")
     ax_filt.axis("off")
 
