@@ -20,6 +20,8 @@ from placecell.behavior import (
     build_event_place_dataframe,
     clip_to_arena,
     correct_perspective,
+    filter_by_speed,
+    recompute_speed,
     remove_position_jumps,
 )
 from placecell.config import AnalysisConfig, DataPathsConfig, SpatialMapConfig
@@ -337,22 +339,10 @@ class PlaceCellDataset:
             self._preprocess_steps["Clipped"] = self.trajectory[["x", "y"]].copy()
 
             # 4. Recompute speed in mm/s on corrected positions
-            traj = self.trajectory.sort_values("frame_index")
-            x_vals = traj["x"].values
-            y_vals = traj["y"].values
-            t_vals = traj["unix_time"].values
-            n = len(traj)
-            w = bcfg.speed_window_frames
-            speed = np.zeros(n)
-            for i in range(n):
-                end_idx = min(i + w, n - 1)
-                if end_idx > i:
-                    dx = x_vals[end_idx] - x_vals[i]
-                    dy = y_vals[end_idx] - y_vals[i]
-                    dt = t_vals[end_idx] - t_vals[i]
-                    if dt > 0:
-                        speed[i] = np.sqrt(dx**2 + dy**2) / dt
-            self.trajectory.loc[traj.index, "speed"] = speed * scale
+            self.trajectory = recompute_speed(
+                self.trajectory, window_frames=bcfg.speed_window_frames
+            )
+            self.trajectory["speed"] *= scale
             logger.info("Speed recomputed in mm/s (%.3f mm/px)", scale)
             speed_unit = "mm/s"
         else:
@@ -364,13 +354,7 @@ class PlaceCellDataset:
             speed_unit = "px/s"
 
         # Speed filter (always applied)
-        self.trajectory_filtered = self.trajectory[
-            self.trajectory["speed"] >= bcfg.speed_threshold
-        ].copy()
-        self.trajectory_filtered = self.trajectory_filtered.sort_values("frame_index")
-        self.trajectory_filtered = self.trajectory_filtered.rename(
-            columns={"frame_index": "beh_frame_index"}
-        )
+        self.trajectory_filtered = filter_by_speed(self.trajectory, bcfg.speed_threshold)
         logger.info(
             "Trajectory: %d frames (%d after speed filter at %.1f %s)",
             len(self.trajectory),

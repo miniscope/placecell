@@ -156,6 +156,69 @@ def clip_to_arena(
     return df
 
 
+def recompute_speed(
+    trajectory: pd.DataFrame,
+    window_frames: int,
+) -> pd.DataFrame:
+    """Recompute speed on a trajectory that already has ``x``, ``y``, ``unix_time``.
+
+    Use this after spatial corrections (jump removal, perspective, clipping)
+    to update the ``speed`` column from the corrected positions.
+
+    Parameters
+    ----------
+    trajectory:
+        DataFrame with columns ``x``, ``y``, ``unix_time``.
+    window_frames:
+        Number of frames to look ahead for speed calculation.
+
+    Returns
+    -------
+    DataFrame with ``speed`` column overwritten (in position-units / s).
+    """
+    df = trajectory.sort_values("frame_index")
+    x_vals = df["x"].values
+    y_vals = df["y"].values
+    t_vals = df["unix_time"].values
+    n = len(df)
+    speed = np.zeros(n)
+    for i in range(n):
+        end_idx = min(i + window_frames, n - 1)
+        if end_idx > i:
+            dx = x_vals[end_idx] - x_vals[i]
+            dy = y_vals[end_idx] - y_vals[i]
+            dt = t_vals[end_idx] - t_vals[i]
+            if dt > 0:
+                speed[i] = np.sqrt(dx**2 + dy**2) / dt
+    trajectory = trajectory.copy()
+    trajectory.loc[df.index, "speed"] = speed
+    return trajectory
+
+
+def filter_by_speed(
+    trajectory: pd.DataFrame,
+    speed_threshold: float,
+) -> pd.DataFrame:
+    """Filter trajectory to frames above a speed threshold.
+
+    Parameters
+    ----------
+    trajectory:
+        DataFrame with columns ``frame_index`` and ``speed``.
+    speed_threshold:
+        Minimum speed to keep.
+
+    Returns
+    -------
+    Filtered copy, sorted by frame index, with ``frame_index`` renamed
+    to ``beh_frame_index``.
+    """
+    filtered = trajectory[trajectory["speed"] >= speed_threshold].copy()
+    filtered = filtered.sort_values("frame_index")
+    filtered = filtered.rename(columns={"frame_index": "beh_frame_index"})
+    return filtered
+
+
 def compute_behavior_speed(
     positions: pd.DataFrame,
     timestamps: pd.DataFrame,
