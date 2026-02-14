@@ -936,14 +936,14 @@ def compute_coverage_map(
     """
     coverage = None
     for _uid, result in unit_results.items():
-        rm = result["rate_map"]
+        rm = result.rate_map
         if coverage is None:
             coverage = np.zeros_like(rm, dtype=int)
         field_mask = compute_place_field_mask(
             rm,
             threshold=threshold,
             min_bins=min_bins,
-            shuffled_rate_p95=result.get("shuffled_rate_p95"),
+            shuffled_rate_p95=result.shuffled_rate_p95,
         )
         coverage += field_mask.astype(int)
     if coverage is None:
@@ -987,10 +987,10 @@ def compute_coverage_curve(
     masks = []
     for _uid, result in unit_results.items():
         m = compute_place_field_mask(
-            result["rate_map"],
+            result.rate_map,
             threshold=threshold,
             min_bins=min_bins,
-            shuffled_rate_p95=result.get("shuffled_rate_p95"),
+            shuffled_rate_p95=result.shuffled_rate_p95,
         )
         masks.append(m)
     masks.sort(key=lambda m: m.sum(), reverse=True)

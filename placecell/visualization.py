@@ -5,7 +5,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pandas as pd
 import xarray as xr
-from mio.logging import init_logger
+
+from placecell.logging import init_logger
 
 try:
     import matplotlib.pyplot as plt
@@ -17,6 +18,89 @@ except ImportError:
     Figure = None
 
 logger = init_logger(__name__)
+
+
+def plot_session_summary(summary_df: "pd.DataFrame") -> "Figure":
+    """Across-session counts and proportions of place cell classifications.
+
+    Parameters
+    ----------
+    summary_df:
+        DataFrame with columns ``dataset``, ``n_total``, ``n_sig``,
+        ``n_stable_thresh``, ``n_stable_shuffle``, ``n_both_thresh``,
+        ``n_both_shuffle``.  One row per session.
+    """
+    if plt is None:
+        raise ImportError("matplotlib is required for plotting.")
+
+    df = summary_df.copy()
+    session = range(1, len(df) + 1)
+
+    # Add proportion columns
+    for col in [
+        "n_sig",
+        "n_stable_thresh",
+        "n_stable_shuffle",
+        "n_both_thresh",
+        "n_both_shuffle",
+    ]:
+        df[col.replace("n_", "pct_")] = (df[col] / df["n_total"] * 100).round(1)
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.5), sharex=True)
+
+    # Left: counts
+    ax = axes[0]
+    ax.plot(session, df["n_sig"], "o-", label="Significant", color="tab:orange")
+    ax.plot(
+        session,
+        df["n_stable_thresh"],
+        "s--",
+        label="Stable (threshold)",
+        color="tab:blue",
+        alpha=0.6,
+    )
+    ax.plot(session, df["n_stable_shuffle"], "s-", label="Stable (shuffle)", color="tab:blue")
+    ax.plot(
+        session, df["n_both_thresh"], "D--", label="Both (threshold)", color="tab:green", alpha=0.6
+    )
+    ax.plot(session, df["n_both_shuffle"], "D-", label="Both (shuffle)", color="tab:green")
+    ax.set_ylabel("Number of units")
+    ax.set_xlabel("Session")
+    ax.set_title("Counts")
+    ax.legend(fontsize=8)
+    ax.set_xticks(list(session))
+    ax.set_xticklabels(df["dataset"], rotation=45, ha="right", fontsize=7)
+
+    # Right: proportions
+    ax = axes[1]
+    ax.plot(session, df["pct_sig"], "o-", label="Significant", color="tab:orange")
+    ax.plot(
+        session,
+        df["pct_stable_thresh"],
+        "s--",
+        label="Stable (threshold)",
+        color="tab:blue",
+        alpha=0.6,
+    )
+    ax.plot(session, df["pct_stable_shuffle"], "s-", label="Stable (shuffle)", color="tab:blue")
+    ax.plot(
+        session,
+        df["pct_both_thresh"],
+        "D--",
+        label="Both (threshold)",
+        color="tab:green",
+        alpha=0.6,
+    )
+    ax.plot(session, df["pct_both_shuffle"], "D-", label="Both (shuffle)", color="tab:green")
+    ax.set_ylabel("Proportion (%)")
+    ax.set_xlabel("Session")
+    ax.set_title("Proportions")
+    ax.legend(fontsize=8)
+    ax.set_xticks(list(session))
+    ax.set_xticklabels(df["dataset"], rotation=45, ha="right", fontsize=7)
+
+    fig.tight_layout()
+    return fig
 
 
 def plot_summary_scatter(
@@ -39,12 +123,12 @@ def plot_summary_scatter(
         raise ImportError("matplotlib is required for plotting.")
 
     unit_ids = list(unit_results.keys())
-    p_vals = [unit_results[uid]["p_val"] for uid in unit_ids]
-    stab_corrs = [unit_results[uid]["stability_corr"] for uid in unit_ids]
-    fisher_z = [unit_results[uid]["stability_z"] for uid in unit_ids]
-    si_vals = [unit_results[uid]["si"] for uid in unit_ids]
+    p_vals = [unit_results[uid].p_val for uid in unit_ids]
+    stab_corrs = [unit_results[uid].stability_corr for uid in unit_ids]
+    fisher_z = [unit_results[uid].stability_z for uid in unit_ids]
+    si_vals = [unit_results[uid].si for uid in unit_ids]
 
-    stab_pvals = [unit_results[uid].get("stability_p_val", np.nan) for uid in unit_ids]
+    stab_pvals = [unit_results[uid].stability_p_val for uid in unit_ids]
 
     colors = []
     for p, s, sp in zip(p_vals, stab_corrs, stab_pvals):
@@ -168,9 +252,9 @@ def plot_diagnostics(
         raise ImportError("matplotlib is required for plotting.")
 
     uids = list(unit_results.keys())
-    n_events = [len(unit_results[u]["unit_data"]) for u in uids]
-    si_vals = [unit_results[u]["si"] for u in uids]
-    p_vals = [unit_results[u]["p_val"] for u in uids]
+    n_events = [len(unit_results[u].unit_data) for u in uids]
+    si_vals = [unit_results[u].si for u in uids]
+    p_vals = [unit_results[u].p_val for u in uids]
 
     fig, (ax_hist, ax_si, ax_pv) = plt.subplots(1, 3, figsize=(12, 3.5))
 

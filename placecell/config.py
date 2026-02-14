@@ -1,11 +1,16 @@
 """Configuration models for pcell, loaded from YAML."""
 
+from pathlib import Path
+
+import yaml
 from mio.models import MiniscopeConfig
 from mio.models.mixins import ConfigYAMLMixin
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field
+
+CONFIG_DIR = Path(__file__).parent / "config"
 
 
-class OasisConfig(MiniscopeConfig, ConfigYAMLMixin):
+class OasisConfig(BaseModel):
     """OASIS deconvolution parameters."""
 
     g: tuple[float, float] = Field(
@@ -28,7 +33,7 @@ class OasisConfig(MiniscopeConfig, ConfigYAMLMixin):
     )
 
 
-class NeuralConfig(MiniscopeConfig, ConfigYAMLMixin):
+class NeuralConfig(BaseModel):
     """Neural data configuration."""
 
     fps: float = Field(
@@ -51,7 +56,7 @@ class NeuralConfig(MiniscopeConfig, ConfigYAMLMixin):
     )
 
 
-class SpatialMapConfig(MiniscopeConfig, ConfigYAMLMixin):
+class SpatialMapConfig(BaseModel):
     """Spatial map visualization configuration."""
 
     bins: int = Field(
@@ -174,7 +179,7 @@ class SpatialMapConfig(MiniscopeConfig, ConfigYAMLMixin):
     )
 
 
-class BehaviorConfig(MiniscopeConfig, ConfigYAMLMixin):
+class BehaviorConfig(BaseModel):
     """Behavior / place-field configuration."""
 
     behavior_fps: float = Field(
@@ -205,8 +210,15 @@ class BehaviorConfig(MiniscopeConfig, ConfigYAMLMixin):
     )
 
 
-class DataPathsConfig(MiniscopeConfig, ConfigYAMLMixin):
+class DataPathsConfig(BaseModel):
     """Bundle of data file paths for neural and behavior data."""
+
+    @classmethod
+    def from_yaml(cls, path: str | Path) -> "DataPathsConfig":
+        """Load from a YAML file."""
+        with open(path) as f:
+            data = yaml.safe_load(f)
+        return cls(**data)
 
     neural_path: str = Field(
         ...,
@@ -240,8 +252,21 @@ class DataPathsConfig(MiniscopeConfig, ConfigYAMLMixin):
     )
 
 
-class AnalysisConfig(MiniscopeConfig, ConfigYAMLMixin):
+class _PlacecellConfigMixin(ConfigYAMLMixin):
+    """Override config sources to include placecell bundled configs."""
+
+    @classmethod
+    def config_sources(cls) -> list[Path]:
+        from mio import CONFIG_DIR as MIO_CONFIG_DIR
+        from mio import Config
+
+        return [Config().config_dir, CONFIG_DIR, MIO_CONFIG_DIR]
+
+
+class AnalysisConfig(MiniscopeConfig, _PlacecellConfigMixin):
     """Top-level application configuration."""
+
+    model_config = ConfigDict(extra="ignore")
 
     neural: NeuralConfig
     behavior: BehaviorConfig | None = None
@@ -260,7 +285,6 @@ class AnalysisConfig(MiniscopeConfig, ConfigYAMLMixin):
             New config with overrides applied. Original config is unchanged.
         """
         if data_cfg.oasis is not None:
-            # Override OASIS config with data-specific values
             new_neural = self.neural.model_copy(update={"oasis": data_cfg.oasis})
             return self.model_copy(update={"neural": new_neural})
         return self
