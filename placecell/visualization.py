@@ -644,17 +644,19 @@ def plot_arena_calibration(
 
 def plot_preprocess_steps(
     steps: "dict[str, pd.DataFrame]",
-    arena_bounds: tuple[float, float, float, float],
+    arena_size_mm: tuple[float, float],
 ) -> "Figure":
     """Plot trajectory at each behavior preprocessing stage.
+
+    All snapshots are expected to be in mm coordinates.
 
     Parameters
     ----------
     steps:
-        Ordered dict mapping step name → DataFrame with ``x``, ``y``.
-        Typically from ``ds._preprocess_steps``.
-    arena_bounds:
-        (x_min, x_max, y_min, y_max) in pixels.
+        Ordered dict mapping step name → DataFrame with ``x``, ``y``
+        in mm.  Typically from ``ds._preprocess_steps``.
+    arena_size_mm:
+        (width, height) in mm.
 
     Returns
     -------
@@ -662,7 +664,7 @@ def plot_preprocess_steps(
     """
     import matplotlib.patches as patches
 
-    x_min, x_max, y_min, y_max = arena_bounds
+    w_mm, h_mm = arena_size_mm
     n = len(steps)
     fig, axes = plt.subplots(1, n, figsize=(4 * n, 4))
     if n == 1:
@@ -672,15 +674,15 @@ def plot_preprocess_steps(
     all_x = np.concatenate([df["x"].values for df in steps.values()])
     all_y = np.concatenate([df["y"].values for df in steps.values()])
     pad = 20
-    xlim = (min(all_x.min(), x_min) - pad, max(all_x.max(), x_max) + pad)
-    ylim = (min(all_y.min(), y_min) - pad, max(all_y.max(), y_max) + pad)
+    xlim = (min(all_x.min(), 0) - pad, max(all_x.max(), w_mm) + pad)
+    ylim = (min(all_y.min(), 0) - pad, max(all_y.max(), h_mm) + pad)
 
     for ax, (title, df) in zip(axes, steps.items()):
         ax.plot(df["x"], df["y"], lw=0.3, alpha=0.5, color="steelblue")
         rect = patches.Rectangle(
-            (x_min, y_min),
-            x_max - x_min,
-            y_max - y_min,
+            (0, 0),
+            w_mm,
+            h_mm,
             linewidth=1.5,
             edgecolor="red",
             facecolor="none",

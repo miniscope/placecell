@@ -463,17 +463,13 @@ def compute_stability_score(
     block_width = span / n_split_blocks
     offset = block_shift * block_width
 
-    traj_block_ids = np.floor(
-        (all_frames - frame_min - offset) / block_width
-    ).astype(int)
+    traj_block_ids = np.floor((all_frames - frame_min - offset) / block_width).astype(int)
     traj_block_ids = np.clip(traj_block_ids, 0, n_split_blocks - 1)
     traj_first_mask = traj_block_ids % 2 == 0
     traj_second_mask = ~traj_first_mask
 
     event_frames = unit_events["beh_frame_index"].values
-    event_block_ids = np.floor(
-        (event_frames - frame_min - offset) / block_width
-    ).astype(int)
+    event_block_ids = np.floor((event_frames - frame_min - offset) / block_width).astype(int)
     event_block_ids = np.clip(event_block_ids, 0, n_split_blocks - 1)
     events_first_mask = event_block_ids % 2 == 0
     events_second_mask = ~events_first_mask
