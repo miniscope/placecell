@@ -84,7 +84,7 @@ class SpatialMapConfig(BaseModel):
         description="Random seed for reproducible shuffling. If None, results vary between runs.",
     )
     event_threshold_sigma: float = Field(
-        ...,
+        0.0,
         description="Sigma multiplier for event amplitude threshold in trajectory plot. "
         "Can be negative to include lower-amplitude events.",
     )
@@ -184,16 +184,20 @@ class MazeConfig(BaseModel):
         "tube_position",
         description="Column name in behavior CSV containing within-tube position (0-1).",
     )
+    split_by_direction: bool = Field(
+        True,
+        description="Split each tube into forward/reverse segments based on traversal direction. "
+        "Doubles total segments (e.g. 4 tubes -> 8 directional segments).",
+    )
 
 
 class SpatialMap1DConfig(BaseModel):
     """Spatial map settings for 1D tube analysis."""
 
-    bins_per_tube: int = Field(
-        25,
-        ge=5,
-        le=200,
-        description="Number of spatial bins per tube segment. Total bins = bins_per_tube * n_tubes.",
+    bin_width_mm: float = Field(
+        10.0,
+        gt=0.0,
+        description="Bin width in mm. Total bins = round(total_length / bin_width_mm).",
     )
     min_occupancy: float = Field(
         0.025,
@@ -220,10 +224,6 @@ class SpatialMap1DConfig(BaseModel):
         None,
         description="Random seed for reproducible shuffling.",
     )
-    event_threshold_sigma: float = Field(
-        0.0,
-        description="Sigma multiplier for event amplitude threshold in visualization.",
-    )
     p_value_threshold: float = Field(
         0.05,
         ge=0.0,
@@ -238,21 +238,6 @@ class SpatialMap1DConfig(BaseModel):
     si_weight_mode: str = Field(
         "amplitude",
         description="Weight mode for spatial information: 'amplitude' or 'binary'.",
-    )
-    place_field_threshold: float = Field(
-        0.35,
-        gt=0.0,
-        lt=1.0,
-        description="Fraction of peak rate to define place field boundary.",
-    )
-    place_field_min_bins: int = Field(
-        3,
-        ge=1,
-        description="Minimum contiguous bins for a place field.",
-    )
-    place_field_seed_percentile: float = Field(
-        95.0,
-        description="Percentile of shuffled rate maps for place field seed detection.",
     )
     n_split_blocks: int = Field(
         10,
@@ -379,6 +364,10 @@ class DataPathsConfig(BaseModel):
         ge=0.0,
         description="Height of tracked point (e.g. LED) above arena floor in mm. "
         "Required when arena_bounds is set.",
+    )
+    behavior_graph: str | None = Field(
+        None,
+        description="Path to behavior graph YAML with zone polylines and mm_per_pixel.",
     )
     oasis: OasisConfig | None = Field(
         None,

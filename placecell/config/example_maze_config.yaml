@@ -15,7 +15,7 @@ neural:
 behavior:
   id: behavior
   behavior_fps: 20.0
-  speed_threshold: 0.5  # tube-position-units/s (1 unit = full tube length)
+  speed_threshold: 10  # mm/s (when behavior_graph provides physical units)
   speed_window_frames: 5
   bodypart: LED
   x_col: x_pinned
@@ -25,20 +25,17 @@ behavior:
     tube_order: [Tube_1, Tube_2, Tube_3, Tube_4]
     zone_column: zone
     tube_position_column: tube_position
+    split_by_direction: true
   spatial_map_1d:
-    bins_per_tube: 50
-    min_occupancy: 0.025
+    bin_width_mm: 10
+    min_occupancy: 0.1
     occupancy_sigma: 3
     activity_sigma: 3
     n_shuffles: 1000
     random_seed: 42
-    event_threshold_sigma: 0
     p_value_threshold: 0.05
     min_shift_seconds: 20
     si_weight_mode: amplitude
-    place_field_threshold: 0.35
-    place_field_min_bins: 3
-    place_field_seed_percentile: 95
     n_split_blocks: 10
     block_shifts: [0]
     trace_time_window: 600
@@ -48,8 +45,7 @@ behavior:
     min_occupancy: 0.1
     occupancy_sigma: 1
     activity_sigma: 1
-    n_shuffles: 100
-    event_threshold_sigma: 0
+    n_shuffles: 1000
     n_split_blocks: 10
     block_shifts: [0]
     trace_time_window: 600

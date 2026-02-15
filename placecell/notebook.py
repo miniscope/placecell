@@ -572,3 +572,551 @@ def browse_units(
         place_field_min_bins=scfg.place_field_min_bins,
         speed_unit="mm/s" if ds.mm_per_px else "px/s",
     )
+
+
+def create_shuffle_browser_1d(
+    unit_results: dict[int, Any],
+    edges: np.ndarray,
+    p_value_threshold: float = 0.05,
+    tube_boundaries: list[float] | None = None,
+    tube_labels: list[str] | None = None,
+) -> tuple[plt.Figure, widgets.VBox]:
+    """Per-unit shuffle distribution browser for 1D maze analysis.
+
+    Shows three panels per unit:
+      - Rate map (1D)
+      - SI shuffle histogram with observed SI line
+      - Stability shuffle histogram with observed correlation line
+
+    Parameters
+    ----------
+    unit_results:
+        Dictionary mapping unit_id to UnitResult.
+    edges:
+        1D bin edges array.
+    p_value_threshold:
+        Threshold for significance / stability classification.
+    tube_boundaries:
+        Tube boundary positions for vertical markers.
+    tube_labels:
+        Labels for each tube segment.
+    """
+    sorted_ids = sorted(unit_results.keys())
+    n_units = len(sorted_ids)
+    centers = 0.5 * (edges[:-1] + edges[1:])
+
+    fig, axes = plt.subplots(1, 3, figsize=(12, 3))
+    fig.canvas.toolbar_visible = False
+    fig.canvas.header_visible = False
+    fig.canvas.layout.width = "100%"
+
+    text_annotations: list[Any] = []
+
+    def _render(unit_idx: int) -> None:
+        nonlocal text_annotations
+
+        uid = sorted_ids[unit_idx]
+        res = unit_results[uid]
+
+        for ax in axes:
+            ax.clear()
+        for txt in text_annotations:
+            txt.remove()
+        text_annotations = []
+
+        # ── Panel 1: Rate map ──────────────────────────────────────
+        ax = axes[0]
+        rm = res.rate_map
+        valid = np.isfinite(rm)
+        ax.fill_between(
+            centers,
+            0,
+            np.where(valid, rm, 0),
+            alpha=0.3,
+            color="steelblue",
+            where=valid,
+        )
+        ax.plot(centers, rm, color="steelblue", linewidth=1.0)
+
+        if tube_boundaries:
+            for b in tube_boundaries:
+                ax.axvline(b, color="gray", linestyle=":", linewidth=0.5, alpha=0.5)
+        if tube_labels and tube_boundaries and len(tube_labels) == len(tube_boundaries) - 1:
+            ymax = ax.get_ylim()[1]
+            for i, lbl in enumerate(tube_labels):
+                mid = (tube_boundaries[i] + tube_boundaries[i + 1]) / 2
+                ax.text(
+                    mid,
+                    ymax * 1.02,
+                    lbl,
+                    ha="center",
+                    va="bottom",
+                    fontsize=6,
+                    rotation=45,
+                    clip_on=False,
+                )
+
+        ax.set_xlabel("1D position", fontsize=8)
+        ax.set_ylabel("Rate (norm.)", fontsize=8)
+        ax.set_title("Rate map", fontsize=9)
+        ax.tick_params(labelsize=7)
+        ax.legend(fontsize=6, loc="upper right")
+
+        # ── Panel 2: SI shuffle distribution ───────────────────────
+        ax = axes[1]
+        if len(res.shuffled_sis) > 0:
+            ax.hist(
+                res.shuffled_sis,
+                bins=30,
+                color="gray",
+                alpha=0.7,
+                edgecolor="none",
+                density=True,
+                label="Shuffled",
+            )
+            pct95 = np.percentile(res.shuffled_sis, 95)
+            ax.axvline(
+                pct95, color="black", linewidth=1, linestyle="--", label=f"95th pctl ({pct95:.3f})"
+            )
+        ax.axvline(res.si, color="red", linewidth=2, label=f"Observed ({res.si:.3f})")
+        ax.set_xlabel("Spatial information (bits/s)", fontsize=8)
+        ax.set_ylabel("Density", fontsize=8)
+        sig_str = "PASS" if res.p_val < p_value_threshold else "fail"
+        ax.set_title(f"SI test (p={res.p_val:.3f}, {sig_str})", fontsize=9)
+        ax.tick_params(labelsize=7)
+        ax.legend(fontsize=6)
+
+        # ── Panel 3: Stability shuffle distribution ────────────────
+        ax = axes[2]
+        if len(res.shuffled_stability) > 0:
+            ax.hist(
+                res.shuffled_stability,
+                bins=30,
+                color="gray",
+                alpha=0.7,
+                edgecolor="none",
+                density=True,
+                label="Shuffled",
+            )
+            pct95_stab = np.percentile(res.shuffled_stability, 95)
+            ax.axvline(
+                pct95_stab,
+                color="black",
+                linewidth=1,
+                linestyle="--",
+                label=f"95th pctl ({pct95_stab:.3f})",
+            )
+        if not np.isnan(res.stability_corr):
+            ax.axvline(
+                res.stability_corr,
+                color="blue",
+                linewidth=2,
+                label=f"Observed (r={res.stability_corr:.3f})",
+            )
+
+        ax.set_xlabel("Split-half correlation", fontsize=8)
+        ax.set_ylabel("Density", fontsize=8)
+        if np.isnan(res.stability_p_val):
+            stab_str = "N/A"
+        elif res.stability_p_val < p_value_threshold:
+            stab_str = "PASS"
+        else:
+            stab_str = "fail"
+        stab_p_str = (
+            f"p={res.stability_p_val:.3f}" if not np.isnan(res.stability_p_val) else "p=N/A"
+        )
+        ax.set_title(f"Stability test ({stab_p_str}, {stab_str})", fontsize=9)
+        ax.tick_params(labelsize=7)
+        ax.legend(fontsize=6)
+
+        # ── Status text ────────────────────────────────────────────
+        is_sig = res.p_val < p_value_threshold
+        is_stable = not np.isnan(res.stability_p_val) and res.stability_p_val < p_value_threshold
+        if is_sig and is_stable:
+            status = "PLACE CELL"
+            color = "green"
+        elif is_sig:
+            status = "Significant only"
+            color = "orange"
+        else:
+            status = "Not significant"
+            color = "gray"
+
+        txt = fig.text(
+            0.02,
+            0.98,
+            f"Unit {uid} ({unit_idx + 1}/{n_units}) — {status}",
+            ha="left",
+            va="top",
+            fontsize=9,
+            fontweight="bold",
+            color=color,
+            transform=fig.transFigure,
+        )
+        text_annotations.append(txt)
+
+        fig.tight_layout(rect=[0, 0, 1, 0.93])
+        fig.canvas.draw_idle()
+
+    # ── Widgets ────────────────────────────────────────────────────
+    unit_slider = widgets.IntSlider(
+        value=0,
+        min=0,
+        max=max(0, n_units - 1),
+        step=1,
+        description="Unit:",
+        continuous_update=False,
+        layout=widgets.Layout(width="100%"),
+    )
+    prev_btn = widgets.Button(description="< Prev", layout=widgets.Layout(width="70px"))
+    next_btn = widgets.Button(description="Next >", layout=widgets.Layout(width="70px"))
+
+    def _on_prev(_: Any) -> None:
+        unit_slider.value = (unit_slider.value - 1) % n_units
+
+    def _on_next(_: Any) -> None:
+        unit_slider.value = (unit_slider.value + 1) % n_units
+
+    prev_btn.on_click(_on_prev)
+    next_btn.on_click(_on_next)
+
+    def _update(_: Any = None) -> None:
+        _render(unit_slider.value)
+
+    unit_slider.observe(_update, names="value")
+
+    nav = widgets.HBox([prev_btn, unit_slider, next_btn], layout=widgets.Layout(width="100%"))
+    controls = widgets.VBox([nav], layout=widgets.Layout(width="100%"))
+
+    _render(0)
+    return fig, controls
+
+
+def create_unit_browser_1d(
+    unit_results: dict[int, Any],
+    edges: np.ndarray,
+    df_all_events: pd.DataFrame | None,
+    trace_name: str,
+    neural_fps: float,
+    speed_threshold: float,
+    p_value_threshold: float,
+    trace_time_window: float = 600.0,
+    tube_boundaries: list[float] | None = None,
+    tube_labels: list[str] | None = None,
+    speed_unit: str = "pos/s",
+) -> tuple[plt.Figure, widgets.VBox]:
+    """Interactive unit browser for 1D maze analysis.
+
+    Layout:
+      Top-left:  Overlaid rate maps (1st half, 2nd half, full)
+      Top-right: SI shuffle histogram (top) and stability shuffle histogram (bottom)
+      Bottom:    Calcium trace with event spikes
+
+    Parameters
+    ----------
+    unit_results:
+        Dictionary mapping unit_id to UnitResult.
+    edges:
+        1D bin edges array.
+    df_all_events:
+        All events DataFrame for trace overlay.
+    trace_name:
+        Label for y-axis on trace panel.
+    neural_fps:
+        Neural sampling rate.
+    p_value_threshold:
+        Threshold for significance / stability classification.
+    trace_time_window:
+        Visible time window in seconds for trace panel.
+    tube_boundaries:
+        Tube boundary positions for vertical markers.
+    tube_labels:
+        Labels for each tube segment.
+    """
+    sorted_ids = sorted(unit_results.keys())
+    n_units = len(sorted_ids)
+    centers = 0.5 * (edges[:-1] + edges[1:])
+
+    fig = plt.figure(figsize=(14, 6))
+    fig.canvas.toolbar_visible = False
+    fig.canvas.header_visible = False
+    fig.canvas.layout.width = "100%"
+
+    # Layout: rate map (left), SI shuffle (top-right), stability shuffle (bottom-right), trace (bottom)
+    ax_rm = fig.add_axes([0.05, 0.42, 0.55, 0.45])
+    ax_si_shuf = fig.add_axes([0.68, 0.65, 0.28, 0.22])
+    ax_stab_shuf = fig.add_axes([0.68, 0.36, 0.28, 0.22])
+    ax_trace = fig.add_axes([0.07, 0.07, 0.88, 0.22])
+
+    text_annotations: list[Any] = []
+
+    def _render(unit_idx: int, trace_start: float) -> None:
+        nonlocal text_annotations
+
+        uid = sorted_ids[unit_idx]
+        res = unit_results[uid]
+
+        for ax in [ax_rm, ax_si_shuf, ax_stab_shuf, ax_trace]:
+            ax.clear()
+        for txt in text_annotations:
+            txt.remove()
+        text_annotations = []
+
+        # ── Overlaid rate maps ────────────────────────────────────
+        valid_full = np.isfinite(res.rate_map)
+        valid_1st = np.isfinite(res.rate_map_first)
+        valid_2nd = np.isfinite(res.rate_map_second)
+
+        ax_rm.fill_between(
+            centers, 0, np.where(valid_full, res.rate_map, 0),
+            alpha=0.15, color="black", where=valid_full,
+        )
+        ax_rm.plot(centers, res.rate_map, color="black", linewidth=1.5, label="Full")
+        ax_rm.plot(
+            centers, np.where(valid_1st, res.rate_map_first, np.nan),
+            color="steelblue", linewidth=1.0, alpha=0.8, label="1st half",
+        )
+        ax_rm.plot(
+            centers, np.where(valid_2nd, res.rate_map_second, np.nan),
+            color="coral", linewidth=1.0, alpha=0.8, label="2nd half",
+        )
+
+        if tube_boundaries:
+            for b in tube_boundaries:
+                ax_rm.axvline(b, color="gray", linestyle=":", linewidth=0.5, alpha=0.5)
+        if tube_labels and tube_boundaries and len(tube_labels) == len(tube_boundaries) - 1:
+            for i, lbl in enumerate(tube_labels):
+                mid = (tube_boundaries[i] + tube_boundaries[i + 1]) / 2
+                ax_rm.text(
+                    mid, -0.06, lbl, ha="center", va="top",
+                    fontsize=5, rotation=45, clip_on=False,
+                    transform=ax_rm.get_xaxis_transform(),
+                )
+
+        ax_rm.set_xlim(edges[0], edges[-1])
+        ax_rm.set_xticklabels([])
+        ax_rm.set_ylabel("Rate (norm.)", fontsize=7)
+        ax_rm.tick_params(labelsize=6)
+        ax_rm.legend(fontsize=6, loc="upper right", framealpha=0.8)
+
+        # ── SI shuffle histogram ──────────────────────────────────
+        if res.shuffled_sis is not None and len(res.shuffled_sis) > 0:
+            ax_si_shuf.hist(
+                res.shuffled_sis, bins=30, color="gray", alpha=0.6, edgecolor="none",
+            )
+            ax_si_shuf.axvline(res.si, color="red", linewidth=1.5, label=f"SI={res.si:.3f}")
+            ax_si_shuf.set_title(f"SI shuffle (p={res.p_val:.3f})", fontsize=8)
+        else:
+            ax_si_shuf.text(0.5, 0.5, "No SI shuffle", ha="center", va="center", fontsize=8)
+        ax_si_shuf.tick_params(labelsize=5)
+        ax_si_shuf.set_ylabel("Count", fontsize=6)
+
+        # ── Stability shuffle histogram ───────────────────────────
+        if res.shuffled_stability is not None and len(res.shuffled_stability) > 0:
+            ax_stab_shuf.hist(
+                res.shuffled_stability, bins=30, color="gray", alpha=0.6, edgecolor="none",
+            )
+            corr_val = res.stability_corr if not np.isnan(res.stability_corr) else 0
+            ax_stab_shuf.axvline(
+                corr_val, color="red", linewidth=1.5, label=f"r={corr_val:.2f}",
+            )
+            p_str = f"p={res.stability_p_val:.3f}" if not np.isnan(res.stability_p_val) else "p=N/A"
+            ax_stab_shuf.set_title(f"Stability shuffle ({p_str})", fontsize=8)
+        else:
+            ax_stab_shuf.text(
+                0.5, 0.5, "No stability shuffle", ha="center", va="center", fontsize=8,
+            )
+        ax_stab_shuf.tick_params(labelsize=5)
+        ax_stab_shuf.set_ylabel("Count", fontsize=6)
+
+        # ── Trace with events ─────────────────────────────────────
+        if res.trace_data is not None and res.trace_times is not None:
+            trace = res.trace_data
+            t_full = res.trace_times
+            t_max = t_full[-1] if len(t_full) > 0 else trace_time_window
+            t_start = max(0.0, trace_start)
+            t_end = min(t_max, t_start + trace_time_window)
+            mask = (t_full >= t_start) & (t_full <= t_end)
+            ax_trace.plot(t_full[mask], trace[mask], "b-", linewidth=0.5)
+
+            event_times_gray: Any = []
+            event_amps_gray: Any = []
+            event_times_red: Any = []
+            event_amps_red: Any = []
+
+            if df_all_events is not None:
+                unit_all = df_all_events[df_all_events["unit_id"] == uid]
+                if "frame" in unit_all.columns and "s" in unit_all.columns and not unit_all.empty:
+                    et = unit_all["frame"].values / neural_fps
+                    ea = unit_all["s"].values
+                    m = (et >= t_start) & (et <= t_end)
+                    if np.any(m):
+                        event_times_gray = et[m]
+                        event_amps_gray = ea[m]
+
+            vis = res.vis_data_above
+            if "frame" in vis.columns and "s" in vis.columns and not vis.empty:
+                et = vis["frame"].values / neural_fps
+                ea = vis["s"].values
+                m = (et >= t_start) & (et <= t_end)
+                if np.any(m):
+                    event_times_red = et[m]
+                    event_amps_red = ea[m]
+
+            y_min, y_max = ax_trace.get_ylim()
+            all_a = np.concatenate([
+                event_amps_gray if len(event_amps_gray) > 0 else [],
+                event_amps_red if len(event_amps_red) > 0 else [],
+            ])
+            amp_max = float(np.max(all_a)) if len(all_a) > 0 else 1.0
+            max_h = (y_max - y_min) * 0.3
+
+            def _h(a: float) -> float:
+                return (a / amp_max) * max_h if amp_max > 0 else 0
+
+            for t, a in zip(event_times_gray, event_amps_gray):
+                ax_trace.plot([t, t], [y_min, y_min + _h(a)], color="gray", lw=0.8)
+            for t, a in zip(event_times_red, event_amps_red):
+                ax_trace.plot([t, t], [y_min, y_min + _h(a)], color="red", lw=0.8)
+
+            ax_trace.set_xlim(t_start, t_end)
+            ax_trace.set_xlabel("Time (s)", fontsize=8)
+            ax_trace.set_ylabel(trace_name, fontsize=8)
+            ax_trace.tick_params(labelsize=7)
+
+            legend_el = [Line2D([0], [0], color="blue", linewidth=0.5, label="Fluorescence")]
+            if len(event_times_gray) > 0:
+                legend_el.append(Line2D(
+                    [0], [0], color="gray", linewidth=1.5,
+                    label=f"Events (< {speed_threshold:.1f} {speed_unit})",
+                ))
+            if len(event_times_red) > 0:
+                legend_el.append(Line2D(
+                    [0], [0], color="red", linewidth=1.5,
+                    label=f"Events (>= {speed_threshold:.1f} {speed_unit})",
+                ))
+            ax_trace.legend(handles=legend_el, loc="upper left", fontsize=6, framealpha=0.9)
+        else:
+            ax_trace.text(0.5, 0.5, "No trace data", ha="center", va="center", fontsize=8)
+
+        # ── Status text ───────────────────────────────────────────
+        is_sig = res.p_val < p_value_threshold
+        is_stable = not np.isnan(res.stability_p_val) and res.stability_p_val < p_value_threshold
+        n_events = len(res.unit_data) if not res.unit_data.empty else 0
+
+        sig_color = "green" if is_sig else "red"
+        sig_text = "pass" if is_sig else "fail"
+        if np.isnan(res.stability_p_val):
+            stab_color, stab_text = "gray", "N/A"
+        else:
+            stab_color = "green" if is_stable else "red"
+            stab_text = "pass" if is_stable else "fail"
+
+        txt = fig.text(
+            0.02, 0.97,
+            f"Unit {uid} ({unit_idx + 1}/{n_units}) | N={n_events}",
+            ha="left", va="top", fontsize=9, fontweight="bold",
+        )
+        text_annotations.append(txt)
+        txt = fig.text(
+            0.30, 0.97,
+            f"SI={res.si:.3f}, p={res.p_val:.3f}: ",
+            ha="left", va="top", fontsize=8,
+        )
+        text_annotations.append(txt)
+        txt = fig.text(
+            0.48, 0.97, sig_text,
+            ha="left", va="top", fontsize=8, fontweight="bold", color=sig_color,
+        )
+        text_annotations.append(txt)
+
+        stab_parts = []
+        if not np.isnan(res.stability_corr):
+            stab_parts.append(f"r={res.stability_corr:.2f}")
+        if not np.isnan(res.stability_p_val):
+            stab_parts.append(f"p={res.stability_p_val:.3f}")
+        txt = fig.text(
+            0.54, 0.97,
+            f"Stab ({', '.join(stab_parts)}): ",
+            ha="left", va="top", fontsize=8,
+        )
+        text_annotations.append(txt)
+        txt = fig.text(
+            0.72, 0.97, stab_text,
+            ha="left", va="top", fontsize=8, fontweight="bold", color=stab_color,
+        )
+        text_annotations.append(txt)
+
+        fig.canvas.draw_idle()
+
+    # ── Max trace time ────────────────────────────────────────────
+    max_trace_time = 0.0
+    for r in unit_results.values():
+        if r.trace_times is not None and len(r.trace_times) > 0:
+            max_trace_time = max(max_trace_time, r.trace_times[-1])
+
+    # ── Widgets ───────────────────────────────────────────────────
+    unit_slider = widgets.IntSlider(
+        value=0, min=0, max=max(0, n_units - 1), step=1,
+        description="Unit:", continuous_update=False,
+        layout=widgets.Layout(width="100%"),
+    )
+    trace_slider = widgets.FloatSlider(
+        value=0, min=0, max=max(0, max_trace_time - trace_time_window),
+        step=10, description="Time (s):", continuous_update=False,
+        layout=widgets.Layout(width="100%"),
+    )
+    prev_btn = widgets.Button(description="< Prev", layout=widgets.Layout(width="70px"))
+    next_btn = widgets.Button(description="Next >", layout=widgets.Layout(width="70px"))
+
+    def _on_prev(_: Any) -> None:
+        unit_slider.value = (unit_slider.value - 1) % n_units
+
+    def _on_next(_: Any) -> None:
+        unit_slider.value = (unit_slider.value + 1) % n_units
+
+    prev_btn.on_click(_on_prev)
+    next_btn.on_click(_on_next)
+
+    def _update(_: Any = None) -> None:
+        _render(unit_slider.value, trace_slider.value)
+
+    unit_slider.observe(_update, names="value")
+    trace_slider.observe(_update, names="value")
+
+    nav = widgets.HBox([prev_btn, unit_slider, next_btn], layout=widgets.Layout(width="100%"))
+    controls = widgets.VBox([nav, trace_slider], layout=widgets.Layout(width="100%"))
+
+    _render(0, 0)
+    return fig, controls
+
+
+def browse_units_1d(
+    ds: Any,
+    unit_results: dict[int, Any] | None = None,
+) -> tuple[plt.Figure, widgets.VBox]:
+    """Create a 1D unit browser from a MazeDataset.
+
+    Parameters
+    ----------
+    ds:
+        MazeDataset with completed analysis.
+    unit_results:
+        Subset of results to browse. Defaults to ds.unit_results.
+    """
+    results = unit_results if unit_results is not None else ds.unit_results
+    scfg = ds.spatial_1d
+
+    return create_unit_browser_1d(
+        unit_results=results,
+        edges=ds.edges_1d,
+        df_all_events=ds.event_index,
+        trace_name=ds.cfg.neural.trace_name,
+        neural_fps=ds.neural_fps,
+        speed_threshold=ds.cfg.behavior.speed_threshold,
+        p_value_threshold=scfg.p_value_threshold,
+        trace_time_window=scfg.trace_time_window,
+        tube_boundaries=ds.tube_boundaries,
+        tube_labels=ds.effective_tube_order,
+        speed_unit="mm/s" if ds.tube_lengths is not None else "pos/s",
+    )

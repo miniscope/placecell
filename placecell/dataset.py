@@ -119,6 +119,7 @@ class PlaceCellDataset:
         behavior_position_path: Path | None = None,
         behavior_timestamp_path: Path | None = None,
         behavior_video_path: Path | None = None,
+        behavior_graph_path: Path | None = None,
         data_cfg: DataPathsConfig | None = None,
     ) -> None:
         self.cfg = cfg
@@ -127,6 +128,7 @@ class PlaceCellDataset:
         self.behavior_position_path = behavior_position_path
         self.behavior_timestamp_path = behavior_timestamp_path
         self.behavior_video_path = behavior_video_path
+        self.behavior_graph_path = behavior_graph_path
         self.data_cfg = data_cfg
 
         # Neural data
@@ -195,6 +197,9 @@ class PlaceCellDataset:
             behavior_timestamp_path=data_dir / data_cfg.behavior_timestamp,
             behavior_video_path=(
                 data_dir / data_cfg.behavior_video if data_cfg.behavior_video else None
+            ),
+            behavior_graph_path=(
+                data_dir / data_cfg.behavior_graph if data_cfg.behavior_graph else None
             ),
             data_cfg=data_cfg,
         )
@@ -798,6 +803,13 @@ class PlaceCellDataset:
 
         # Config
         cfg = AnalysisConfig.from_yaml(path / "config.yaml")
+
+        # Auto-select MazeDataset when maze config is present
+        if cls is PlaceCellDataset and cfg.behavior and cfg.behavior.maze is not None:
+            from placecell.maze_dataset import MazeDataset
+
+            return MazeDataset.load_bundle(path)
+
         ds = cls(cfg)
 
         # Spatial arrays

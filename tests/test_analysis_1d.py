@@ -6,7 +6,6 @@ import pytest
 
 from placecell.analysis_1d import (
     compute_occupancy_map_1d,
-    compute_place_field_mask_1d,
     compute_rate_map_1d,
     compute_raw_rate_map_1d,
     compute_spatial_information_1d,
@@ -27,6 +26,28 @@ class TestGaussianFilter1D:
         result = gaussian_filter_normalized_1d(data, sigma=0.0)
         np.testing.assert_array_equal(result, data)
         assert result is not data
+
+    def test_segment_bins_independent_smoothing(self):
+        """Segment boundaries should prevent smoothing across segments."""
+        data = np.zeros(20)
+        data[9] = 10.0  # Peak at boundary between seg 0 and seg 1
+        # With segment_bins, the peak should not leak into the next segment
+        result = gaussian_filter_normalized_1d(data, sigma=2.0, segment_bins=[0, 10, 20])
+        assert result[10] == 0.0  # First bin of segment 2 should be zero
+
+    def test_segment_bins_none_smooths_whole(self):
+        """segment_bins=None should smooth the whole array."""
+        data = np.zeros(20)
+        data[9] = 10.0
+        result = gaussian_filter_normalized_1d(data, sigma=2.0, segment_bins=None)
+        # Without segment boundaries, the peak leaks across
+        assert result[10] > 0.0
+
+    def test_segment_bins_preserves_uniform_per_segment(self):
+        """Uniform data should stay uniform within each segment."""
+        data = np.ones(30)
+        result = gaussian_filter_normalized_1d(data, sigma=2.0, segment_bins=[0, 10, 20, 30])
+        np.testing.assert_allclose(result, 1.0, rtol=1e-5)
 
 
 class TestComputeOccupancy1D:
@@ -110,31 +131,3 @@ class TestSpatialInformation1D:
             events_spread, traj, occ, valid, edges, n_shuffles=10, random_seed=1
         )
         assert si_conc > si_spread
-
-
-class TestPlaceFieldMask1D:
-    def test_detects_peak(self):
-        """Should detect a clear peak above shuffled threshold."""
-        n_bins = 40
-        rate_map = np.zeros(n_bins)
-        rate_map[15:20] = 0.8  # Clear peak
-        shuffled_p95 = np.full(n_bins, 0.3)
-        mask = compute_place_field_mask_1d(rate_map, shuffled_p95, threshold=0.1, min_bins=3)
-        assert mask[15:20].all()
-
-    def test_no_field_below_threshold(self):
-        """No field when all bins below shuffled threshold."""
-        n_bins = 20
-        rate_map = np.full(n_bins, 0.1)
-        shuffled_p95 = np.full(n_bins, 0.5)
-        mask = compute_place_field_mask_1d(rate_map, shuffled_p95, threshold=0.05, min_bins=2)
-        assert not mask.any()
-
-    def test_min_bins_filter(self):
-        """Seed regions smaller than min_bins should be excluded."""
-        n_bins = 20
-        rate_map = np.zeros(n_bins)
-        rate_map[5] = 0.9  # Single bin peak
-        shuffled_p95 = np.full(n_bins, 0.3)
-        mask = compute_place_field_mask_1d(rate_map, shuffled_p95, threshold=0.1, min_bins=3)
-        assert not mask.any()

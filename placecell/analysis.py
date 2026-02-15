@@ -737,7 +737,7 @@ def compute_unit_analysis(
         events_above = unit_data[unit_data["s"] > vis_threshold]
     else:
         vis_threshold = 0.0
-        events_above = pd.DataFrame()
+        events_above = unit_data
 
     # Shuffled rate percentile for place field seed detection (Guo et al. 2023)
     shuffled_rate_p95 = compute_shuffled_rate_percentile(
