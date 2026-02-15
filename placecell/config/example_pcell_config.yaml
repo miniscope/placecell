@@ -15,7 +15,7 @@ neural:
 behavior:
   id: behavior
   behavior_fps: 20.0
-  speed_threshold: 10.0  # mm/s
+  speed_threshold: 25.0  # mm/s
   speed_window_frames: 5
   bodypart: LED
   jump_threshold_mm: 100  # Max plausible frame-to-frame displacement (mm). Larger = tracking error.
@@ -25,7 +25,7 @@ behavior:
     min_occupancy: 0.025 # Minimum occupancy (in seconds) to include a bin in spatial map
     occupancy_sigma: 3  # Gaussian smoothing (in bins) for occupancy map (0 = no smoothing)
     activity_sigma: 3  # Gaussian smoothing (in bins) for spatial activity map
-    n_shuffles: 500
+    n_shuffles: 1000
     random_seed: 1
     event_threshold_sigma: 0  # Sigma multiplier for event amplitude threshold in trajectory visualization
     p_value_threshold: 0.05 # P-value threshold. Units with p < threshold pass.
