@@ -67,8 +67,16 @@ def test_event_index_shape(
     pipeline_result: PlaceCellDataset,
     reference: PlaceCellDataset,
 ) -> None:
-    """Event index row count must match."""
-    assert len(pipeline_result.event_index) == len(reference.event_index)
+    """Non-trivial event count must match.
+
+    OASIS deconvolution can produce near-zero ghost events (s ~ 1e-17)
+    whose presence varies across platforms.  Filter these out before
+    comparing counts.
+    """
+    threshold = 1e-10
+    got = (pipeline_result.event_index["s"] > threshold).sum()
+    ref = (reference.event_index["s"] > threshold).sum()
+    assert got == ref
 
 
 # ── Event–place matching ─────────────────────────────────────────────
@@ -78,8 +86,11 @@ def test_event_place_shape(
     pipeline_result: PlaceCellDataset,
     reference: PlaceCellDataset,
 ) -> None:
-    """Matched event count must match."""
-    assert len(pipeline_result.event_place) == len(reference.event_place)
+    """Non-trivial matched event count must match (see event_index note)."""
+    threshold = 1e-10
+    got = (pipeline_result.event_place["s"] > threshold).sum()
+    ref = (reference.event_place["s"] > threshold).sum()
+    assert got == ref
 
 
 # ── Occupancy ────────────────────────────────────────────────────────
@@ -156,6 +167,7 @@ def test_rate_maps(
             got_map,
             ref_map,
             rtol=1e-5,
+            atol=1e-10,
             equal_nan=True,
             err_msg=f"unit {uid} rate_map",
         )
