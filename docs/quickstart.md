@@ -1,10 +1,6 @@
 # Quickstart
 
-Run spatial neural activity analysis with a single command:
-
-```bash
-pcell workflow visualize --config config.yaml --data data_paths.yaml
-```
+Run the analysis using the Jupyter notebook at `notebook/workflow_2D.ipynb`.
 
 ## Required Files
 
@@ -38,7 +34,6 @@ neural_path: path/to/minian_output
 neural_timestamp: path/to/neural_timestamp.csv
 behavior_position: path/to/behavior_position.csv
 behavior_timestamp: path/to/behavior_timestamp.csv
-curation_csv: path/to/curation.csv  # optional: filter units by curation
 ```
 :::
 
@@ -49,7 +44,7 @@ Create `config.yaml` with analysis parameters:
 :::{dropdown} config.yaml
 ```yaml
 id: your_config
-mio_model: placecell.config.AppConfig
+mio_model: placecell.config.AnalysisConfig
 mio_version: 0.8.1
 neural:
   id: neural
@@ -74,15 +69,12 @@ behavior:
     activity_sigma: 3
     n_shuffles: 500
     p_value_threshold: 0.05
-    stability_threshold: 0.5
 ```
 :::
 
-### 3. Run the workflow
+### 3. Run the notebook
 
-```bash
-pcell workflow visualize --config config.yaml --data data_paths.yaml
-```
+Open `notebook/workflow_2D.ipynb` in Jupyter Lab, set `CONFIG_PATH` and `DATA_PATH` to your config files, and run all cells.
 
 ## Output
 
@@ -98,17 +90,5 @@ And finally launches the interactive place cell viewer:
 
 ![Place Cell Viewer](assets/Figure_3.png)
 
-## CLI Options
-
-```bash
-pcell workflow visualize --help
-```
-
-Optional arguments:
-- `--out-dir`: output directory (default: `output/`)
-- `--label`: label for output files (default: timestamp)
-- `--start-idx`, `--end-idx`: unit index range to process
-
 ## Next Steps
 - See [Pipeline Details](pipeline.md) for how the analysis works
-- See [CLI Reference](cli.md) for all available commands

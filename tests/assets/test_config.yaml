@@ -1,5 +1,5 @@
 id: test_config
-mio_model: pcell.config.AppConfig
+mio_model: pcell.config.AnalysisConfig
 mio_version: 0.8.1
 neural:
   id: neural
@@ -9,7 +9,6 @@ neural:
     g: [1.6, -0.63]
     baseline: p10
   trace_name: C
-  max_units: null
 behavior:
   id: behavior
   behavior_fps: 30.0

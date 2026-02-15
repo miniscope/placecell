@@ -1,31 +1,39 @@
 id: pcell_config
-mio_model: pcell.config.AppConfig
+mio_model: pcell.config.AnalysisConfig
 mio_version: 0.8.1
 neural:
   id: neural
   fps: 20.0
   oasis:
     id: oasis
-    g: [1.60, -0.63]  # AR(2) coefficients (required)
+    g: [1.60, -0.63]  # AR(2) coefficients (required, usually overridden by data config)
     baseline: p10
-    penalty: 0  # Sparsity penalty (higher = fewer events). Default 0.
+    penalty: 0.8  # Sparsity penalty (higher = fewer events). Default 0.
     s_min: 0  # Minimum event size threshold. Default 0.
   trace_name: C_lp
-  max_units: null  # Max units to process. null = process all units.
+
 behavior:
   id: behavior
   behavior_fps: 20.0
-  speed_threshold: 10.0
+  speed_threshold: 25.0  # mm/s
   speed_window_frames: 5
-  bodypart: LED_clean
+  bodypart: LED
+  jump_threshold_mm: 100  # Max plausible frame-to-frame displacement (mm). Larger = tracking error.
   spatial_map:
     id: spatial_map
     bins: 50
-    min_occupancy: 0.05 # Minimum occupancy (in seconds) to include a bin in spatial map
+    min_occupancy: 0.025 # Minimum occupancy (in seconds) to include a bin in spatial map
     occupancy_sigma: 3  # Gaussian smoothing (in bins) for occupancy map (0 = no smoothing)
     activity_sigma: 3  # Gaussian smoothing (in bins) for spatial activity map
-    n_shuffles: 500
+    n_shuffles: 1000
     random_seed: 1
     event_threshold_sigma: 0  # Sigma multiplier for event amplitude threshold in trajectory visualization
     p_value_threshold: 0.05 # P-value threshold. Units with p < threshold pass.
-    stability_threshold: 0.5 # Correlation threshold. Units with r >= threshold pass.
+    min_shift_seconds: 20  # Minimum circular shift (seconds) for shuffle test. 0 = no minimum.
+    si_weight_mode: amplitude  # SI weight mode: 'amplitude' (event amplitudes) or 'binary' (event counts)
+    place_field_threshold: 0.35  # Fraction of peak rate for place field boundary (red contour). Applied to smoothed rate map.
+    place_field_min_bins: 5  # Minimum contiguous bins for a place field component. Smaller disconnected regions are discarded.
+    place_field_seed_percentile: 95  # Percentile of shuffled rates for seed detection (Guo et al. 2023).
+    n_split_blocks: 10  # Number of temporal blocks for interleaved stability splitting.
+    block_shifts: [0]  # Block boundary shifts (fractions of block width). [0, 0.5] for two arrangements.
+    trace_time_window: 600  # Time window (seconds) for trace display in interactive browser.

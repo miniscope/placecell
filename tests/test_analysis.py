@@ -1,6 +1,5 @@
 """Regression tests for analysis pipeline."""
 
-import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -9,44 +8,47 @@ import pytest
 import xarray as xr
 
 from placecell.analysis import (
-    build_event_place_dataframe,
-    compute_behavior_speed,
     compute_occupancy_map,
     compute_rate_map,
     compute_spatial_information,
     compute_unit_analysis,
     gaussian_filter_normalized,
-    load_curated_unit_ids,
-    load_traces,
 )
+from placecell.behavior import (
+    build_event_place_dataframe,
+    compute_behavior_speed,
+)
+from placecell.neural import load_calcium_traces
 
 
 def test_event_place_regression(assets_dir: Path) -> None:
     """event_index → event_place should match reference output."""
+    from placecell.behavior import _load_behavior_xy
+
+    event_index = pd.read_csv(assets_dir / "reference_event_index.csv")
+    beh_pos = _load_behavior_xy(assets_dir / "behavior" / "behavior_position.csv", "LED_clean")
+    beh_ts = pd.read_csv(assets_dir / "behavior" / "behavior_timestamp.csv")
+    behavior_with_speed = compute_behavior_speed(beh_pos, beh_ts, window_frames=5)
+
     result = build_event_place_dataframe(
-        event_index_path=assets_dir / "reference_event_index.csv",
+        event_index=event_index,
         neural_timestamp_path=assets_dir / "neural_data" / "neural_timestamp.csv",
-        behavior_position_path=assets_dir / "behavior" / "behavior_position.csv",
-        behavior_timestamp_path=assets_dir / "behavior" / "behavior_timestamp.csv",
-        bodypart="LED_clean",
+        behavior_with_speed=behavior_with_speed,
         behavior_fps=20.0,
         speed_threshold=0.0,
-        speed_window_frames=5,
     )
 
     reference = pd.read_csv(assets_dir / "reference_event_place.csv")
 
-    # Same shape and columns
     assert list(result.columns) == list(reference.columns)
     assert len(result) == len(reference)
 
-    # Values match (with float tolerance)
     pd.testing.assert_frame_equal(result, reference, rtol=1e-5)
 
 
-def test_load_traces_shape(neural_path: Path) -> None:
-    """load_traces should return correct dimensions."""
-    C = load_traces(neural_path, trace_name="C")
+def test_load_calcium_traces_shape(neural_path: Path) -> None:
+    """load_calcium_traces should return correct dimensions."""
+    C = load_calcium_traces(neural_path, trace_name="C")
 
     assert C.dims == ("unit_id", "frame")
     assert C.sizes["unit_id"] == 10
@@ -80,25 +82,6 @@ def test_compute_behavior_speed_shape(assets_dir: Path) -> None:
     assert len(result) == 5
     # Speed should be ~100 pixels/s (10 pixels / 0.1 s)
     assert result["speed"].iloc[0] == pytest.approx(100.0, rel=0.01)
-
-
-def test_load_curated_unit_ids(assets_dir: Path) -> None:
-    """load_curated_unit_ids should filter and sort unit IDs."""
-    # Create a temporary curation CSV
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
-        f.write("unit_id,keep\n")
-        f.write("5,1\n")
-        f.write("2,0\n")
-        f.write("3,1\n")
-        f.write("1,1\n")
-        f.write("4,0\n")
-        temp_path = Path(f.name)
-
-    try:
-        result = load_curated_unit_ids(temp_path)
-        assert result == [1, 3, 5]  # Sorted, only keep=1
-    finally:
-        temp_path.unlink()
 
 
 def test_gaussian_filter_normalized(assets_dir: Path) -> None:
@@ -186,7 +169,8 @@ def test_compute_spatial_information(assets_dir: Path) -> None:
 
     si, p_val, shuffled = compute_spatial_information(
         unit_events, trajectory, ref["occupancy"], ref["valid_mask"],
-        ref["x_edges"], ref["y_edges"], n_shuffles=100, random_seed=42
+        ref["x_edges"], ref["y_edges"], n_shuffles=100, random_seed=42,
+        activity_sigma=1.0,
     )
 
     assert si == pytest.approx(float(ref["spatial_info"]), rel=1e-10)

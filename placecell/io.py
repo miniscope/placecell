@@ -6,9 +6,10 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import xarray as xr
-from mio.logging import init_logger
 
-from placecell.analysis import _load_behavior_xy, compute_behavior_speed, load_traces
+from placecell.behavior import _load_behavior_xy, compute_behavior_speed, filter_by_speed
+from placecell.logging import init_logger
+from placecell.neural import load_calcium_traces
 
 logger = init_logger(__name__)
 
@@ -136,18 +137,16 @@ def load_behavior_data(
             f"Trimmed behavior to overlap window: {len(trajectory_with_speed)}/{n_before} frames"
         )
 
-    trajectory_filtered = trajectory_with_speed[trajectory_with_speed["speed"] >= speed_threshold]
-    trajectory_filtered = trajectory_filtered.sort_values("frame_index")
-    trajectory_filtered = trajectory_filtered.rename(columns={"frame_index": "beh_frame_index"})
+    trajectory_filtered = filter_by_speed(trajectory_with_speed, speed_threshold)
 
     return trajectory_with_speed, trajectory_filtered
 
 
-def load_neural_data(
+def load_visualization_data(
     neural_path: Path | None,
     trace_name: str,
 ) -> tuple[Any, np.ndarray | None, Any]:
-    """Load neural data including traces, max projection, and footprints.
+    """Load visualization data: traces, max projection, and footprints.
 
     Parameters
     ----------
@@ -172,7 +171,7 @@ def load_neural_data(
 
     # Load traces
     try:
-        traces = load_traces(neural_path, trace_name=trace_name)
+        traces = load_calcium_traces(neural_path, trace_name=trace_name)
     except FileNotFoundError:
         logger.warning(f"{trace_name}.zarr not found at {neural_path}. Trace display disabled.")
     except (KeyError, ValueError) as e:

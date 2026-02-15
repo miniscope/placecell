@@ -1,0 +1,37 @@
+id: regression_test_config
+mio_model: pcell.config.AnalysisConfig
+mio_version: 0.8.1
+neural:
+  fps: 20.0
+  oasis:
+    g:
+    - 1.3805576774138437
+    - -0.4111122905071874
+    baseline: p10
+    penalty: 0.8
+    s_min: 0.0
+  trace_name: C_lp
+behavior:
+  behavior_fps: 20.0
+  speed_threshold: 25.0
+  speed_window_frames: 5
+  bodypart: LED
+  jump_threshold_mm: 100.0
+  spatial_map:
+    bins: 50
+    min_occupancy: 0.025
+    occupancy_sigma: 3.0
+    activity_sigma: 3.0
+    n_shuffles: 100
+    random_seed: 42
+    event_threshold_sigma: 0.0
+    p_value_threshold: 0.05
+    min_shift_seconds: 20.0
+    si_weight_mode: amplitude
+    place_field_threshold: 0.35
+    place_field_min_bins: 5
+    place_field_seed_percentile: 95.0
+    n_split_blocks: 10
+    block_shifts:
+    - 0.0
+    trace_time_window: 600.0

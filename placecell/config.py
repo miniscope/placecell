@@ -1,11 +1,16 @@
 """Configuration models for pcell, loaded from YAML."""
 
+from pathlib import Path
+
+import yaml
 from mio.models import MiniscopeConfig
 from mio.models.mixins import ConfigYAMLMixin
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field
+
+CONFIG_DIR = Path(__file__).parent / "config"
 
 
-class OasisConfig(MiniscopeConfig, ConfigYAMLMixin):
+class OasisConfig(BaseModel):
     """OASIS deconvolution parameters."""
 
     g: tuple[float, float] = Field(
@@ -28,7 +33,7 @@ class OasisConfig(MiniscopeConfig, ConfigYAMLMixin):
     )
 
 
-class NeuralConfig(MiniscopeConfig, ConfigYAMLMixin):
+class NeuralConfig(BaseModel):
     """Neural data configuration."""
 
     fps: float = Field(
@@ -40,18 +45,9 @@ class NeuralConfig(MiniscopeConfig, ConfigYAMLMixin):
         "C",
         description="Base name of the zarr group (e.g. 'C' or 'C_lp').",
     )
-    max_units: int | None = Field(
-        None,
-        ge=1,
-        description=(
-            "Maximum number of units to include in a visualization. "
-            "If omitted/null, use all available units unless a CLI max-units "
-            "override is provided."
-        ),
-    )
 
 
-class SpatialMapConfig(MiniscopeConfig, ConfigYAMLMixin):
+class SpatialMapConfig(BaseModel):
     """Spatial map visualization configuration."""
 
     bins: int = Field(
@@ -92,27 +88,190 @@ class SpatialMapConfig(MiniscopeConfig, ConfigYAMLMixin):
         description="Sigma multiplier for event amplitude threshold in trajectory plot. "
         "Can be negative to include lower-amplitude events.",
     )
-    p_value_threshold: float | None = Field(
-        None,
+    p_value_threshold: float = Field(
+        0.05,
         ge=0.0,
         le=1.0,
         description=(
             "P-value threshold for significance test pass/fail. "
-            "Units with p-value < threshold pass. Default 0.05 if None."
+            "Units with p-value < threshold pass."
         ),
     )
-    stability_threshold: float = Field(
-        0.5,
-        ge=-1.0,
-        le=1.0,
+    min_shift_seconds: float = Field(
+        20.0,
+        ge=0.0,
         description=(
-            "Correlation threshold for stability test pass/fail. "
-            "Units with first/second half rate map correlation >= threshold pass."
+            "Minimum circular shift in seconds for shuffle significance test. "
+            "Ensures shuffled data breaks the temporal-spatial association. "
+            "Set to 0 to allow any shift size (original behavior)."
         ),
+    )
+    si_weight_mode: str = Field(
+        "binary",
+        description=(
+            "Weight mode for spatial information calculation: "
+            "'amplitude' uses event amplitudes (s values), "
+            "'binary' uses event counts (1 per event, ignoring amplitude). "
+            "Binary mode is more robust to bursty firing patterns."
+        ),
+    )
+    place_field_threshold: float = Field(
+        0.05,
+        gt=0.0,
+        lt=1.0,
+        description=(
+            "Fraction of peak rate to define the place field boundary "
+            "(red contour on rate maps and coverage analysis). "
+            "Applied to the smoothed, normalized rate map. "
+            "E.g. 0.05 means bins >= 5%% of peak are inside the field."
+        ),
+    )
+    place_field_min_bins: int = Field(
+        5,
+        ge=1,
+        description=(
+            "Minimum number of contiguous bins for a connected component "
+            "to count as a place field (Guo et al. 2023). Smaller "
+            "disconnected regions are discarded. Set to 1 to disable."
+        ),
+    )
+    place_field_seed_percentile: float = Field(
+        95.0,
+        description=(
+            "Percentile of shuffled rate maps for place field seed detection "
+            "(Guo et al. 2023). Bins exceeding this percentile form seeds; "
+            "seeds extend to contiguous bins above place_field_threshold."
+        ),
+    )
+    n_split_blocks: int = Field(
+        10,
+        ge=2,
+        le=100,
+        description=(
+            "Number of temporal blocks for interleaved stability splitting. "
+            "The session is divided into this many equal-duration blocks, "
+            "and odd/even blocks are assigned to each half."
+        ),
+    )
+    block_shifts: list[float] = Field(
+        [0.0],
+        description=(
+            "List of block boundary shifts as fractions of one block width. "
+            "Each value produces an independent split; results are Fisher "
+            "z-averaged. Use [0] for a single split, [0, 0.5] for two "
+            "shifted arrangements, etc. Values are circular with period 1.0."
+        ),
+    )
+    trace_time_window: float = Field(
+        600.0,
+        gt=0.0,
+        description="Time window in seconds for trace display in the interactive browser.",
     )
 
 
-class BehaviorConfig(MiniscopeConfig, ConfigYAMLMixin):
+class MazeConfig(BaseModel):
+    """Configuration for maze/tube-based 1D analysis."""
+
+    tube_order: list[str] = Field(
+        ["Tube_1", "Tube_2", "Tube_3", "Tube_4"],
+        description="Ordered list of tube zone names. Determines concatenation order on 1D axis.",
+    )
+    zone_column: str = Field(
+        "zone",
+        description="Column name in behavior CSV containing zone labels.",
+    )
+    tube_position_column: str = Field(
+        "tube_position",
+        description="Column name in behavior CSV containing within-tube position (0-1).",
+    )
+
+
+class SpatialMap1DConfig(BaseModel):
+    """Spatial map settings for 1D tube analysis."""
+
+    bins_per_tube: int = Field(
+        25,
+        ge=5,
+        le=200,
+        description="Number of spatial bins per tube segment. Total bins = bins_per_tube * n_tubes.",
+    )
+    min_occupancy: float = Field(
+        0.025,
+        ge=0.0,
+        description="Minimum occupancy time (seconds) for a bin to be included.",
+    )
+    occupancy_sigma: float = Field(
+        2.0,
+        ge=0.0,
+        description="Gaussian smoothing sigma (in bins) for the 1D occupancy histogram.",
+    )
+    activity_sigma: float = Field(
+        2.0,
+        ge=0.0,
+        description="Gaussian smoothing sigma (in bins) for the 1D rate map.",
+    )
+    n_shuffles: int = Field(
+        1000,
+        ge=1,
+        le=10000,
+        description="Number of shuffles for significance test.",
+    )
+    random_seed: int | None = Field(
+        None,
+        description="Random seed for reproducible shuffling.",
+    )
+    event_threshold_sigma: float = Field(
+        0.0,
+        description="Sigma multiplier for event amplitude threshold in visualization.",
+    )
+    p_value_threshold: float = Field(
+        0.05,
+        ge=0.0,
+        le=1.0,
+        description="P-value threshold for significance test.",
+    )
+    min_shift_seconds: float = Field(
+        20.0,
+        ge=0.0,
+        description="Minimum circular shift in seconds for shuffle test.",
+    )
+    si_weight_mode: str = Field(
+        "amplitude",
+        description="Weight mode for spatial information: 'amplitude' or 'binary'.",
+    )
+    place_field_threshold: float = Field(
+        0.35,
+        gt=0.0,
+        lt=1.0,
+        description="Fraction of peak rate to define place field boundary.",
+    )
+    place_field_min_bins: int = Field(
+        3,
+        ge=1,
+        description="Minimum contiguous bins for a place field.",
+    )
+    place_field_seed_percentile: float = Field(
+        95.0,
+        description="Percentile of shuffled rate maps for place field seed detection.",
+    )
+    n_split_blocks: int = Field(
+        10,
+        ge=2,
+        le=100,
+        description="Number of temporal blocks for stability splitting.",
+    )
+    block_shifts: list[float] = Field(
+        [0.0],
+        description="Block boundary shifts as fractions of one block width.",
+    )
+    trace_time_window: float = Field(
+        600.0,
+        gt=0.0,
+        description="Time window in seconds for trace display.",
+    )
+
+
+class BehaviorConfig(BaseModel):
     """Behavior / place-field configuration."""
 
     behavior_fps: float = Field(
@@ -125,7 +284,7 @@ class BehaviorConfig(MiniscopeConfig, ConfigYAMLMixin):
     )
     speed_threshold: float = Field(
         50.0,
-        description="Minimum running speed to keep events (pixels/s or cm/s).",
+        description="Minimum running speed to keep events (mm/s).",
     )
     speed_window_frames: int = Field(
         5,
@@ -145,14 +304,35 @@ class BehaviorConfig(MiniscopeConfig, ConfigYAMLMixin):
         "y",
         description="Coordinate column name for the y-axis in the behavior CSV.",
     )
+    jump_threshold_mm: float = Field(
+        100.0,
+        gt=0.0,
+        description="Maximum plausible frame-to-frame displacement in mm. "
+        "Larger jumps are treated as tracking errors and interpolated.",
+    )
     spatial_map: SpatialMapConfig = Field(
         default_factory=SpatialMapConfig,
         description="Spatial map visualization settings.",
     )
+    maze: MazeConfig | None = Field(
+        None,
+        description="Maze configuration for 1D tube analysis. None = standard 2D mode.",
+    )
+    spatial_map_1d: SpatialMap1DConfig | None = Field(
+        None,
+        description="Spatial map settings for 1D analysis. Required when maze is set.",
+    )
 
 
-class DataPathsConfig(MiniscopeConfig, ConfigYAMLMixin):
+class DataPathsConfig(BaseModel):
     """Bundle of data file paths for neural and behavior data."""
+
+    @classmethod
+    def from_yaml(cls, path: str | Path) -> "DataPathsConfig":
+        """Load from a YAML file."""
+        with open(path) as f:
+            data = yaml.safe_load(f)
+        return cls(**data)
 
     neural_path: str = Field(
         ...,
@@ -170,12 +350,35 @@ class DataPathsConfig(MiniscopeConfig, ConfigYAMLMixin):
         ...,
         description="Path to behavior timestamp CSV file (behavior_timestamp.csv).",
     )
-    curation_csv: str | None = Field(
+    behavior_video: str | None = Field(
+        None,
+        description="Path to behavior video file (e.g. .mp4). Used for arena bounds verification.",
+    )
+    arena_bounds: tuple[float, float, float, float] | None = Field(
         None,
         description=(
-            "Path to curation results CSV file with columns 'unit_id' and 'keep'. "
-            "Only units with keep=1 will be processed. If None, all units are used."
+            "Arena bounding box in pixels: (x_min, x_max, y_min, y_max). "
+            "Used for perspective correction center and boundary clipping. "
+            "If None, no preprocessing (perspective/clipping) is applied."
         ),
+    )
+    arena_size_mm: tuple[float, float] | None = Field(
+        None,
+        description=(
+            "Physical arena dimensions in mm: (width, height). "
+            "Required when arena_bounds is set. Used to derive mm/pixel scale."
+        ),
+    )
+    camera_height_mm: float | None = Field(
+        None,
+        gt=0.0,
+        description="Camera height above arena floor in mm. Required when arena_bounds is set.",
+    )
+    tracking_height_mm: float | None = Field(
+        None,
+        ge=0.0,
+        description="Height of tracked point (e.g. LED) above arena floor in mm. "
+        "Required when arena_bounds is set.",
     )
     oasis: OasisConfig | None = Field(
         None,
@@ -186,13 +389,26 @@ class DataPathsConfig(MiniscopeConfig, ConfigYAMLMixin):
     )
 
 
-class AppConfig(MiniscopeConfig, ConfigYAMLMixin):
+class _PlacecellConfigMixin(ConfigYAMLMixin):
+    """Override config sources to include placecell bundled configs."""
+
+    @classmethod
+    def config_sources(cls) -> list[Path]:
+        from mio import CONFIG_DIR as MIO_CONFIG_DIR
+        from mio import Config
+
+        return [Config().config_dir, CONFIG_DIR, MIO_CONFIG_DIR]
+
+
+class AnalysisConfig(MiniscopeConfig, _PlacecellConfigMixin):
     """Top-level application configuration."""
+
+    model_config = ConfigDict(extra="ignore")
 
     neural: NeuralConfig
     behavior: BehaviorConfig | None = None
 
-    def with_data_overrides(self, data_cfg: DataPathsConfig) -> "AppConfig":
+    def with_data_overrides(self, data_cfg: DataPathsConfig) -> "AnalysisConfig":
         """Create a new config with data-specific overrides applied.
 
         Parameters
@@ -202,11 +418,10 @@ class AppConfig(MiniscopeConfig, ConfigYAMLMixin):
 
         Returns
         -------
-        AppConfig
+        AnalysisConfig
             New config with overrides applied. Original config is unchanged.
         """
         if data_cfg.oasis is not None:
-            # Override OASIS config with data-specific values
             new_neural = self.neural.model_copy(update={"oasis": data_cfg.oasis})
             return self.model_copy(update={"neural": new_neural})
         return self
