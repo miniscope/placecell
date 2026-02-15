@@ -26,10 +26,10 @@ behavior:
     zone_column: zone
     tube_position_column: tube_position
   spatial_map_1d:
-    bins_per_tube: 25
+    bins_per_tube: 50
     min_occupancy: 0.025
-    occupancy_sigma: 2
-    activity_sigma: 2
+    occupancy_sigma: 3
+    activity_sigma: 3
     n_shuffles: 1000
     random_seed: 42
     event_threshold_sigma: 0

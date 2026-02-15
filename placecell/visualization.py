@@ -760,6 +760,152 @@ def plot_rate_map_1d(
     return fig
 
 
+def plot_shuffle_test_1d(
+    unit_results: dict,
+    edges: np.ndarray,
+    p_value_threshold: float = 0.05,
+    tube_boundaries: "list[float] | None" = None,
+    tube_labels: "list[str] | None" = None,
+) -> "Figure":
+    """Shuffle-test summary for all place cells (Guo et al. 2023 style).
+
+    Layout (3 rows):
+      Row 1: Population rate map heatmap — each row is a place cell sorted
+              by peak position, columns are spatial bins (Fig 3J style).
+      Row 2: Spatial information — observed vs shuffled distribution for
+              all place cells (histogram overlay).
+      Row 3: Stability — observed vs shuffled split-half correlation for
+              all place cells (histogram overlay).
+
+    Parameters
+    ----------
+    unit_results:
+        Dictionary mapping unit_id to UnitResult.
+    edges:
+        1D bin edges array.
+    p_value_threshold:
+        Threshold for classifying place cells.
+    tube_boundaries:
+        Tube boundary positions for vertical markers.
+    tube_labels:
+        Labels for each tube segment.
+    """
+    if plt is None:
+        raise ImportError("matplotlib is required for plotting.")
+
+    # Identify place cells: significant SI AND stable
+    place_cell_ids = []
+    for uid, res in unit_results.items():
+        is_sig = res.p_val < p_value_threshold
+        is_stable = not np.isnan(res.stability_p_val) and res.stability_p_val < p_value_threshold
+        if is_sig and is_stable:
+            place_cell_ids.append(uid)
+
+    if not place_cell_ids:
+        fig, ax = plt.subplots(1, 1, figsize=(8, 2))
+        ax.text(0.5, 0.5, "No place cells found", ha="center", va="center", fontsize=14)
+        ax.axis("off")
+        return fig
+
+    # Collect rate maps and sort by peak position
+    centers = 0.5 * (edges[:-1] + edges[1:])
+    rate_maps = []
+    for uid in place_cell_ids:
+        rm = unit_results[uid].rate_map.copy()
+        rm[~np.isfinite(rm)] = 0.0
+        rate_maps.append(rm)
+    rate_maps = np.array(rate_maps)
+
+    peak_positions = np.array([centers[np.argmax(rm)] for rm in rate_maps])
+    sort_order = np.argsort(peak_positions)
+    rate_maps_sorted = rate_maps[sort_order]
+    sorted_ids = [place_cell_ids[i] for i in sort_order]
+
+    # Collect shuffle distributions
+    all_observed_si = [unit_results[uid].si for uid in sorted_ids]
+    all_shuffled_si = np.concatenate(
+        [unit_results[uid].shuffled_sis for uid in sorted_ids
+         if len(unit_results[uid].shuffled_sis) > 0]
+    )
+    all_observed_stab = [
+        unit_results[uid].stability_corr for uid in sorted_ids
+        if not np.isnan(unit_results[uid].stability_corr)
+    ]
+    all_shuffled_stab = np.concatenate(
+        [unit_results[uid].shuffled_stability for uid in sorted_ids
+         if len(unit_results[uid].shuffled_stability) > 0]
+    )
+
+    fig, axes = plt.subplots(3, 1, figsize=(10, 10), height_ratios=[2, 1, 1])
+
+    # ── Row 1: Population rate map heatmap (Fig 3J) ──────────────────
+    ax = axes[0]
+    im = ax.imshow(
+        rate_maps_sorted,
+        aspect="auto",
+        cmap="hot",
+        interpolation="nearest",
+        extent=[edges[0], edges[-1], len(sorted_ids), 0],
+        vmin=0,
+        vmax=1,
+    )
+    ax.set_ylabel("Cell number")
+    ax.set_xlabel("1D position")
+    ax.set_title(f"Place cells sorted by peak position (N = {len(sorted_ids)})")
+    plt.colorbar(im, ax=ax, label="Normalized rate", shrink=0.8)
+
+    if tube_boundaries:
+        for b in tube_boundaries:
+            ax.axvline(b, color="white", linestyle="--", linewidth=0.8, alpha=0.7)
+    if tube_labels and tube_boundaries and len(tube_labels) == len(tube_boundaries) - 1:
+        for i, lbl in enumerate(tube_labels):
+            mid = (tube_boundaries[i] + tube_boundaries[i + 1]) / 2
+            ax.text(mid, -0.5, lbl, ha="center", va="bottom", fontsize=7,
+                    color="black", clip_on=False)
+
+    # ── Row 2: SI shuffle distribution ────────────────────────────────
+    ax = axes[1]
+    if len(all_shuffled_si) > 0:
+        ax.hist(all_shuffled_si, bins=50, color="gray", alpha=0.7,
+                edgecolor="none", density=True, label="Shuffled")
+    for si_val in all_observed_si:
+        ax.axvline(si_val, color="red", linewidth=0.5, alpha=0.3)
+    # Mark the median observed
+    median_si = np.median(all_observed_si)
+    ax.axvline(median_si, color="red", linewidth=2, linestyle="-",
+               label=f"Observed (median={median_si:.3f})")
+    if len(all_shuffled_si) > 0:
+        pct95 = np.percentile(all_shuffled_si, 95)
+        ax.axvline(pct95, color="black", linewidth=1.5, linestyle="--",
+                   label=f"95th pctl shuffled={pct95:.3f}")
+    ax.set_xlabel("Spatial information (bits/s)")
+    ax.set_ylabel("Density")
+    ax.set_title("Significance test: observed SI vs circular-shift shuffle")
+    ax.legend(fontsize=8)
+
+    # ── Row 3: Stability shuffle distribution ─────────────────────────
+    ax = axes[2]
+    if len(all_shuffled_stab) > 0:
+        ax.hist(all_shuffled_stab, bins=50, color="gray", alpha=0.7,
+                edgecolor="none", density=True, label="Shuffled")
+    for corr_val in all_observed_stab:
+        ax.axvline(corr_val, color="blue", linewidth=0.5, alpha=0.3)
+    median_stab = np.median(all_observed_stab) if all_observed_stab else 0
+    ax.axvline(median_stab, color="blue", linewidth=2, linestyle="-",
+               label=f"Observed (median={median_stab:.3f})")
+    if len(all_shuffled_stab) > 0:
+        pct95_stab = np.percentile(all_shuffled_stab, 95)
+        ax.axvline(pct95_stab, color="black", linewidth=1.5, linestyle="--",
+                   label=f"95th pctl shuffled={pct95_stab:.3f}")
+    ax.set_xlabel("Split-half correlation")
+    ax.set_ylabel("Density")
+    ax.set_title("Stability test: observed correlation vs circular-shift shuffle")
+    ax.legend(fontsize=8)
+
+    fig.tight_layout()
+    return fig
+
+
 def plot_occupancy_preview_1d(
     trajectory_1d_filtered: "pd.DataFrame",
     occupancy_time: np.ndarray,

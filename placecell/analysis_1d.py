@@ -8,18 +8,45 @@ from scipy.ndimage import gaussian_filter1d, label
 def gaussian_filter_normalized_1d(
     data: np.ndarray,
     sigma: float,
+    n_segments: int = 1,
 ) -> np.ndarray:
     """Apply 1D Gaussian smoothing with boundary normalization.
 
     Uses zero-padding and normalizes by the kernel weight sum so that
     edge bins are not penalized.
+
+    Parameters
+    ----------
+    data:
+        1D array to smooth.
+    sigma:
+        Gaussian smoothing sigma in bins.
+    n_segments:
+        Number of independent segments (e.g. tubes).  When > 1 the array
+        is split into equal-length segments and each is smoothed
+        independently so that activity does not leak across segment
+        boundaries.
     """
     if sigma <= 0:
         return data.copy()
-    smoothed = gaussian_filter1d(data, sigma=sigma, mode="constant", cval=0)
-    norm = gaussian_filter1d(np.ones_like(data), sigma=sigma, mode="constant", cval=0)
-    norm[norm == 0] = 1
-    return smoothed / norm
+    if n_segments <= 1:
+        smoothed = gaussian_filter1d(data, sigma=sigma, mode="constant", cval=0)
+        norm = gaussian_filter1d(np.ones_like(data), sigma=sigma, mode="constant", cval=0)
+        norm[norm == 0] = 1
+        return smoothed / norm
+
+    # Smooth each segment independently
+    seg_len = len(data) // n_segments
+    result = np.empty_like(data)
+    for i in range(n_segments):
+        s = i * seg_len
+        e = (i + 1) * seg_len if i < n_segments - 1 else len(data)
+        seg = data[s:e]
+        smoothed = gaussian_filter1d(seg, sigma=sigma, mode="constant", cval=0)
+        norm = gaussian_filter1d(np.ones_like(seg), sigma=sigma, mode="constant", cval=0)
+        norm[norm == 0] = 1
+        result[s:e] = smoothed / norm
+    return result
 
 
 def compute_occupancy_map_1d(
@@ -30,6 +57,7 @@ def compute_occupancy_map_1d(
     occupancy_sigma: float = 1.0,
     min_occupancy: float = 0.1,
     pos_column: str = "pos_1d",
+    n_segments: int = 1,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Compute 1D occupancy histogram.
 
@@ -49,6 +77,8 @@ def compute_occupancy_map_1d(
         Minimum occupancy in seconds.
     pos_column:
         Column name for position values.
+    n_segments:
+        Number of independent segments (tubes) for smoothing.
 
     Returns
     -------
@@ -62,7 +92,9 @@ def compute_occupancy_map_1d(
     occupancy_time = counts.astype(float) * time_per_frame
 
     if occupancy_sigma > 0:
-        occupancy_time = gaussian_filter_normalized_1d(occupancy_time, sigma=occupancy_sigma)
+        occupancy_time = gaussian_filter_normalized_1d(
+            occupancy_time, sigma=occupancy_sigma, n_segments=n_segments
+        )
 
     valid_mask = occupancy_time >= min_occupancy
 
@@ -76,6 +108,7 @@ def compute_rate_map_1d(
     edges: np.ndarray,
     activity_sigma: float = 1.0,
     pos_column: str = "pos_1d",
+    n_segments: int = 1,
 ) -> np.ndarray:
     """Compute smoothed and normalized 1D rate map.
 
@@ -95,7 +128,9 @@ def compute_rate_map_1d(
     event_weights = event_weights.astype(float)
     rate_map = np.zeros_like(occupancy_time)
     rate_map[valid_mask] = event_weights[valid_mask] / occupancy_time[valid_mask]
-    rate_map_smooth = gaussian_filter_normalized_1d(rate_map, sigma=activity_sigma)
+    rate_map_smooth = gaussian_filter_normalized_1d(
+        rate_map, sigma=activity_sigma, n_segments=n_segments
+    )
 
     valid_rate_values = rate_map_smooth[valid_mask]
     if len(valid_rate_values) > 0 and np.nanmax(valid_rate_values) > 0:
@@ -139,6 +174,7 @@ def compute_spatial_information_1d(
     si_weight_mode: str = "amplitude",
     activity_sigma: float = 0.0,
     pos_column: str = "pos_1d",
+    n_segments: int = 1,
 ) -> tuple[float, float, np.ndarray]:
     """Compute 1D spatial information with shuffle significance test.
 
@@ -166,7 +202,9 @@ def compute_spatial_information_1d(
     rate_map[valid_mask] = event_weights[valid_mask] / occupancy_time[valid_mask]
 
     if activity_sigma > 0:
-        rate_map = gaussian_filter_normalized_1d(rate_map, sigma=activity_sigma)
+        rate_map = gaussian_filter_normalized_1d(
+            rate_map, sigma=activity_sigma, n_segments=n_segments
+        )
         rate_map[~valid_mask] = 0.0
 
     total_time = np.sum(occupancy_time[valid_mask])
@@ -214,7 +252,9 @@ def compute_spatial_information_1d(
         rate_shuf[valid_mask] = event_w_shuf[valid_mask] / occupancy_time[valid_mask]
 
         if activity_sigma > 0:
-            rate_shuf = gaussian_filter_normalized_1d(rate_shuf, sigma=activity_sigma)
+            rate_shuf = gaussian_filter_normalized_1d(
+                rate_shuf, sigma=activity_sigma, n_segments=n_segments
+            )
             rate_shuf[~valid_mask] = 0.0
 
         valid_s = (rate_shuf > 0) & valid_mask
@@ -246,6 +286,7 @@ def compute_shuffled_rate_percentile_1d(
     random_seed: int | None = None,
     percentile: float = 95.0,
     pos_column: str = "pos_1d",
+    n_segments: int = 1,
 ) -> np.ndarray:
     """Compute per-bin percentile of shuffled smoothed 1D rate maps.
 
@@ -283,7 +324,9 @@ def compute_shuffled_rate_percentile_1d(
         event_w_shuf = event_w_shuf.astype(float)
         rate_shuf = np.zeros_like(occupancy_time)
         rate_shuf[valid_mask] = event_w_shuf[valid_mask] / occupancy_time[valid_mask]
-        rate_shuf_smooth = gaussian_filter_normalized_1d(rate_shuf, sigma=activity_sigma)
+        rate_shuf_smooth = gaussian_filter_normalized_1d(
+            rate_shuf, sigma=activity_sigma, n_segments=n_segments
+        )
 
         peak = np.nanmax(rate_shuf_smooth[valid_mask]) if np.any(valid_mask) else 0
         if peak > 0:
@@ -312,6 +355,7 @@ def compute_stability_score_1d(
     min_shift_seconds: float = 0.0,
     si_weight_mode: str = "amplitude",
     pos_column: str = "pos_1d",
+    n_segments: int = 1,
 ) -> tuple[float, float, float, np.ndarray, np.ndarray, np.ndarray]:
     """Compute 1D split-half stability test.
 
@@ -364,7 +408,9 @@ def compute_stability_score_1d(
             return np.zeros_like(occupancy_time), np.zeros_like(valid_mask, dtype=bool)
         counts, _ = np.histogram(traj_half[pos_column], bins=edges)
         occ = counts.astype(float) * time_per_frame
-        occ_smooth = gaussian_filter_normalized_1d(occ, sigma=occupancy_sigma)
+        occ_smooth = gaussian_filter_normalized_1d(
+            occ, sigma=occupancy_sigma, n_segments=n_segments
+        )
         mask = occ_smooth >= min_occupancy
         return occ_smooth, mask
 
@@ -382,7 +428,9 @@ def compute_stability_score_1d(
         event_weights = event_weights.astype(float)
         rate_map = np.zeros_like(occ)
         rate_map[mask] = event_weights[mask] / occ[mask]
-        rate_map_smooth = gaussian_filter_normalized_1d(rate_map, sigma=activity_sigma)
+        rate_map_smooth = gaussian_filter_normalized_1d(
+            rate_map, sigma=activity_sigma, n_segments=n_segments
+        )
         rate_map_smooth[~mask] = np.nan
         return rate_map_smooth
 
@@ -441,14 +489,18 @@ def compute_stability_score_1d(
             )
             rm1 = np.zeros_like(occ_first)
             rm1[valid_first] = ew1.astype(float)[valid_first] / occ_first[valid_first]
-            rm1 = gaussian_filter_normalized_1d(rm1, sigma=activity_sigma)
+            rm1 = gaussian_filter_normalized_1d(
+                rm1, sigma=activity_sigma, n_segments=n_segments
+            )
 
             ew2, _ = np.histogram(
                 traj_pos[traj_second_mask], bins=edges, weights=shifted[traj_second_mask]
             )
             rm2 = np.zeros_like(occ_second)
             rm2[valid_second] = ew2.astype(float)[valid_second] / occ_second[valid_second]
-            rm2 = gaussian_filter_normalized_1d(rm2, sigma=activity_sigma)
+            rm2 = gaussian_filter_normalized_1d(
+                rm2, sigma=activity_sigma, n_segments=n_segments
+            )
 
             bv = valid_first & valid_second
             if not np.any(bv):
@@ -538,6 +590,7 @@ def compute_unit_analysis_1d(
     n_split_blocks: int = 10,
     block_shifts: list[float] | None = None,
     pos_column: str = "pos_1d",
+    n_segments: int = 1,
 ) -> dict:
     """Compute 1D rate map, SI, stability, and place field for a unit.
 
@@ -548,7 +601,8 @@ def compute_unit_analysis_1d(
     )
 
     rate_map = compute_rate_map_1d(
-        unit_data, occupancy_time, valid_mask, edges, activity_sigma, pos_column
+        unit_data, occupancy_time, valid_mask, edges, activity_sigma, pos_column,
+        n_segments=n_segments,
     )
     rate_map_raw = compute_raw_rate_map_1d(
         unit_data, occupancy_time, valid_mask, edges, pos_column
@@ -567,6 +621,7 @@ def compute_unit_analysis_1d(
         si_weight_mode=si_weight_mode,
         activity_sigma=activity_sigma,
         pos_column=pos_column,
+        n_segments=n_segments,
     )
 
     if not unit_data.empty and len(unit_data) > 1:
@@ -590,6 +645,7 @@ def compute_unit_analysis_1d(
         random_seed=random_seed,
         percentile=place_field_seed_percentile,
         pos_column=pos_column,
+        n_segments=n_segments,
     )
 
     if block_shifts is None:
@@ -618,6 +674,7 @@ def compute_unit_analysis_1d(
             min_shift_seconds=min_shift_seconds,
             si_weight_mode=si_weight_mode,
             pos_column=pos_column,
+            n_segments=n_segments,
         )
         if np.isfinite(z_i):
             z_scores.append(z_i)

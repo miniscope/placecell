@@ -95,7 +95,11 @@ class MazeDataset(PlaceCellDataset):
         )
 
     def _load_maze_columns(self) -> None:
-        """Load zone and tube_position columns from behavior CSV into trajectory."""
+        """Load zone and tube_position columns from behavior CSV into trajectory.
+
+        Joins on ``frame_index`` to handle trajectories that have been
+        trimmed or reordered by speed computation / time-range filtering.
+        """
         mcfg = self.maze_cfg
         zone_col = mcfg.zone_column
         tp_col = mcfg.tube_position_column
@@ -104,8 +108,6 @@ class MazeDataset(PlaceCellDataset):
             return  # Already present
 
         # Re-read the behavior CSV to get the extra columns
-        import pandas as pd
-
         df = pd.read_csv(self.behavior_position_path, header=[0, 1, 2])
         scorer = df.columns[1][0]
         bodypart = self.cfg.behavior.bodypart
@@ -114,21 +116,30 @@ class MazeDataset(PlaceCellDataset):
         zone_key = (scorer, bodypart, zone_col)
         tp_key = (scorer, bodypart, tp_col)
 
-        if zone_key in df.columns:
-            self.trajectory[zone_col] = df[zone_key].values[: len(self.trajectory)]
-        else:
+        if zone_key not in df.columns:
             raise ValueError(
                 f"Column '{zone_col}' not found for bodypart '{bodypart}' in behavior CSV."
             )
-
-        if tp_key in df.columns:
-            self.trajectory[tp_col] = pd.to_numeric(
-                df[tp_key].values[: len(self.trajectory)], errors="coerce"
-            )
-        else:
+        if tp_key not in df.columns:
             raise ValueError(
                 f"Column '{tp_col}' not found for bodypart '{bodypart}' in behavior CSV."
             )
+
+        # Build a lookup keyed by frame_index (first column of the CSV)
+        frame_index = df.iloc[:, 0].values
+        lookup = pd.DataFrame({
+            "frame_index": frame_index,
+            zone_col: df[zone_key].values,
+            tp_col: pd.to_numeric(df[tp_key].values, errors="coerce"),
+        })
+
+        # Merge on frame_index so alignment survives trimming / reordering
+        self.trajectory = self.trajectory.merge(lookup, on="frame_index", how="left")
+        logger.info(
+            "Loaded maze columns via frame_index join: %d/%d frames matched",
+            self.trajectory[zone_col].notna().sum(),
+            len(self.trajectory),
+        )
 
     def match_events(self) -> None:
         """Match events to behavior, then add 1D position.
@@ -141,10 +152,10 @@ class MazeDataset(PlaceCellDataset):
         if self.trajectory_1d is None:
             raise RuntimeError("Call preprocess_behavior() first.")
 
-        # Add pos_1d to event_place by joining on behavior frame
-        pos_lookup = self.trajectory_1d[["frame_index", "pos_1d", "tube_index"]].rename(
-            columns={"frame_index": "beh_frame_index"}
-        )
+        # Add pos_1d and speed_1d to event_place by joining on behavior frame
+        pos_lookup = self.trajectory_1d[
+            ["frame_index", "pos_1d", "tube_index", "speed_1d"]
+        ].rename(columns={"frame_index": "beh_frame_index"})
         self.event_place = self.event_place.merge(pos_lookup, on="beh_frame_index", how="left")
 
         # Drop events not in tubes (pos_1d will be NaN)
@@ -172,6 +183,7 @@ class MazeDataset(PlaceCellDataset):
             behavior_fps=self.cfg.behavior.behavior_fps,
             occupancy_sigma=scfg.occupancy_sigma,
             min_occupancy=scfg.min_occupancy,
+            n_segments=n_tubes,
         )
 
         # Store in x_edges for compatibility with save_bundle
@@ -198,7 +210,10 @@ class MazeDataset(PlaceCellDataset):
         if scfg.random_seed is not None:
             np.random.seed(scfg.random_seed)
 
-        df_filtered = self.event_place[self.event_place["speed"] >= bcfg.speed_threshold].copy()
+        # Use 1D tube speed (same criterion as occupancy), not 2D camera speed
+        df_filtered = self.event_place[
+            self.event_place["speed_1d"] >= bcfg.speed_threshold
+        ].copy()
 
         unique_units = sorted(df_filtered["unit_id"].unique())
         unique_units = [uid for uid in unique_units if uid in self.good_unit_ids]
@@ -207,6 +222,8 @@ class MazeDataset(PlaceCellDataset):
         iterator = unique_units
         if progress_bar is not None:
             iterator = progress_bar(iterator)
+
+        n_tubes = len(self.maze_cfg.tube_order)
 
         self.unit_results = {}
         for unit_id in iterator:
@@ -229,6 +246,7 @@ class MazeDataset(PlaceCellDataset):
                 place_field_seed_percentile=scfg.place_field_seed_percentile,
                 n_split_blocks=scfg.n_split_blocks,
                 block_shifts=scfg.block_shifts,
+                n_segments=n_tubes,
             )
 
             trace_data = None
@@ -282,6 +300,58 @@ class MazeDataset(PlaceCellDataset):
             "n_stable": n_stable,
             "n_place_cells": n_place_cells,
         }
+
+    def place_cells(self) -> dict[int, "UnitResult"]:
+        """Return units passing both significance and stability tests (1D thresholds)."""
+        p_thresh = self.spatial_1d.p_value_threshold
+        out: dict[int, UnitResult] = {}
+        for uid, res in self.unit_results.items():
+            if res.p_val >= p_thresh:
+                continue
+            if np.isnan(res.stability_p_val) or res.stability_p_val >= p_thresh:
+                continue
+            out[uid] = res
+        return out
+
+    def coverage(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Compute 1D place field coverage map and curve."""
+        from placecell.analysis_1d import compute_place_field_mask_1d
+
+        scfg = self.spatial_1d
+        pc = self.place_cells()
+
+        # Coverage map: count overlapping place fields per bin
+        coverage_map = None
+        masks = []
+        for _uid, res in pc.items():
+            m = compute_place_field_mask_1d(
+                res.rate_map,
+                res.shuffled_rate_p95,
+                threshold=scfg.place_field_threshold,
+                min_bins=scfg.place_field_min_bins,
+            )
+            masks.append(m)
+            if coverage_map is None:
+                coverage_map = np.zeros_like(m, dtype=int)
+            coverage_map += m.astype(int)
+        if coverage_map is None:
+            coverage_map = np.zeros(1, dtype=int)
+
+        # Coverage curve: fraction of valid bins covered vs number of cells
+        n_valid = int(np.sum(self.valid_mask)) if self.valid_mask is not None else 0
+        if n_valid == 0 or not masks:
+            return coverage_map, np.array([0]), np.array([0.0])
+
+        masks.sort(key=lambda m: m.sum(), reverse=True)
+        n_cells = np.arange(len(masks) + 1)
+        fractions = np.zeros(len(masks) + 1)
+        cumulative = np.zeros_like(self.valid_mask, dtype=bool)
+        for i, m in enumerate(masks):
+            cumulative |= m
+            covered = np.sum(cumulative & self.valid_mask)
+            fractions[i + 1] = covered / n_valid
+
+        return coverage_map, n_cells, fractions
 
     def save_bundle(self, path) -> "Path":
         """Save bundle, including 1D trajectory data."""
