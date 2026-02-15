@@ -29,3 +29,9 @@ def behavior_path(assets_dir: Path) -> Path:
 def example_config_path(assets_dir: Path) -> Path:
     """Path to test config file."""
     return assets_dir / "test_config.yaml"
+
+
+@pytest.fixture
+def regression_dir() -> Path:
+    """Path to regression test assets directory."""
+    return ASSETS_DIR / "regression"
