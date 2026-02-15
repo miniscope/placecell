@@ -628,8 +628,9 @@ def compute_stability_score(
         stability_p_val = float(np.sum(shuffled_corrs >= corr) / n_shuffles)
     else:
         stability_p_val = np.nan
+        shuffled_corrs = np.array([])
 
-    return corr, fisher_z, stability_p_val, rate_map_first, rate_map_second
+    return corr, fisher_z, stability_p_val, rate_map_first, rate_map_second, shuffled_corrs
 
 
 def compute_unit_analysis(
@@ -761,10 +762,11 @@ def compute_unit_analysis(
 
     z_scores = []
     p_vals = []
+    all_shuffled_corrs = []
     rate_map_first = None
     rate_map_second = None
     for shift in block_shifts:
-        corr_i, z_i, p_i, rm1_i, rm2_i = compute_stability_score(
+        corr_i, z_i, p_i, rm1_i, rm2_i, shuf_corrs_i = compute_stability_score(
             unit_data,
             trajectory_df,
             occupancy_time,
@@ -786,6 +788,8 @@ def compute_unit_analysis(
             z_scores.append(z_i)
         if np.isfinite(p_i):
             p_vals.append(p_i)
+        if len(shuf_corrs_i) > 0:
+            all_shuffled_corrs.append(shuf_corrs_i)
         # Keep rate maps from the first shift for display
         if rate_map_first is None:
             rate_map_first, rate_map_second = rm1_i, rm2_i
@@ -803,6 +807,9 @@ def compute_unit_analysis(
         rate_map_first = nan_map
         rate_map_second = nan_map
 
+    # Use first shift's shuffled correlations (matches displayed rate maps)
+    shuffled_stability = all_shuffled_corrs[0] if all_shuffled_corrs else np.array([])
+
     return {
         "rate_map": rate_map,
         "rate_map_raw": rate_map_raw,
@@ -818,6 +825,7 @@ def compute_unit_analysis(
         "stability_p_val": stability_p_val,
         "rate_map_first": rate_map_first,
         "rate_map_second": rate_map_second,
+        "shuffled_stability": shuffled_stability,
     }
 
 

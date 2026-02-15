@@ -74,6 +74,7 @@ class UnitResult:
     stability_corr: float
     stability_z: float
     stability_p_val: float
+    shuffled_stability: np.ndarray
     rate_map_first: np.ndarray
     rate_map_second: np.ndarray
     vis_data_above: pd.DataFrame
@@ -542,6 +543,7 @@ class PlaceCellDataset:
                 stability_corr=result["stability_corr"],
                 stability_z=result["stability_z"],
                 stability_p_val=result["stability_p_val"],
+                shuffled_stability=result["shuffled_stability"],
                 rate_map_first=result["rate_map_first"],
                 rate_map_second=result["rate_map_second"],
                 vis_data_above=vis_data_above,
@@ -718,6 +720,7 @@ class PlaceCellDataset:
             "rate_map_raw",
             "shuffled_sis",
             "shuffled_rate_p95",
+            "shuffled_stability",
             "rate_map_first",
             "rate_map_second",
             "trace_data",
@@ -903,6 +906,7 @@ class PlaceCellDataset:
                 stability_corr=float(sc["stability_corr"]),
                 stability_z=float(sc["stability_z"]),
                 stability_p_val=float(sc["stability_p_val"]),
+                shuffled_stability=ar.get("shuffled_stability", np.array([])),
                 rate_map_first=ar.get("rate_map_first", np.array([])),
                 rate_map_second=ar.get("rate_map_second", np.array([])),
                 vis_data_above=ev.get("vis_data_above", pd.DataFrame()),
