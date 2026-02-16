@@ -22,11 +22,11 @@ behavior:
   jump_threshold_mm: 100  # Max plausible frame-to-frame displacement (mm). Larger = tracking error.
   spatial_map_2d:
     id: spatial_map
-    bins: 30
+    bins: 50
     min_occupancy: 0.025 # Minimum occupancy (in seconds) to include a bin in spatial map
     occupancy_sigma: 3  # Gaussian smoothing (in bins) for occupancy map (0 = no smoothing)
     activity_sigma: 3  # Gaussian smoothing (in bins) for spatial activity map
-    n_shuffles: 500
+    n_shuffles: 1000
     random_seed: 1
     event_threshold_sigma: 0  # Sigma multiplier for event amplitude threshold in trajectory visualization
     p_value_threshold: 0.05 # P-value threshold. Units with p < threshold pass.

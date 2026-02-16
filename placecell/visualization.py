@@ -175,7 +175,16 @@ def plot_summary_scatter(
     ax2.set_title("SI vs Stability", fontsize=11)
     ax2.grid(True, alpha=0.3, linestyle="--")
     ax2.axhline(0, color="gray", linestyle=":", linewidth=1, alpha=0.5)
-    ax2.set_aspect("equal", adjustable="datalim")
+
+    # Snap to smallest square with 0.5 step grid
+    step = 0.5
+    valid2 = np.isfinite(si_vals) & np.isfinite(fisher_z)
+    all_vals = np.concatenate([si_vals[valid2], fisher_z[valid2]])
+    lo = np.floor(all_vals.min() / step) * step if len(all_vals) > 0 else -1.0
+    hi = np.ceil(all_vals.max() / step) * step if len(all_vals) > 0 else 1.0
+    ax2.set_xlim(lo, hi)
+    ax2.set_ylim(lo, hi)
+    ax2.set_aspect("equal")
 
     # ── Panel 3: Density contour (Guo et al. style) ──────────────
     valid = np.isfinite(si_vals) & np.isfinite(fisher_z)
@@ -224,7 +233,16 @@ def plot_summary_scatter(
     ax3.set_xlabel("Spatial Information (bits/s)", fontsize=10)
     ax3.set_ylabel("Stability score (Fisher Z)", fontsize=10)
     ax3.set_title("SI vs Stability density", fontsize=11)
-    ax3.legend(fontsize=7, loc="upper right")
+    legend_elements_3 = [
+        Patch(facecolor="green", edgecolor="black",
+              label=f"Place cells ({int(pc_mask.sum())})"),
+        Patch(facecolor="darkorange", edgecolor="black",
+              label=f"Non-place cells ({int(npc_mask.sum())})"),
+    ]
+    ax3.legend(handles=legend_elements_3, fontsize=7, loc="upper right")
+    hi3 = min(hi, 3.0)
+    ax3.set_xlim(lo, hi3)
+    ax3.set_ylim(lo, hi3)
 
     # Marginal KDE: top (SI)
     ax3_top.set_xlim(ax3.get_xlim())
@@ -598,23 +616,20 @@ def plot_footprints_filled(
 
 def plot_coverage(
     coverage_map: np.ndarray,
-    n_cells_arr: np.ndarray,
-    coverage_frac: np.ndarray,
     x_edges: np.ndarray,
     y_edges: np.ndarray,
     valid_mask: np.ndarray,
     n_place_cells: int,
 ) -> "Figure":
-    """Place field coverage map and cumulative coverage curve.
+    """Place field coverage heatmap.
+
+    Each bin shows the fraction of place cells whose place field
+    overlaps that location (overlapping fields / total place cells).
 
     Parameters
     ----------
     coverage_map:
         Overlap count per spatial bin.
-    n_cells_arr:
-        Number of place cells at each step of the cumulative curve.
-    coverage_frac:
-        Fraction of environment covered at each step.
     x_edges, y_edges:
         Spatial bin edges.
     valid_mask:
@@ -623,17 +638,24 @@ def plot_coverage(
         Total number of place cells.
     """
     ext = [x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]]
-    fig, (ax_map, ax_curve) = plt.subplots(1, 2, figsize=(10, 4))
+    fig, ax = plt.subplots(figsize=(5, 4))
 
-    im = ax_map.imshow(
-        coverage_map.T,
+    pct_map = 100.0 * coverage_map / max(n_place_cells, 1)
+
+    pct_max = np.nanmax(pct_map) if np.any(pct_map > 0) else 10.0
+    vmax_pct = int(np.ceil(pct_max / 10.0)) * 10
+
+    im = ax.imshow(
+        pct_map.T,
         origin="lower",
         extent=ext,
         cmap="inferno",
         aspect="equal",
+        vmin=0,
+        vmax=vmax_pct,
     )
     if np.any(coverage_map > 0):
-        ax_map.contour(
+        ax.contour(
             (coverage_map > 0).T.astype(float),
             levels=[0.5],
             colors="white",
@@ -641,43 +663,9 @@ def plot_coverage(
             extent=ext,
             origin="lower",
         )
-    plt.colorbar(im, ax=ax_map, label="Overlapping fields")
-    ax_map.set_title(f"Place Field Coverage ({n_place_cells} cells)")
-    ax_map.axis("off")
-
-    ax_curve.plot(n_cells_arr, coverage_frac * 100, "k-", linewidth=2)
-    ax_curve.fill_between(
-        n_cells_arr,
-        0,
-        coverage_frac * 100,
-        alpha=0.15,
-        color="steelblue",
-    )
-    ax_curve.set_xlabel("Number of place cells (sorted by field size)")
-    ax_curve.set_ylabel("Environment coverage (%)")
-    ax_curve.set_title("Cumulative Coverage")
-    ax_curve.set_ylim(0, 105)
-    ax_curve.set_xlim(0, n_place_cells)
-    ax_curve.axhline(100, color="gray", linestyle="--", linewidth=1, alpha=0.5)
-    ax_curve.grid(True, alpha=0.3, linestyle="--")
-
-    for pct in [90, 100]:
-        idx = np.searchsorted(coverage_frac, pct / 100.0)
-        if idx < len(n_cells_arr):
-            ax_curve.axvline(
-                n_cells_arr[idx],
-                color="red",
-                linestyle=":",
-                linewidth=1,
-                alpha=0.7,
-            )
-            ax_curve.text(
-                n_cells_arr[idx] + 1,
-                pct - 5,
-                f"{pct}% at {n_cells_arr[idx]} cells",
-                fontsize=8,
-                color="red",
-            )
+    plt.colorbar(im, ax=ax, label="Coverage (% of place cells)")
+    ax.set_title(f"Place Field Coverage ({n_place_cells} cells)")
+    ax.axis("off")
 
     fig.tight_layout()
 
@@ -1435,6 +1423,145 @@ def plot_position_and_traces_1d(
         if res.trace_times is not None:
             t_max = max(t_max, res.trace_times[-1] / time_scale)
     ax_pos.set_xlim(0, t_max)
+
+    fig.tight_layout()
+    return fig
+
+
+def plot_position_and_traces_2d(
+    trajectory: "pd.DataFrame",
+    unit_results: dict,
+    behavior_fps: float,
+    speed_threshold: float = 0.0,
+    trajectory_filtered: "pd.DataFrame | None" = None,
+    n_units: int = 20,
+    trace_height: float = 0.5,
+    time_unit: str = "min",
+    speed_unit: str = "mm/s",
+) -> "Figure":
+    """Time-synced 2D speed trace and example place cell calcium traces.
+
+    Top panel shows animal speed over time with the speed threshold.
+    Bottom panel shows *n_units* calcium traces (from place cells, sorted
+    by spatial information) stacked vertically with a shared time axis.
+
+    Parameters
+    ----------
+    trajectory:
+        Unfiltered trajectory with ``speed`` and ``frame_index`` columns.
+    unit_results:
+        Dict of unit_id -> UnitResult.  Only units whose ``trace_data``
+        is not None are plotted.
+    behavior_fps:
+        Behavior sampling rate (Hz).
+    speed_threshold:
+        Speed threshold used for filtering (shown as dashed line).
+    trajectory_filtered:
+        Speed-filtered trajectory.  If provided, filtered count is shown
+        in the legend.
+    n_units:
+        Maximum number of traces to show (default 20).
+    trace_height:
+        Vertical extent of each normalized trace (controls density).
+    time_unit:
+        ``"min"`` (default) or ``"s"`` for x-axis labels.
+    speed_unit:
+        Label for speed axis (e.g. ``"mm/s"`` or ``"px/s"``).
+    """
+    if plt is None:
+        raise ImportError("matplotlib is required for plotting.")
+
+    # Select units with trace data, sorted by SI (highest first)
+    candidates = []
+    for uid, res in unit_results.items():
+        if res.trace_data is not None and res.trace_times is not None:
+            candidates.append((uid, res.si))
+    candidates.sort(key=lambda x: -x[1])
+    selected = [uid for uid, _ in candidates[:n_units]]
+
+    if not selected:
+        fig, ax = plt.subplots(1, 1, figsize=(10, 2))
+        ax.text(0.5, 0.5, "No trace data available", ha="center", va="center")
+        return fig
+
+    n_sel = len(selected)
+    fig, (ax_spd, ax_tr) = plt.subplots(
+        2,
+        1,
+        figsize=(10, 1.5 + 0.3 * n_sel),
+        sharex=True,
+        gridspec_kw={"height_ratios": [1, 2]},
+    )
+
+    time_scale = 60.0 if time_unit == "min" else 1.0
+    time_label = "Time (min)" if time_unit == "min" else "Time (s)"
+
+    # --- Top: speed over time ---
+    beh_time = trajectory["frame_index"].values / behavior_fps / time_scale
+    speed = trajectory["speed"].values
+
+    ax_spd.scatter(
+        beh_time,
+        speed,
+        s=0.3,
+        alpha=0.3,
+        color="steelblue",
+        rasterized=True,
+    )
+    if speed_threshold > 0:
+        ax_spd.axhline(
+            speed_threshold,
+            color="red",
+            linestyle="--",
+            linewidth=1,
+            alpha=0.7,
+            label=f"threshold = {speed_threshold:.0f} {speed_unit}",
+        )
+    n_total = len(trajectory)
+    n_filt = len(trajectory_filtered) if trajectory_filtered is not None else n_total
+    ax_spd.set_ylabel(f"Speed ({speed_unit})")
+    ax_spd.legend(fontsize=7, loc="upper right")
+    ax_spd.set_title(
+        f"Speed + place cell traces  ({n_filt}/{n_total} frames after filter)",
+        fontsize=10,
+    )
+
+    # --- Bottom: stacked calcium traces ---
+    colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+
+    for i, uid in enumerate(selected):
+        res = unit_results[uid]
+        trace = res.trace_data
+        t = res.trace_times / time_scale
+
+        tmin, tmax = np.nanmin(trace), np.nanmax(trace)
+        trace_norm = (
+            (trace - tmin) / (tmax - tmin) if tmax - tmin > 0 else np.zeros_like(trace)
+        )
+
+        offset_val = i * trace_height
+        ax_tr.plot(
+            t,
+            trace_norm * trace_height + offset_val,
+            linewidth=1,
+            alpha=1,
+            color=colors[i % len(colors)],
+        )
+
+    tick_ids = [i for i in [1, 5, 10, 15, 20, 25] if i <= n_sel]
+    ax_tr.set_yticks([(i - 1) * trace_height + trace_height * 0.5 for i in tick_ids])
+    ax_tr.set_yticklabels([str(i) for i in tick_ids], fontsize=6)
+    ax_tr.set_ylabel("Cell #")
+    ax_tr.set_xlabel(time_label)
+    ax_tr.set_ylim(-0.1 * trace_height, n_sel * trace_height + 0.1 * trace_height)
+
+    # Set xlim to data boundaries
+    t_max = beh_time[-1]
+    for uid in selected:
+        res = unit_results[uid]
+        if res.trace_times is not None:
+            t_max = max(t_max, res.trace_times[-1] / time_scale)
+    ax_spd.set_xlim(0, t_max)
 
     fig.tight_layout()
     return fig
