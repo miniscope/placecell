@@ -22,10 +22,11 @@ class TestGaussianFilter1D:
         np.testing.assert_allclose(result, 1.0, rtol=1e-5)
 
     def test_zero_sigma_returns_copy(self):
+        """Sigma=0 should return a copy of the input."""
         data = np.array([1.0, 2.0, 3.0])
         result = gaussian_filter_normalized_1d(data, sigma=0.0)
         np.testing.assert_array_equal(result, data)
-        assert result is not data
+        assert result is not data # just to make sure it's a copy, not the same array. probably redundant.
 
     def test_segment_bins_independent_smoothing(self):
         """Segment boundaries should prevent smoothing across segments."""

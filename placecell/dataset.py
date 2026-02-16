@@ -65,7 +65,7 @@ def unique_bundle_path(bundle_dir: str | Path, stem: str) -> Path:
 @dataclass
 class UnitResult:
     """Analysis results for a single unit.
-    
+
     Parameters
     ----------
     rate_map:
@@ -227,7 +227,7 @@ class BasePlaceCellDataset(abc.ABC):
             from placecell.maze_dataset import MazeDataset
 
             klass = MazeDataset
-        elif cls is BasePlaceCellDataset or cls is PlaceCellDataset:
+        elif cls is BasePlaceCellDataset:
             klass = ArenaDataset
 
         return klass(
@@ -749,7 +749,7 @@ class BasePlaceCellDataset(abc.ABC):
         cfg = AnalysisConfig.from_yaml(path / "config.yaml")
 
         # Auto-select subclass based on behavior type
-        if cls in (BasePlaceCellDataset, PlaceCellDataset):
+        if cls is BasePlaceCellDataset:
             if cfg.behavior and cfg.behavior.type == "maze":
                 from placecell.maze_dataset import MazeDataset
 
@@ -1008,12 +1008,3 @@ class ArenaDataset(BasePlaceCellDataset):
             )
 
         logger.info("Done. %d units analyzed.", len(self.unit_results))
-
-
-# Backward-compatible alias — existing code importing PlaceCellDataset
-# will get BasePlaceCellDataset, which has the from_yaml factory and
-# auto-dispatches to ArenaDataset or MazeDataset.
-PlaceCellDataset = BasePlaceCellDataset
-
-# Keep SpatialMapConfig as an alias for backward compatibility
-SpatialMapConfig = SpatialMap2DConfig

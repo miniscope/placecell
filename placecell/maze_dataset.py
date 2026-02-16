@@ -11,7 +11,7 @@ from placecell.analysis_1d import (
     compute_occupancy_map_1d,
     compute_unit_analysis_1d,
 )
-from placecell.config import SpatialMap1DConfig
+from placecell.config import MazeConfig, SpatialMap1DConfig
 from placecell.dataset import BasePlaceCellDataset, UnitResult
 from placecell.logging import init_logger
 from placecell.maze import (
@@ -47,7 +47,7 @@ class MazeDataset(BasePlaceCellDataset):
         self.graph_mm_per_pixel: float | None = None
 
     @property
-    def maze_cfg(self):
+    def maze_cfg(self) -> "MazeConfig | None":
         """Shortcut to maze config."""
         return self.cfg.behavior.maze
 
@@ -346,7 +346,7 @@ class MazeDataset(BasePlaceCellDataset):
 
         logger.info("Done. %d units analyzed (1D).", len(self.unit_results))
 
-    def save_bundle(self, path) -> "Path":
+    def save_bundle(self, path: "str | Path") -> "Path":
         """Save bundle, including 1D trajectory and maze metadata."""
 
         result = super().save_bundle(path)

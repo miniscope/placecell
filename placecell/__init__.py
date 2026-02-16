@@ -8,7 +8,6 @@ except ImportError:
 from placecell.dataset import (
     ArenaDataset,
     BasePlaceCellDataset,
-    PlaceCellDataset,
     UnitResult,
     unique_bundle_path,
 )
@@ -18,7 +17,6 @@ __all__ = [
     "ArenaDataset",
     "BasePlaceCellDataset",
     "MazeDataset",
-    "PlaceCellDataset",
     "UnitResult",
     "unique_bundle_path",
     "__version__",

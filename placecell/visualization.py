@@ -12,6 +12,7 @@ try:
     import matplotlib.pyplot as plt
 
     if TYPE_CHECKING:
+        from matplotlib.axes import Axes
         from matplotlib.figure import Figure
 except ImportError:
     plt = None
@@ -985,7 +986,7 @@ def plot_rate_map_1d(
     tube_boundaries: list[float] | None = None,
     tube_labels: list[str] | None = None,
     title: str = "",
-    ax: "Any | None" = None,
+    ax: "Axes | None" = None,
 ) -> "Figure":
     """Plot a 1D rate map as a filled line plot with tube boundaries.
 

@@ -41,7 +41,7 @@ class NeuralConfig(BaseModel):
         20.0,
         description="Sampling rate in frames per second.",
     )
-    oasis: OasisConfig = Field(default_factory=OasisConfig)
+    oasis: OasisConfig = Field(..., description="OASIS deconvolution parameters.")
     trace_name: str = Field(
         "C",
         description="Base name of the zarr group (e.g. 'C' or 'C_lp').",

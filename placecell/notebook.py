@@ -842,7 +842,8 @@ def create_unit_browser_1d(
     fig.canvas.header_visible = False
     fig.canvas.layout.width = "100%"
 
-    # Layout: rate map (left), SI shuffle (top-right), stability shuffle (bottom-right), trace (bottom)
+    # Layout: rate map (left), SI shuffle (top-right),
+    # stability shuffle (bottom-right), trace (bottom)
     ax_rm = fig.add_axes([0.05, 0.42, 0.55, 0.45])
     ax_si_shuf = fig.add_axes([0.68, 0.65, 0.28, 0.22])
     ax_stab_shuf = fig.add_axes([0.68, 0.36, 0.28, 0.22])
