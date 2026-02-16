@@ -1,11 +1,12 @@
 """Configuration models for pcell, loaded from YAML."""
 
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from mio.models import MiniscopeConfig
 from mio.models.mixins import ConfigYAMLMixin
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 CONFIG_DIR = Path(__file__).parent / "config"
 
@@ -40,15 +41,15 @@ class NeuralConfig(BaseModel):
         20.0,
         description="Sampling rate in frames per second.",
     )
-    oasis: OasisConfig = Field(default_factory=OasisConfig)
+    oasis: OasisConfig = Field(..., description="OASIS deconvolution parameters.")
     trace_name: str = Field(
         "C",
         description="Base name of the zarr group (e.g. 'C' or 'C_lp').",
     )
 
 
-class SpatialMapConfig(BaseModel):
-    """Spatial map visualization configuration."""
+class SpatialMap2DConfig(BaseModel):
+    """Spatial map visualization configuration for 2D arena analysis."""
 
     bins: int = Field(
         ...,
@@ -84,7 +85,7 @@ class SpatialMapConfig(BaseModel):
         description="Random seed for reproducible shuffling. If None, results vary between runs.",
     )
     event_threshold_sigma: float = Field(
-        ...,
+        0.0,
         description="Sigma multiplier for event amplitude threshold in trajectory plot. "
         "Can be negative to include lower-amplitude events.",
     )
@@ -169,9 +170,100 @@ class SpatialMapConfig(BaseModel):
     )
 
 
+class MazeConfig(BaseModel):
+    """Configuration for maze/tube-based 1D analysis."""
+
+    tube_order: list[str] = Field(
+        ["Tube_1", "Tube_2", "Tube_3", "Tube_4"],
+        description="Ordered list of tube zone names. Determines concatenation order on 1D axis.",
+    )
+    zone_column: str = Field(
+        "zone",
+        description="Column name in behavior CSV containing zone labels.",
+    )
+    tube_position_column: str = Field(
+        "tube_position",
+        description="Column name in behavior CSV containing within-tube position (0-1).",
+    )
+    split_by_direction: bool = Field(
+        True,
+        description="Split each tube into forward/reverse segments based on traversal direction. "
+        "Doubles total segments (e.g. 4 tubes -> 8 directional segments).",
+    )
+
+
+class SpatialMap1DConfig(BaseModel):
+    """Spatial map settings for 1D tube analysis."""
+
+    bin_width_mm: float = Field(
+        10.0,
+        gt=0.0,
+        description="Bin width in mm. Total bins = round(total_length / bin_width_mm).",
+    )
+    min_occupancy: float = Field(
+        0.025,
+        ge=0.0,
+        description="Minimum occupancy time (seconds) for a bin to be included.",
+    )
+    occupancy_sigma: float = Field(
+        2.0,
+        ge=0.0,
+        description="Gaussian smoothing sigma (in bins) for the 1D occupancy histogram.",
+    )
+    activity_sigma: float = Field(
+        2.0,
+        ge=0.0,
+        description="Gaussian smoothing sigma (in bins) for the 1D rate map.",
+    )
+    n_shuffles: int = Field(
+        1000,
+        ge=1,
+        le=10000,
+        description="Number of shuffles for significance test.",
+    )
+    random_seed: int | None = Field(
+        None,
+        description="Random seed for reproducible shuffling.",
+    )
+    p_value_threshold: float = Field(
+        0.05,
+        ge=0.0,
+        le=1.0,
+        description="P-value threshold for significance test.",
+    )
+    min_shift_seconds: float = Field(
+        20.0,
+        ge=0.0,
+        description="Minimum circular shift in seconds for shuffle test.",
+    )
+    si_weight_mode: str = Field(
+        "amplitude",
+        description="Weight mode for spatial information: 'amplitude' or 'binary'.",
+    )
+    n_split_blocks: int = Field(
+        10,
+        ge=2,
+        le=100,
+        description="Number of temporal blocks for stability splitting.",
+    )
+    block_shifts: list[float] = Field(
+        [0.0],
+        description="Block boundary shifts as fractions of one block width.",
+    )
+    trace_time_window: float = Field(
+        600.0,
+        gt=0.0,
+        description="Time window in seconds for trace display.",
+    )
+
+
 class BehaviorConfig(BaseModel):
     """Behavior / place-field configuration."""
 
+    type: Literal["arena", "maze"] = Field(
+        "arena",
+        description="Analysis type: 'arena' for 2D open-field, 'maze' for 1D tube analysis.",
+    )
     behavior_fps: float = Field(
         ...,
         gt=0.0,
@@ -194,16 +286,44 @@ class BehaviorConfig(BaseModel):
         ...,
         description="Body part name to use for position tracking (e.g. 'LED').",
     )
+    x_col: str = Field(
+        "x",
+        description="Coordinate column name for the x-axis in the behavior CSV.",
+    )
+    y_col: str = Field(
+        "y",
+        description="Coordinate column name for the y-axis in the behavior CSV.",
+    )
     jump_threshold_mm: float = Field(
         100.0,
         gt=0.0,
         description="Maximum plausible frame-to-frame displacement in mm. "
         "Larger jumps are treated as tracking errors and interpolated.",
     )
-    spatial_map: SpatialMapConfig = Field(
-        default_factory=SpatialMapConfig,
-        description="Spatial map visualization settings.",
+    spatial_map_2d: SpatialMap2DConfig | None = Field(
+        None,
+        description="Spatial map settings for 2D arena analysis. Required when type='arena'.",
     )
+    maze: MazeConfig | None = Field(
+        None,
+        description="Maze configuration for 1D tube analysis. Required when type='maze'.",
+    )
+    spatial_map_1d: SpatialMap1DConfig | None = Field(
+        None,
+        description="Spatial map settings for 1D analysis. Required when type='maze'.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_type_fields(self) -> "BehaviorConfig":
+        if self.type == "arena":
+            if self.spatial_map_2d is None:
+                raise ValueError("spatial_map_2d is required when type='arena'")
+        elif self.type == "maze":
+            if self.maze is None:
+                raise ValueError("maze is required when type='maze'")
+            if self.spatial_map_1d is None:
+                raise ValueError("spatial_map_1d is required when type='maze'")
+        return self
 
 
 class DataPathsConfig(BaseModel):
@@ -261,6 +381,10 @@ class DataPathsConfig(BaseModel):
         ge=0.0,
         description="Height of tracked point (e.g. LED) above arena floor in mm. "
         "Required when arena_bounds is set.",
+    )
+    behavior_graph: str | None = Field(
+        None,
+        description="Path to behavior graph YAML with zone polylines and mm_per_pixel.",
     )
     oasis: OasisConfig | None = Field(
         None,

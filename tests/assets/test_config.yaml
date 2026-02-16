@@ -15,7 +15,7 @@ behavior:
   speed_threshold: 50.0
   speed_window_frames: 5
   bodypart: LED_clean
-  spatial_map:
+  spatial_map_2d:
     id: spatial_map
     bins: 30
     min_occupancy: 0.1

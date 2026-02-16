@@ -1,0 +1,11 @@
+{
+  "cutoff_hz": 0.9,
+  "filter": "butterworth_lowpass",
+  "fps": 20.0,
+  "order": 2,
+  "coordinates": "animal session",
+  "_ARRAY_DIMENSIONS": [
+    "unit_id",
+    "frame"
+  ]
+}

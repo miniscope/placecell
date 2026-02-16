@@ -400,7 +400,7 @@ def compute_stability_score(
     random_seed: int | None = None,
     min_shift_seconds: float = 0.0,
     si_weight_mode: str = "amplitude",
-) -> tuple[float, float, float, np.ndarray, np.ndarray]:
+) -> tuple[float, float, float, np.ndarray, np.ndarray, np.ndarray]:
     """Compute stability score by comparing rate maps from split data.
 
     Divides the session into ``n_split_blocks`` interleaved temporal
@@ -450,16 +450,19 @@ def compute_stability_score(
     Returns
     -------
     tuple
-        (correlation, fisher_z, stability_p_val, rate_map_first, rate_map_second)
+        (correlation, fisher_z, stability_p_val, rate_map_first,
+        rate_map_second, shuffled_corrs)
+
         correlation: Pearson correlation between the two rate maps
         fisher_z: Fisher z-transformed correlation
         stability_p_val: Shuffle-based p-value (NaN if n_shuffles=0)
         rate_map_first: Rate map from first half
         rate_map_second: Rate map from second half
+        shuffled_corrs: Array of shuffled correlations (empty if n_shuffles=0)
     """
     if unit_events.empty or trajectory_df.empty:
         nan_map = np.full_like(occupancy_time, np.nan)
-        return np.nan, np.nan, np.nan, nan_map, nan_map
+        return np.nan, np.nan, np.nan, nan_map, nan_map, np.array([])
 
     # Binary mode: use event counts instead of amplitudes
     if si_weight_mode == "binary":
@@ -737,7 +740,7 @@ def compute_unit_analysis(
         events_above = unit_data[unit_data["s"] > vis_threshold]
     else:
         vis_threshold = 0.0
-        events_above = pd.DataFrame()
+        events_above = unit_data
 
     # Shuffled rate percentile for place field seed detection (Guo et al. 2023)
     shuffled_rate_p95 = compute_shuffled_rate_percentile(

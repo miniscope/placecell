@@ -227,10 +227,10 @@ def test_compute_unit_analysis(assets_dir: Path) -> None:
 
     # Rate map should match reference (same as compute_rate_map test)
     np.testing.assert_allclose(result["rate_map"], ref["rate_map"], rtol=1e-10, equal_nan=True)
-    
+
     # SI should match reference (same as compute_spatial_information test)
     assert result["si"] == pytest.approx(float(ref["spatial_info"]), rel=1e-10)
     assert result["p_val"] == pytest.approx(float(ref["spatial_info_pval"]), rel=1e-10)
-    
+
     # Vis threshold should be deterministic
     assert result["vis_threshold"] == pytest.approx(float(ref["vis_threshold"]), rel=1e-10)

@@ -1,0 +1,42 @@
+id: pcell_maze_config
+mio_model: pcell.config.AnalysisConfig
+mio_version: 0.8.1
+neural:
+  id: neural
+  fps: 20.0
+  oasis:
+    id: oasis
+    g: [1.60, -0.63]
+    baseline: p10
+    penalty: 0.8
+    s_min: 0
+  trace_name: C_lp
+
+behavior:
+  id: behavior
+  type: maze
+  behavior_fps: 20.0
+  speed_threshold: 25 # mm/s (when behavior_graph provides physical units)
+  speed_window_frames: 5
+  bodypart: LED
+  x_col: x_pinned
+  y_col: y_pinned
+  jump_threshold_mm: 100
+  maze:
+    tube_order: [Tube_1, Tube_2, Tube_3, Tube_4]
+    zone_column: zone
+    tube_position_column: tube_position
+    split_by_direction: true
+  spatial_map_1d:
+    bin_width_mm: 10
+    min_occupancy: 0.1
+    occupancy_sigma: 3
+    activity_sigma: 3
+    n_shuffles: 1000
+    random_seed: 42
+    p_value_threshold: 0.05
+    min_shift_seconds: 20
+    si_weight_mode: amplitude
+    n_split_blocks: 10
+    block_shifts: [0]
+    trace_time_window: 600

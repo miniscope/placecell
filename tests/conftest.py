@@ -32,6 +32,12 @@ def example_config_path(assets_dir: Path) -> Path:
 
 
 @pytest.fixture
-def regression_dir() -> Path:
-    """Path to regression test assets directory."""
-    return ASSETS_DIR / "regression"
+def regression_2d_dir() -> Path:
+    """Path to 2D arena regression test assets directory."""
+    return ASSETS_DIR / "regression_2d"
+
+
+@pytest.fixture
+def regression_1d_dir() -> Path:
+    """Path to 1D maze regression test assets directory."""
+    return ASSETS_DIR / "regression_1d"

@@ -210,8 +210,8 @@ behavior:
   speed_window_frames: 5
   bodypart: LED
   jump_threshold_mm: 100  # Max plausible frame-to-frame displacement (mm)
-  spatial_map:
-    id: spatial_map
+  spatial_map_2d:
+    id: spatial_map_2d
     bins: 50
     min_occupancy: 0.025  # Minimum occupancy (in seconds) to include a bin
     occupancy_sigma: 3  # Gaussian smoothing (in bins) for occupancy map
