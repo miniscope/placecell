@@ -1,5 +1,6 @@
 """Central dataset class for place cell analysis."""
 
+import abc
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -24,7 +25,7 @@ from placecell.behavior import (
     recompute_speed,
     remove_position_jumps,
 )
-from placecell.config import AnalysisConfig, DataPathsConfig, SpatialMapConfig
+from placecell.config import AnalysisConfig, DataPathsConfig, SpatialMap2DConfig
 from placecell.io import load_behavior_data, load_visualization_data
 from placecell.logging import init_logger
 from placecell.neural import build_event_index_dataframe, load_calcium_traces, run_deconvolution
@@ -63,7 +64,45 @@ def unique_bundle_path(bundle_dir: str | Path, stem: str) -> Path:
 
 @dataclass
 class UnitResult:
-    """Analysis results for a single unit."""
+    """Analysis results for a single unit.
+    
+    Parameters
+    ----------
+    rate_map:
+        Smoothed rate map (e.g. 2D array for arena dataset, or 1D array for maze dataset).
+    rate_map_raw:
+        Raw (unsmoothed) rate map.
+    si:
+        Spatial information (bits/spike).
+    p_val:
+        P-value from spatial information significance test.
+    shuffled_sis:
+        Spatial information values from shuffled data (for significance test).
+    shuffled_rate_p95:
+        95th percentile of shuffled rate maps (for place field thresholding).
+    stability_corr:
+        Correlation between rate maps from first vs. second half of session.
+    stability_z:
+        Fisher z-score corresponding to stability_corr.
+    stability_p_val:
+        P-value from stability significance test.
+    shuffled_stability:
+        Stability correlations from shuffled data (for significance test).
+    rate_map_first:
+        Rate map for first half of session.
+    rate_map_second:
+        Rate map for second half of session.
+    vis_data_above:
+        Subset of unit_data where event amplitude exceeds the threshold
+        (used for plotting event dots on rate maps).
+    unit_data:
+        Speed-filtered deconvolved events for this unit (subset of event_place).
+    trace_data:
+        Raw calcium trace for this unit (None if traces unavailable).
+    trace_times:
+        Time axis in seconds corresponding to trace_data.
+
+    """
 
     rate_map: np.ndarray
     rate_map_raw: np.ndarray
@@ -83,12 +122,12 @@ class UnitResult:
     trace_times: np.ndarray | None
 
 
-class PlaceCellDataset:
-    """Container for a single recording session's place cell analysis.
+class BasePlaceCellDataset(abc.ABC):
+    """Base class for place cell analysis datasets.
 
-    Pipeline (each step populates attributes for the next)::
+    Shared pipeline (each step populates attributes for the next)::
 
-        ds = PlaceCellDataset.from_yaml(config_path, data_path)
+        ds = BasePlaceCellDataset.from_yaml(config_path, data_path)
         ds.load()                            # traces, trajectory, footprints
         ds.preprocess_behavior()             # corrections + speed filter
         ds.deconvolve(progress_bar=tqdm)     # good_unit_ids, S_list, event_index
@@ -160,7 +199,7 @@ class PlaceCellDataset:
         self.unit_results: dict[int, UnitResult] = {}
 
     @classmethod
-    def from_yaml(cls, config: str | Path, data_path: str | Path) -> "PlaceCellDataset":
+    def from_yaml(cls, config: str | Path, data_path: str | Path) -> "BasePlaceCellDataset":
         """Create dataset from analysis config and data paths file.
 
         Parameters
@@ -182,12 +221,14 @@ class PlaceCellDataset:
         data_cfg = DataPathsConfig.from_yaml(data_path)
         cfg = cfg.with_data_overrides(data_cfg)
 
-        # Auto-select MazeDataset when maze config is present
+        # Auto-select subclass based on behavior type
         klass = cls
-        if cfg.behavior and cfg.behavior.maze is not None:
+        if cfg.behavior and cfg.behavior.type == "maze":
             from placecell.maze_dataset import MazeDataset
 
             klass = MazeDataset
+        elif cls is BasePlaceCellDataset or cls is PlaceCellDataset:
+            klass = ArenaDataset
 
         return klass(
             cfg=cfg,
@@ -205,9 +246,10 @@ class PlaceCellDataset:
         )
 
     @property
-    def spatial(self) -> SpatialMapConfig:
-        """Shortcut to spatial map config."""
-        return self.cfg.behavior.spatial_map
+    @abc.abstractmethod
+    def p_value_threshold(self) -> float:
+        """P-value threshold from the appropriate spatial config."""
+        ...
 
     @property
     def neural_fps(self) -> float:
@@ -460,117 +502,19 @@ class PlaceCellDataset:
             self.event_place["unit_id"].nunique(),
         )
 
+    @abc.abstractmethod
     def compute_occupancy(self) -> None:
         """Compute occupancy map from speed-filtered trajectory."""
-        if self.trajectory_filtered is None:
-            raise RuntimeError("Call preprocess_behavior() first.")
+        ...
 
-        scfg = self.spatial
-
-        self.occupancy_time, self.valid_mask, self.x_edges, self.y_edges = compute_occupancy_map(
-            trajectory_df=self.trajectory_filtered,
-            bins=scfg.bins,
-            behavior_fps=self.cfg.behavior.behavior_fps,
-            occupancy_sigma=scfg.occupancy_sigma,
-            min_occupancy=scfg.min_occupancy,
-        )
-        logger.info(
-            "Occupancy map: %s, %d/%d valid bins",
-            self.occupancy_time.shape,
-            self.valid_mask.sum(),
-            self.valid_mask.size,
-        )
-
+    @abc.abstractmethod
     def analyze_units(self, progress_bar: Any = None) -> None:
-        """Run spatial analysis for all deconvolved units with events.
-
-        Parameters
-        ----------
-        progress_bar:
-            Progress bar wrapper, e.g. ``tqdm``.
-        """
-        if self.event_place is None:
-            raise RuntimeError("Call match_events() first.")
-        if self.occupancy_time is None:
-            raise RuntimeError("Call compute_occupancy() first.")
-
-        scfg = self.spatial
-        bcfg = self.cfg.behavior
-
-        if scfg.random_seed is not None:
-            np.random.seed(scfg.random_seed)
-
-        df_filtered = self.event_place[self.event_place["speed"] >= bcfg.speed_threshold].copy()
-
-        unique_units = sorted(df_filtered["unit_id"].unique())
-        unique_units = [uid for uid in unique_units if uid in self.good_unit_ids]
-        n_units = len(unique_units)
-        logger.info("Analyzing %d units...", n_units)
-
-        iterator = unique_units
-        if progress_bar is not None:
-            iterator = progress_bar(iterator)
-
-        self.unit_results = {}
-        for unit_id in iterator:
-            result = compute_unit_analysis(
-                unit_id=unit_id,
-                df_filtered=df_filtered,
-                trajectory_df=self.trajectory_filtered,
-                occupancy_time=self.occupancy_time,
-                valid_mask=self.valid_mask,
-                x_edges=self.x_edges,
-                y_edges=self.y_edges,
-                activity_sigma=scfg.activity_sigma,
-                event_threshold_sigma=scfg.event_threshold_sigma,
-                n_shuffles=scfg.n_shuffles,
-                random_seed=scfg.random_seed,
-                behavior_fps=bcfg.behavior_fps,
-                min_occupancy=scfg.min_occupancy,
-                occupancy_sigma=scfg.occupancy_sigma,
-                min_shift_seconds=scfg.min_shift_seconds,
-                si_weight_mode=scfg.si_weight_mode,
-                place_field_seed_percentile=scfg.place_field_seed_percentile,
-                n_split_blocks=scfg.n_split_blocks,
-                block_shifts=scfg.block_shifts,
-            )
-
-            # Attach visualization data
-            vis_data_above = result["events_above_threshold"]
-
-            trace_data = None
-            trace_times = None
-            if self.traces is not None:
-                try:
-                    trace_data = self.traces.sel(unit_id=int(unit_id)).values
-                    trace_times = np.arange(len(trace_data)) / self.neural_fps
-                except (KeyError, IndexError):
-                    pass
-
-            self.unit_results[unit_id] = UnitResult(
-                rate_map=result["rate_map"],
-                rate_map_raw=result["rate_map_raw"],
-                si=result["si"],
-                shuffled_sis=result["shuffled_sis"],
-                shuffled_rate_p95=result["shuffled_rate_p95"],
-                p_val=result["p_val"],
-                stability_corr=result["stability_corr"],
-                stability_z=result["stability_z"],
-                stability_p_val=result["stability_p_val"],
-                shuffled_stability=result["shuffled_stability"],
-                rate_map_first=result["rate_map_first"],
-                rate_map_second=result["rate_map_second"],
-                vis_data_above=vis_data_above,
-                unit_data=result["unit_data"],
-                trace_data=trace_data,
-                trace_times=trace_times,
-            )
-
-        logger.info("Done. %d units analyzed.", len(self.unit_results))
+        """Run spatial analysis for all deconvolved units."""
+        ...
 
     def place_cells(self) -> dict[int, UnitResult]:
         """Return units passing both significance and stability tests."""
-        p_thresh = self.spatial.p_value_threshold
+        p_thresh = self.p_value_threshold
 
         out: dict[int, UnitResult] = {}
         for uid, res in self.unit_results.items():
@@ -589,7 +533,7 @@ class PlaceCellDataset:
         dict
             Keys: ``n_total``, ``n_sig``, ``n_stable``, ``n_place_cells``.
         """
-        p_thresh = self.spatial.p_value_threshold
+        p_thresh = self.p_value_threshold
 
         n_sig = 0
         n_stable = 0
@@ -618,7 +562,7 @@ class PlaceCellDataset:
 
         Returns (coverage_map, n_cells_array, coverage_fraction_array).
         """
-        scfg = self.spatial
+        scfg = self.cfg.behavior.spatial_map_2d
         pc = self.place_cells()
 
         coverage_map = compute_coverage_map(
@@ -775,7 +719,7 @@ class PlaceCellDataset:
             pd.concat(parts, ignore_index=True).to_parquet(ur_dir / "events.parquet")
 
     @classmethod
-    def load_bundle(cls, path: str | Path) -> "PlaceCellDataset":
+    def load_bundle(cls, path: str | Path) -> "BasePlaceCellDataset":
         """Load a previously saved ``.pcellbundle`` directory.
 
         Parameters
@@ -785,7 +729,7 @@ class PlaceCellDataset:
 
         Returns
         -------
-        PlaceCellDataset
+        BasePlaceCellDataset
             Dataset with all attributes restored. Recomputation methods
             (``load``, ``deconvolve``, etc.) are unavailable since the
             original raw data paths are not preserved.
@@ -804,11 +748,13 @@ class PlaceCellDataset:
         # Config
         cfg = AnalysisConfig.from_yaml(path / "config.yaml")
 
-        # Auto-select MazeDataset when maze config is present
-        if cls is PlaceCellDataset and cfg.behavior and cfg.behavior.maze is not None:
-            from placecell.maze_dataset import MazeDataset
+        # Auto-select subclass based on behavior type
+        if cls in (BasePlaceCellDataset, PlaceCellDataset):
+            if cfg.behavior and cfg.behavior.type == "maze":
+                from placecell.maze_dataset import MazeDataset
 
-            return MazeDataset.load_bundle(path)
+                return MazeDataset.load_bundle(path)
+            cls = ArenaDataset
 
         ds = cls(cfg)
 
@@ -936,3 +882,138 @@ class PlaceCellDataset:
                 trace_times=ar.get("trace_times"),
             )
         return results
+
+
+class ArenaDataset(BasePlaceCellDataset):
+    """Dataset for 2D open-field arena place cell analysis.
+
+    Adds arena-specific functionality: perspective correction scale
+    properties, 2D occupancy computation, and 2D spatial analysis.
+    """
+
+    @property
+    def spatial(self) -> SpatialMap2DConfig:
+        """Shortcut to 2D spatial map config."""
+        return self.cfg.behavior.spatial_map_2d
+
+    @property
+    def p_value_threshold(self) -> float:
+        """P-value threshold from 2D spatial map config."""
+        return self.spatial.p_value_threshold
+
+    def compute_occupancy(self) -> None:
+        """Compute 2D occupancy map from speed-filtered trajectory."""
+        if self.trajectory_filtered is None:
+            raise RuntimeError("Call preprocess_behavior() first.")
+
+        scfg = self.spatial
+
+        self.occupancy_time, self.valid_mask, self.x_edges, self.y_edges = compute_occupancy_map(
+            trajectory_df=self.trajectory_filtered,
+            bins=scfg.bins,
+            behavior_fps=self.cfg.behavior.behavior_fps,
+            occupancy_sigma=scfg.occupancy_sigma,
+            min_occupancy=scfg.min_occupancy,
+        )
+        logger.info(
+            "Occupancy map: %s, %d/%d valid bins",
+            self.occupancy_time.shape,
+            self.valid_mask.sum(),
+            self.valid_mask.size,
+        )
+
+    def analyze_units(self, progress_bar: Any = None) -> None:
+        """Run 2D spatial analysis for all deconvolved units with events.
+
+        Parameters
+        ----------
+        progress_bar:
+            Progress bar wrapper, e.g. ``tqdm``.
+        """
+        if self.event_place is None:
+            raise RuntimeError("Call match_events() first.")
+        if self.occupancy_time is None:
+            raise RuntimeError("Call compute_occupancy() first.")
+
+        scfg = self.spatial
+        bcfg = self.cfg.behavior
+
+        if scfg.random_seed is not None:
+            np.random.seed(scfg.random_seed)
+
+        df_filtered = self.event_place[self.event_place["speed"] >= bcfg.speed_threshold].copy()
+
+        unique_units = sorted(df_filtered["unit_id"].unique())
+        unique_units = [uid for uid in unique_units if uid in self.good_unit_ids]
+        n_units = len(unique_units)
+        logger.info("Analyzing %d units...", n_units)
+
+        iterator = unique_units
+        if progress_bar is not None:
+            iterator = progress_bar(iterator)
+
+        self.unit_results = {}
+        for unit_id in iterator:
+            result = compute_unit_analysis(
+                unit_id=unit_id,
+                df_filtered=df_filtered,
+                trajectory_df=self.trajectory_filtered,
+                occupancy_time=self.occupancy_time,
+                valid_mask=self.valid_mask,
+                x_edges=self.x_edges,
+                y_edges=self.y_edges,
+                activity_sigma=scfg.activity_sigma,
+                event_threshold_sigma=scfg.event_threshold_sigma,
+                n_shuffles=scfg.n_shuffles,
+                random_seed=scfg.random_seed,
+                behavior_fps=bcfg.behavior_fps,
+                min_occupancy=scfg.min_occupancy,
+                occupancy_sigma=scfg.occupancy_sigma,
+                min_shift_seconds=scfg.min_shift_seconds,
+                si_weight_mode=scfg.si_weight_mode,
+                place_field_seed_percentile=scfg.place_field_seed_percentile,
+                n_split_blocks=scfg.n_split_blocks,
+                block_shifts=scfg.block_shifts,
+            )
+
+            # Attach visualization data
+            vis_data_above = result["events_above_threshold"]
+
+            trace_data = None
+            trace_times = None
+            if self.traces is not None:
+                try:
+                    trace_data = self.traces.sel(unit_id=int(unit_id)).values
+                    trace_times = np.arange(len(trace_data)) / self.neural_fps
+                except (KeyError, IndexError):
+                    pass
+
+            self.unit_results[unit_id] = UnitResult(
+                rate_map=result["rate_map"],
+                rate_map_raw=result["rate_map_raw"],
+                si=result["si"],
+                shuffled_sis=result["shuffled_sis"],
+                shuffled_rate_p95=result["shuffled_rate_p95"],
+                p_val=result["p_val"],
+                stability_corr=result["stability_corr"],
+                stability_z=result["stability_z"],
+                stability_p_val=result["stability_p_val"],
+                shuffled_stability=result["shuffled_stability"],
+                rate_map_first=result["rate_map_first"],
+                rate_map_second=result["rate_map_second"],
+                vis_data_above=vis_data_above,
+                unit_data=result["unit_data"],
+                trace_data=trace_data,
+                trace_times=trace_times,
+            )
+
+        logger.info("Done. %d units analyzed.", len(self.unit_results))
+
+
+# Backward-compatible alias — existing code importing PlaceCellDataset
+# will get BasePlaceCellDataset, which has the from_yaml factory and
+# auto-dispatches to ArenaDataset or MazeDataset.
+PlaceCellDataset = BasePlaceCellDataset
+
+# Keep SpatialMapConfig as an alias for backward compatibility
+SpatialMapConfig = SpatialMap2DConfig

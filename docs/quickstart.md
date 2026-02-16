@@ -61,8 +61,8 @@ behavior:
   bodypart: LED
   speed_threshold: 10.0
   speed_window_frames: 5
-  spatial_map:
-    id: spatial_map
+  spatial_map_2d:
+    id: spatial_map_2d
     bins: 50
     min_occupancy: 0.05
     occupancy_sigma: 3

@@ -102,9 +102,7 @@ def plot_summary_scatter(
 
     # Classify units
     is_sig = p_vals < p_value_threshold
-    is_stable = np.array(
-        [not np.isnan(sp) and sp < p_value_threshold for sp in stab_pvals]
-    )
+    is_stable = np.array([not np.isnan(sp) and sp < p_value_threshold for sp in stab_pvals])
     is_place_cell = is_sig & is_stable
 
     colors = []
@@ -138,8 +136,13 @@ def plot_summary_scatter(
 
     # ── Panel 1: P-value scatter ──────────────────────────────────
     ax1.scatter(
-        p_vals, stab_pvals, c=colors, s=50, alpha=0.7,
-        edgecolors="black", linewidths=0.5,
+        p_vals,
+        stab_pvals,
+        c=colors,
+        s=50,
+        alpha=0.7,
+        edgecolors="black",
+        linewidths=0.5,
     )
     ax1.axvline(p_value_threshold, color="gray", linestyle="--", linewidth=1.5)
     ax1.axhline(p_value_threshold, color="gray", linestyle=":", linewidth=1.5)
@@ -158,8 +161,13 @@ def plot_summary_scatter(
 
     # ── Panel 2: SI vs Fisher Z (no regression) ──────────────────
     ax2.scatter(
-        si_vals, fisher_z, s=50, alpha=0.7,
-        edgecolors="black", linewidths=0.5, c=colors,
+        si_vals,
+        fisher_z,
+        s=50,
+        alpha=0.7,
+        edgecolors="black",
+        linewidths=0.5,
+        c=colors,
     )
     ax2.set_xlabel("Spatial Information (bits/s)", fontsize=10)
     ax2.set_ylabel("Fisher Z (stability)", fontsize=10)
@@ -175,8 +183,7 @@ def plot_summary_scatter(
     pc_mask = is_place_cell[valid]
     npc_mask = ~pc_mask
 
-    def _contour_group(ax_: "Axes", x: np.ndarray, y: np.ndarray,
-                       color: str, label: str) -> None:
+    def _contour_group(ax_: "Axes", x: np.ndarray, y: np.ndarray, color: str, label: str) -> None:
         if len(x) < 5:
             ax_.scatter(x, y, c=color, s=20, alpha=0.5, label=label)
             return
@@ -196,17 +203,22 @@ def plot_summary_scatter(
         Xi, Yi = np.meshgrid(xi, yi)
         Zi = kde(np.vstack([Xi.ravel(), Yi.ravel()])).reshape(Xi.shape)
 
-        ax_.contourf(Xi, Yi, Zi, levels=6, cmap=None, colors=None,
-                     alpha=0.0)  # invisible, just for structure
+        ax_.contourf(
+            Xi, Yi, Zi, levels=6, cmap=None, colors=None, alpha=0.0
+        )  # invisible, just for structure
         ax_.contour(Xi, Yi, Zi, levels=6, colors=color, linewidths=0.8, alpha=0.8)
-        ax_.contourf(Xi, Yi, Zi, levels=6,
-                     colors=[(*plt.cm.colors.to_rgba(color)[:3], a)
-                             for a in np.linspace(0.0, 0.35, 7)])
+        ax_.contourf(
+            Xi,
+            Yi,
+            Zi,
+            levels=6,
+            colors=[(*plt.cm.colors.to_rgba(color)[:3], a) for a in np.linspace(0.0, 0.35, 7)],
+        )
 
-    _contour_group(ax3, si_v[npc_mask], z_v[npc_mask],
-                   "darkorange", f"Non-place cells ({int(npc_mask.sum())})")
-    _contour_group(ax3, si_v[pc_mask], z_v[pc_mask],
-                   "green", f"Place cells ({int(pc_mask.sum())})")
+    _contour_group(
+        ax3, si_v[npc_mask], z_v[npc_mask], "darkorange", f"Non-place cells ({int(npc_mask.sum())})"
+    )
+    _contour_group(ax3, si_v[pc_mask], z_v[pc_mask], "green", f"Place cells ({int(pc_mask.sum())})")
 
     ax3.set_xlabel("Spatial Information (bits/s)", fontsize=10)
     ax3.set_ylabel("Stability score (Fisher Z)", fontsize=10)
@@ -459,7 +471,7 @@ def plot_occupancy_preview(
         occupancy_time.T,
         origin="lower",
         extent=ext,
-        cmap="hot",
+        cmap="inferno",
         aspect="equal",
     )
     if np.any(valid_mask) and not np.all(valid_mask):
@@ -530,6 +542,59 @@ def plot_footprints(
     return fig
 
 
+def plot_footprints_filled(
+    max_proj: np.ndarray,
+    footprints: "xr.DataArray",
+    unit_ids: "np.ndarray | list | None" = None,
+) -> "Figure":
+    """Max projection and filled spatial footprints side by side.
+
+    Parameters
+    ----------
+    max_proj:
+        Max-projection image (H, W).
+    footprints:
+        Spatial footprints DataArray with ``unit_id`` coordinate.
+    unit_ids:
+        Subset of unit IDs to show.  If None, all units are shown.
+    """
+    if plt is None:
+        raise ImportError("matplotlib is required for plotting.")
+
+    if unit_ids is None:
+        unit_ids = footprints.coords["unit_id"].values
+    colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+
+    fig, (ax_mp, ax_fp) = plt.subplots(1, 2, figsize=(8, 4))
+
+    # Left: max projection
+    ax_mp.imshow(max_proj, cmap="gray", aspect="equal")
+    ax_mp.set_title("Max Projection")
+    ax_mp.axis("off")
+
+    # Right: filled footprints on black background
+    # Build an RGB composite: each cell gets a color, overlapping cells blend
+    h, w = max_proj.shape[:2]
+    composite = np.zeros((h, w, 3), dtype=float)
+    for i, uid in enumerate(unit_ids):
+        fp = footprints.sel(unit_id=uid).values
+        if fp.max() <= 0:
+            continue
+        mask = fp / fp.max()  # normalize to [0, 1]
+        c = plt.matplotlib.colors.to_rgb(colors[i % len(colors)])
+        for ch in range(3):
+            composite[:, :, ch] += mask * c[ch]
+    # Clip to [0, 1]
+    composite = np.clip(composite, 0, 1)
+
+    ax_fp.imshow(composite, aspect="equal")
+    ax_fp.set_title(f"Spatial Footprints ({len(unit_ids)})")
+    ax_fp.axis("off")
+
+    fig.tight_layout()
+    return fig
+
+
 def plot_coverage(
     coverage_map: np.ndarray,
     n_cells_arr: np.ndarray,
@@ -563,7 +628,7 @@ def plot_coverage(
         coverage_map.T,
         origin="lower",
         extent=ext,
-        cmap="hot",
+        cmap="inferno",
         aspect="equal",
     )
     if np.any(coverage_map > 0):
@@ -833,12 +898,44 @@ def plot_graph_overlay(
 
         ax.plot(xs, ys, color=color, linewidth=lw, alpha=alpha, solid_capstyle="round")
 
+        # Forward-direction arrow at midpoint of tube polylines
+        if zone_name in tube_set and len(waypoints) >= 2:
+            mid_idx = len(waypoints) // 2
+            # Compute tangent from nearby points
+            idx_a = max(mid_idx - 1, 0)
+            idx_b = min(mid_idx + 1, len(waypoints) - 1)
+            dx = waypoints[idx_b][0] - waypoints[idx_a][0]
+            dy = waypoints[idx_b][1] - waypoints[idx_a][1]
+            norm = (dx**2 + dy**2) ** 0.5
+            if norm > 0:
+                # Place a short arrow at midpoint along the tangent direction
+                arrow_len = 15  # pixels
+                dx, dy = dx / norm * arrow_len, dy / norm * arrow_len
+                mx, my = waypoints[mid_idx]
+                ax.annotate(
+                    "",
+                    xy=(mx + dx, my + dy),
+                    xytext=(mx - dx, my - dy),
+                    arrowprops=dict(
+                        arrowstyle="->,head_width=0.6,head_length=0.5",
+                        color=color,
+                        lw=2.5,
+                        alpha=alpha,
+                    ),
+                )
+
         # Label at midpoint of polyline
         mid_idx = len(waypoints) // 2
         mx, my = waypoints[mid_idx]
         ax.text(
-            mx, my, zone_name, fontsize=7, fontweight="bold",
-            color=color, ha="center", va="bottom",
+            mx,
+            my,
+            zone_name,
+            fontsize=7,
+            fontweight="bold",
+            color=color,
+            ha="center",
+            va="bottom",
             bbox=dict(boxstyle="round,pad=0.15", facecolor="white", alpha=0.7, edgecolor="none"),
         )
 
@@ -851,16 +948,27 @@ def plot_graph_overlay(
     bar_x = xlim[1] - scale_px - 20
     bar_y = ylim[0] - 20 if ylim[0] > ylim[1] else ylim[0] + 20  # handle inverted y
     ax.plot(
-        [bar_x, bar_x + scale_px], [bar_y, bar_y],
-        color="white", linewidth=4, solid_capstyle="butt",
+        [bar_x, bar_x + scale_px],
+        [bar_y, bar_y],
+        color="white",
+        linewidth=4,
+        solid_capstyle="butt",
     )
     ax.plot(
-        [bar_x, bar_x + scale_px], [bar_y, bar_y],
-        color="black", linewidth=2, solid_capstyle="butt",
+        [bar_x, bar_x + scale_px],
+        [bar_y, bar_y],
+        color="black",
+        linewidth=2,
+        solid_capstyle="butt",
     )
     ax.text(
-        bar_x + scale_px / 2, bar_y, f"{scale_mm:.0f} mm",
-        ha="center", va="top", fontsize=8, fontweight="bold",
+        bar_x + scale_px / 2,
+        bar_y,
+        f"{scale_mm:.0f} mm",
+        ha="center",
+        va="top",
+        fontsize=8,
+        fontweight="bold",
         color="black",
         bbox=dict(boxstyle="round,pad=0.15", facecolor="white", alpha=0.7, edgecolor="none"),
     )
@@ -984,7 +1092,9 @@ def plot_shuffle_test_1d(
     n_total = len(valid_cols)
     logger.info(
         "Peak position map: %d/%d bins valid, %d excluded",
-        int(valid_cols.sum()), n_total, n_excluded,
+        int(valid_cols.sum()),
+        n_total,
+        n_excluded,
     )
 
     # Sort by peak position (using only valid columns for peak detection)
@@ -1010,7 +1120,7 @@ def plot_shuffle_test_1d(
 
     fig, ax = plt.subplots(1, 1, figsize=(7, 6))
 
-    cmap = plt.cm.jet.copy()
+    cmap = plt.cm.inferno.copy()
     n_valid = int(valid_cols.sum())
     im = ax.imshow(
         rate_maps_sorted,
@@ -1033,8 +1143,14 @@ def plot_shuffle_test_1d(
         for i, lbl in enumerate(tube_labels):
             mid = (compressed_boundaries[i] + compressed_boundaries[i + 1]) / 2
             ax.text(
-                mid, 0, lbl, ha="center", va="top", fontsize=8,
-                rotation=45, clip_on=False,
+                mid,
+                0,
+                lbl,
+                ha="center",
+                va="top",
+                fontsize=8,
+                rotation=45,
+                clip_on=False,
                 transform=ax.get_xaxis_transform(),
             )
 
@@ -1141,6 +1257,183 @@ def plot_occupancy_preview_1d(
     if tube_boundaries:
         for b in tube_boundaries:
             ax_occ.axvline(b, color="gray", linestyle="--", linewidth=0.8, alpha=0.6)
+
+    fig.tight_layout()
+    return fig
+
+
+def plot_position_and_traces_1d(
+    trajectory_1d: "pd.DataFrame",
+    unit_results: dict,
+    edges: np.ndarray,
+    behavior_fps: float,
+    speed_threshold: float = 0.0,
+    trajectory_1d_filtered: "pd.DataFrame | None" = None,
+    tube_boundaries: list[float] | None = None,
+    tube_labels: list[str] | None = None,
+    n_units: int = 20,
+    trace_height: float = 0.5,
+    time_unit: str = "min",
+) -> "Figure":
+    """Time-synced 1D position trace and example place cell calcium traces.
+
+    Top panel shows serialized 1D position over time.  Bottom panel shows
+    *n_units* calcium traces (from place cells, sorted by peak position)
+    stacked vertically with a shared time axis.
+
+    Parameters
+    ----------
+    trajectory_1d:
+        Unfiltered 1D trajectory with ``pos_1d`` and ``frame_index`` columns.
+    unit_results:
+        Dict of unit_id -> UnitResult.  Only units whose ``trace_data``
+        is not None are plotted.
+    edges:
+        1D bin edges (for computing peak position to sort cells).
+    behavior_fps:
+        Behavior sampling rate (Hz).
+    speed_threshold:
+        Speed threshold used for filtering (shown in legend).
+    trajectory_1d_filtered:
+        Speed-filtered trajectory.  If provided, overlaid on top of the
+        unfiltered trace.
+    tube_boundaries:
+        Position values at tube segment boundaries.
+    tube_labels:
+        Labels for each tube segment.
+    n_units:
+        Maximum number of traces to show (default 25).
+    """
+    if plt is None:
+        raise ImportError("matplotlib is required for plotting.")
+
+    centers = 0.5 * (edges[:-1] + edges[1:])
+
+    # Select units that have trace data, sorted by peak position
+    candidates = []
+    for uid, res in unit_results.items():
+        if res.trace_data is not None and res.trace_times is not None:
+            rm = np.where(np.isfinite(res.rate_map), res.rate_map, 0.0)
+            peak_pos = centers[np.argmax(rm)]
+            candidates.append((uid, peak_pos))
+    candidates.sort(key=lambda x: x[1])
+    selected = [uid for uid, _ in candidates[:n_units]]
+
+    if not selected:
+        fig, ax = plt.subplots(1, 1, figsize=(10, 2))
+        ax.text(0.5, 0.5, "No trace data available", ha="center", va="center")
+        return fig
+
+    n_sel = len(selected)
+    fig, (ax_pos, ax_tr) = plt.subplots(
+        2,
+        1,
+        figsize=(10, 1.5 + 0.3 * n_sel),
+        sharex=True,
+        gridspec_kw={"height_ratios": [1, 2]},
+    )
+
+    # --- Top: 1D position ---
+    time_scale = 60.0 if time_unit == "min" else 1.0
+    time_label = "Time (min)" if time_unit == "min" else "Time (s)"
+
+    time_col = "unix_time"
+    if time_col in trajectory_1d.columns:
+        t0 = trajectory_1d[time_col].iloc[0]
+        beh_time = (trajectory_1d[time_col] - t0).values / time_scale
+    else:
+        beh_time = trajectory_1d["frame_index"].values / behavior_fps / time_scale
+
+    # Unfiltered background
+    ax_pos.scatter(
+        beh_time,
+        trajectory_1d["pos_1d"].values,
+        s=0.3,
+        alpha=1,
+        color="lightcoral",
+        rasterized=True,
+        label=f"All ({len(trajectory_1d)})",
+    )
+
+    # Speed-filtered overlay
+    if trajectory_1d_filtered is not None:
+        if time_col in trajectory_1d_filtered.columns:
+            filt_time = (trajectory_1d_filtered[time_col] - t0).values / time_scale
+        else:
+            filt_time = trajectory_1d_filtered["frame_index"].values / behavior_fps / time_scale
+        ax_pos.scatter(
+            filt_time,
+            trajectory_1d_filtered["pos_1d"].values,
+            s=0.3,
+            alpha=1,
+            color="steelblue",
+            rasterized=True,
+            label=f"Speed > {speed_threshold:.0f} mm/s ({len(trajectory_1d_filtered)})",
+        )
+
+    ax_pos.set_ylabel("1D position (mm)")
+    ax_pos.legend(markerscale=10, fontsize=7, loc="upper right")
+
+    if tube_boundaries:
+        for b in tube_boundaries:
+            ax_pos.axhline(b, color="gray", linestyle=":", linewidth=0.5, alpha=0.6)
+
+    ax_pos.set_title("Serialized 1D position + place cell traces", fontsize=10)
+
+    # Arm labels on the right side of position axis
+    if tube_boundaries and tube_labels and len(tube_labels) == len(tube_boundaries) - 1:
+        for i, lbl in enumerate(tube_labels):
+            mid = (tube_boundaries[i] + tube_boundaries[i + 1]) / 2
+            ax_pos.annotate(
+                lbl,
+                xy=(1.0, mid),
+                xycoords=("axes fraction", "data"),
+                xytext=(4, 0),
+                textcoords="offset points",
+                fontsize=6,
+                va="center",
+                ha="left",
+                color="gray",
+                annotation_clip=False,
+            )
+
+    # --- Bottom: stacked calcium traces ---
+    colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+
+    for i, uid in enumerate(selected):
+        res = unit_results[uid]
+        trace = res.trace_data
+        t = res.trace_times / time_scale
+
+        # Normalize to [0, 1] then offset
+        tmin, tmax = np.nanmin(trace), np.nanmax(trace)
+        trace_norm = (trace - tmin) / (tmax - tmin) if tmax - tmin > 0 else np.zeros_like(trace)
+
+        offset = i * trace_height
+        ax_tr.plot(
+            t,
+            trace_norm * trace_height + offset,
+            linewidth=1,
+            alpha=1,
+            color=colors[i % len(colors)],
+        )
+    # Only label cells 1, 10, 20
+    tick_ids = [i for i in [1, 5, 10, 15, 20, 25] if i <= n_sel]
+    ax_tr.set_yticks([(i - 1) * trace_height + trace_height * 0.5 for i in tick_ids])
+    ax_tr.set_yticklabels([str(i) for i in tick_ids], fontsize=6)
+    ax_tr.set_ylabel("Cell #")
+    ax_tr.set_xlabel(time_label)
+    ax_tr.set_ylim(-0.1 * trace_height, n_sel * trace_height + 0.1 * trace_height)
+
+    # Set xlim to data boundaries
+    t_max = beh_time[-1]
+    if trajectory_1d_filtered is not None:
+        t_max = max(t_max, filt_time[-1])
+    for uid in selected:
+        res = unit_results[uid]
+        if res.trace_times is not None:
+            t_max = max(t_max, res.trace_times[-1] / time_scale)
+    ax_pos.set_xlim(0, t_max)
 
     fig.tight_layout()
     return fig

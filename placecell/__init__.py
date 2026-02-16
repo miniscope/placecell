@@ -5,7 +5,21 @@ try:
 except ImportError:
     __version__ = "0.0.0.dev0"
 
-from placecell.dataset import PlaceCellDataset, UnitResult, unique_bundle_path
+from placecell.dataset import (
+    ArenaDataset,
+    BasePlaceCellDataset,
+    PlaceCellDataset,
+    UnitResult,
+    unique_bundle_path,
+)
 from placecell.maze_dataset import MazeDataset
 
-__all__ = ["PlaceCellDataset", "MazeDataset", "UnitResult", "unique_bundle_path", "__version__"]
+__all__ = [
+    "ArenaDataset",
+    "BasePlaceCellDataset",
+    "MazeDataset",
+    "PlaceCellDataset",
+    "UnitResult",
+    "unique_bundle_path",
+    "__version__",
+]

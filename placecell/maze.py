@@ -120,10 +120,9 @@ def serialize_tube_position(
         offsets = np.concatenate([[0.0], np.cumsum(lengths[:-1])])
         zone_to_offset = {z: offsets[i] for i, z in enumerate(tube_order)}
         zone_to_length = {z: tube_lengths[z] for z in tube_order}
-        df["pos_1d"] = (
-            df[tube_position_column].astype(float) * df[zone_column].map(zone_to_length)
-            + df[zone_column].map(zone_to_offset)
-        )
+        df["pos_1d"] = df[tube_position_column].astype(float) * df[zone_column].map(
+            zone_to_length
+        ) + df[zone_column].map(zone_to_offset)
     else:
         zone_to_offset = {zone: float(i) for i, zone in enumerate(tube_order)}
         df["pos_1d"] = df[tube_position_column].astype(float) + df[zone_column].map(zone_to_offset)
@@ -212,10 +211,9 @@ def assign_traversal_direction(
         offsets = np.concatenate([[0.0], np.cumsum(seg_lengths[:-1])])
         zone_dir_to_offset = {name: offsets[i] for i, name in enumerate(effective_order)}
         zone_dir_to_length = {name: effective_lengths[name] for name in effective_order}
-        df["pos_1d"] = (
-            df[tube_position_column].astype(float) * df["zone_dir"].map(zone_dir_to_length)
-            + df["zone_dir"].map(zone_dir_to_offset)
-        )
+        df["pos_1d"] = df[tube_position_column].astype(float) * df["zone_dir"].map(
+            zone_dir_to_length
+        ) + df["zone_dir"].map(zone_dir_to_offset)
     else:
         df["pos_1d"] = df[tube_position_column].astype(float) + df["tube_index"].astype(float)
 

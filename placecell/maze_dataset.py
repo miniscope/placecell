@@ -12,7 +12,7 @@ from placecell.analysis_1d import (
     compute_unit_analysis_1d,
 )
 from placecell.config import SpatialMap1DConfig
-from placecell.dataset import PlaceCellDataset, UnitResult
+from placecell.dataset import BasePlaceCellDataset, UnitResult
 from placecell.logging import init_logger
 from placecell.maze import (
     assign_traversal_direction,
@@ -26,8 +26,8 @@ from placecell.maze import (
 logger = init_logger(__name__)
 
 
-class MazeDataset(PlaceCellDataset):
-    """Extension of PlaceCellDataset for 1D tube/maze analysis.
+class MazeDataset(BasePlaceCellDataset):
+    """Dataset for 1D tube/maze place cell analysis.
 
     Overrides the behavior preprocessing, occupancy computation, and
     unit analysis steps to work on a concatenated 1D axis.
@@ -55,6 +55,11 @@ class MazeDataset(PlaceCellDataset):
     def spatial_1d(self) -> SpatialMap1DConfig:
         """Shortcut to 1D spatial map config."""
         return self.cfg.behavior.spatial_map_1d
+
+    @property
+    def p_value_threshold(self) -> float:
+        """P-value threshold from 1D spatial map config."""
+        return self.spatial_1d.p_value_threshold
 
     def preprocess_behavior(self) -> None:
         """Load behavior, serialize to 1D, compute speed, and filter.
@@ -128,7 +133,9 @@ class MazeDataset(PlaceCellDataset):
             seg_lengths = []
             for seg_name in self.effective_tube_order:
                 # Strip _fwd/_rev suffix to find parent tube
-                base = seg_name.rsplit("_", 1)[0] if seg_name.endswith(("_fwd", "_rev")) else seg_name
+                base = (
+                    seg_name.rsplit("_", 1)[0] if seg_name.endswith(("_fwd", "_rev")) else seg_name
+                )
                 seg_lengths.append(self.tube_lengths.get(base, 1.0))
             cumulative = np.concatenate([[0.0], np.cumsum(seg_lengths)])
             self.tube_boundaries = cumulative.tolist()
@@ -339,40 +346,6 @@ class MazeDataset(PlaceCellDataset):
 
         logger.info("Done. %d units analyzed (1D).", len(self.unit_results))
 
-    def summary(self) -> dict[str, int]:
-        """Compute summary counts using 1D config thresholds."""
-        p_thresh = self.spatial_1d.p_value_threshold
-        n_sig = 0
-        n_stable = 0
-        n_place_cells = 0
-        for res in self.unit_results.values():
-            is_sig = res.p_val < p_thresh
-            is_stable = not np.isnan(res.stability_p_val) and res.stability_p_val < p_thresh
-            if is_sig:
-                n_sig += 1
-            if is_stable:
-                n_stable += 1
-            if is_sig and is_stable:
-                n_place_cells += 1
-        return {
-            "n_total": len(self.unit_results),
-            "n_sig": n_sig,
-            "n_stable": n_stable,
-            "n_place_cells": n_place_cells,
-        }
-
-    def place_cells(self) -> dict[int, "UnitResult"]:
-        """Return units passing both significance and stability tests (1D thresholds)."""
-        p_thresh = self.spatial_1d.p_value_threshold
-        out: dict[int, UnitResult] = {}
-        for uid, res in self.unit_results.items():
-            if res.p_val >= p_thresh:
-                continue
-            if np.isnan(res.stability_p_val) or res.stability_p_val >= p_thresh:
-                continue
-            out[uid] = res
-        return out
-
     def save_bundle(self, path) -> "Path":
         """Save bundle, including 1D trajectory and maze metadata."""
 
@@ -405,12 +378,10 @@ class MazeDataset(PlaceCellDataset):
         Restores all base attributes via the parent loader, then adds
         1D-specific state (trajectories, tube boundaries, etc.).
         """
-        from placecell.dataset import PlaceCellDataset
-
         path = Path(path)
 
         # Use the parent loader to get a base dataset, then upgrade
-        base = PlaceCellDataset.load_bundle.__func__(cls, path)
+        base = BasePlaceCellDataset.load_bundle.__func__(cls, path)
 
         # Restore 1D trajectories
         t1d_path = path / "trajectory_1d.parquet"

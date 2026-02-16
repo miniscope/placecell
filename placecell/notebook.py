@@ -13,7 +13,7 @@ from matplotlib.lines import Line2D
 from placecell.analysis import compute_place_field_mask
 
 if TYPE_CHECKING:
-    from placecell.dataset import PlaceCellDataset
+    from placecell.dataset import ArenaDataset
 
 
 def create_deconv_browser(
@@ -289,17 +289,17 @@ def create_unit_browser(
         stab_corr = result.stability_corr
 
         # Plot first half
-        im1 = ax3a.imshow(rate_map_first.T, origin="lower", cmap="jet", aspect="equal")
+        im1 = ax3a.imshow(rate_map_first.T, origin="lower", cmap="inferno", aspect="equal")
         ax3a.set_title("1st half", fontsize=9)
         ax3a.axis("off")
 
         # Plot second half
-        im2 = ax3b.imshow(rate_map_second.T, origin="lower", cmap="jet", aspect="equal")
+        im2 = ax3b.imshow(rate_map_second.T, origin="lower", cmap="inferno", aspect="equal")
         ax3b.set_title("2nd half", fontsize=9)
         ax3b.axis("off")
 
         # Plot full session with red contour
-        im3 = ax3c.imshow(result.rate_map.T, origin="lower", cmap="jet", aspect="equal")
+        im3 = ax3c.imshow(result.rate_map.T, origin="lower", cmap="inferno", aspect="equal")
         field_mask_full = compute_place_field_mask(
             result.rate_map,
             threshold=place_field_threshold,
@@ -535,11 +535,11 @@ def create_unit_browser(
 
 
 def browse_units(
-    ds: PlaceCellDataset,
+    ds: ArenaDataset,
     unit_results: dict[int, dict] | None = None,
     place_field_threshold: float | None = None,
 ) -> tuple[plt.Figure, widgets.VBox]:
-    """Create a unit browser from a PlaceCellDataset.
+    """Create a unit browser from an ArenaDataset.
 
     Parameters
     ----------
@@ -868,17 +868,29 @@ def create_unit_browser_1d(
         valid_2nd = np.isfinite(res.rate_map_second)
 
         ax_rm.fill_between(
-            centers, 0, np.where(valid_full, res.rate_map, 0),
-            alpha=0.15, color="black", where=valid_full,
+            centers,
+            0,
+            np.where(valid_full, res.rate_map, 0),
+            alpha=0.15,
+            color="black",
+            where=valid_full,
         )
         ax_rm.plot(centers, res.rate_map, color="black", linewidth=1.5, label="Full")
         ax_rm.plot(
-            centers, np.where(valid_1st, res.rate_map_first, np.nan),
-            color="steelblue", linewidth=1.0, alpha=0.8, label="1st half",
+            centers,
+            np.where(valid_1st, res.rate_map_first, np.nan),
+            color="steelblue",
+            linewidth=1.0,
+            alpha=0.8,
+            label="1st half",
         )
         ax_rm.plot(
-            centers, np.where(valid_2nd, res.rate_map_second, np.nan),
-            color="coral", linewidth=1.0, alpha=0.8, label="2nd half",
+            centers,
+            np.where(valid_2nd, res.rate_map_second, np.nan),
+            color="coral",
+            linewidth=1.0,
+            alpha=0.8,
+            label="2nd half",
         )
 
         if tube_boundaries:
@@ -888,8 +900,14 @@ def create_unit_browser_1d(
             for i, lbl in enumerate(tube_labels):
                 mid = (tube_boundaries[i] + tube_boundaries[i + 1]) / 2
                 ax_rm.text(
-                    mid, -0.06, lbl, ha="center", va="top",
-                    fontsize=5, rotation=45, clip_on=False,
+                    mid,
+                    -0.06,
+                    lbl,
+                    ha="center",
+                    va="top",
+                    fontsize=5,
+                    rotation=45,
+                    clip_on=False,
                     transform=ax_rm.get_xaxis_transform(),
                 )
 
@@ -902,7 +920,11 @@ def create_unit_browser_1d(
         # ── SI shuffle histogram ──────────────────────────────────
         if res.shuffled_sis is not None and len(res.shuffled_sis) > 0:
             ax_si_shuf.hist(
-                res.shuffled_sis, bins=30, color="gray", alpha=0.6, edgecolor="none",
+                res.shuffled_sis,
+                bins=30,
+                color="gray",
+                alpha=0.6,
+                edgecolor="none",
             )
             ax_si_shuf.axvline(res.si, color="red", linewidth=1.5, label=f"SI={res.si:.3f}")
             ax_si_shuf.set_title(f"SI shuffle (p={res.p_val:.3f})", fontsize=8)
@@ -914,17 +936,29 @@ def create_unit_browser_1d(
         # ── Stability shuffle histogram ───────────────────────────
         if res.shuffled_stability is not None and len(res.shuffled_stability) > 0:
             ax_stab_shuf.hist(
-                res.shuffled_stability, bins=30, color="gray", alpha=0.6, edgecolor="none",
+                res.shuffled_stability,
+                bins=30,
+                color="gray",
+                alpha=0.6,
+                edgecolor="none",
             )
             corr_val = res.stability_corr if not np.isnan(res.stability_corr) else 0
             ax_stab_shuf.axvline(
-                corr_val, color="red", linewidth=1.5, label=f"r={corr_val:.2f}",
+                corr_val,
+                color="red",
+                linewidth=1.5,
+                label=f"r={corr_val:.2f}",
             )
             p_str = f"p={res.stability_p_val:.3f}" if not np.isnan(res.stability_p_val) else "p=N/A"
             ax_stab_shuf.set_title(f"Stability shuffle ({p_str})", fontsize=8)
         else:
             ax_stab_shuf.text(
-                0.5, 0.5, "No stability shuffle", ha="center", va="center", fontsize=8,
+                0.5,
+                0.5,
+                "No stability shuffle",
+                ha="center",
+                va="center",
+                fontsize=8,
             )
         ax_stab_shuf.tick_params(labelsize=5)
         ax_stab_shuf.set_ylabel("Count", fontsize=6)
@@ -964,10 +998,12 @@ def create_unit_browser_1d(
                     event_amps_red = ea[m]
 
             y_min, y_max = ax_trace.get_ylim()
-            all_a = np.concatenate([
-                event_amps_gray if len(event_amps_gray) > 0 else [],
-                event_amps_red if len(event_amps_red) > 0 else [],
-            ])
+            all_a = np.concatenate(
+                [
+                    event_amps_gray if len(event_amps_gray) > 0 else [],
+                    event_amps_red if len(event_amps_red) > 0 else [],
+                ]
+            )
             amp_max = float(np.max(all_a)) if len(all_a) > 0 else 1.0
             max_h = (y_max - y_min) * 0.3
 
@@ -986,15 +1022,25 @@ def create_unit_browser_1d(
 
             legend_el = [Line2D([0], [0], color="blue", linewidth=0.5, label="Fluorescence")]
             if len(event_times_gray) > 0:
-                legend_el.append(Line2D(
-                    [0], [0], color="gray", linewidth=1.5,
-                    label=f"Events (< {speed_threshold:.1f} {speed_unit})",
-                ))
+                legend_el.append(
+                    Line2D(
+                        [0],
+                        [0],
+                        color="gray",
+                        linewidth=1.5,
+                        label=f"Events (< {speed_threshold:.1f} {speed_unit})",
+                    )
+                )
             if len(event_times_red) > 0:
-                legend_el.append(Line2D(
-                    [0], [0], color="red", linewidth=1.5,
-                    label=f"Events (>= {speed_threshold:.1f} {speed_unit})",
-                ))
+                legend_el.append(
+                    Line2D(
+                        [0],
+                        [0],
+                        color="red",
+                        linewidth=1.5,
+                        label=f"Events (>= {speed_threshold:.1f} {speed_unit})",
+                    )
+                )
             ax_trace.legend(handles=legend_el, loc="upper left", fontsize=6, framealpha=0.9)
         else:
             ax_trace.text(0.5, 0.5, "No trace data", ha="center", va="center", fontsize=8)
@@ -1013,20 +1059,33 @@ def create_unit_browser_1d(
             stab_text = "pass" if is_stable else "fail"
 
         txt = fig.text(
-            0.02, 0.97,
+            0.02,
+            0.97,
             f"Unit {uid} ({unit_idx + 1}/{n_units}) | N={n_events}",
-            ha="left", va="top", fontsize=9, fontweight="bold",
+            ha="left",
+            va="top",
+            fontsize=9,
+            fontweight="bold",
         )
         text_annotations.append(txt)
         txt = fig.text(
-            0.30, 0.97,
+            0.30,
+            0.97,
             f"SI={res.si:.3f}, p={res.p_val:.3f}: ",
-            ha="left", va="top", fontsize=8,
+            ha="left",
+            va="top",
+            fontsize=8,
         )
         text_annotations.append(txt)
         txt = fig.text(
-            0.48, 0.97, sig_text,
-            ha="left", va="top", fontsize=8, fontweight="bold", color=sig_color,
+            0.48,
+            0.97,
+            sig_text,
+            ha="left",
+            va="top",
+            fontsize=8,
+            fontweight="bold",
+            color=sig_color,
         )
         text_annotations.append(txt)
 
@@ -1036,14 +1095,23 @@ def create_unit_browser_1d(
         if not np.isnan(res.stability_p_val):
             stab_parts.append(f"p={res.stability_p_val:.3f}")
         txt = fig.text(
-            0.54, 0.97,
+            0.54,
+            0.97,
             f"Stab ({', '.join(stab_parts)}): ",
-            ha="left", va="top", fontsize=8,
+            ha="left",
+            va="top",
+            fontsize=8,
         )
         text_annotations.append(txt)
         txt = fig.text(
-            0.72, 0.97, stab_text,
-            ha="left", va="top", fontsize=8, fontweight="bold", color=stab_color,
+            0.72,
+            0.97,
+            stab_text,
+            ha="left",
+            va="top",
+            fontsize=8,
+            fontweight="bold",
+            color=stab_color,
         )
         text_annotations.append(txt)
 
@@ -1057,13 +1125,21 @@ def create_unit_browser_1d(
 
     # ── Widgets ───────────────────────────────────────────────────
     unit_slider = widgets.IntSlider(
-        value=0, min=0, max=max(0, n_units - 1), step=1,
-        description="Unit:", continuous_update=False,
+        value=0,
+        min=0,
+        max=max(0, n_units - 1),
+        step=1,
+        description="Unit:",
+        continuous_update=False,
         layout=widgets.Layout(width="100%"),
     )
     trace_slider = widgets.FloatSlider(
-        value=0, min=0, max=max(0, max_trace_time - trace_time_window),
-        step=10, description="Time (s):", continuous_update=False,
+        value=0,
+        min=0,
+        max=max(0, max_trace_time - trace_time_window),
+        step=10,
+        description="Time (s):",
+        continuous_update=False,
         layout=widgets.Layout(width="100%"),
     )
     prev_btn = widgets.Button(description="< Prev", layout=widgets.Layout(width="70px"))

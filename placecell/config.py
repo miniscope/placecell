@@ -1,11 +1,12 @@
 """Configuration models for pcell, loaded from YAML."""
 
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from mio.models import MiniscopeConfig
 from mio.models.mixins import ConfigYAMLMixin
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 CONFIG_DIR = Path(__file__).parent / "config"
 
@@ -47,8 +48,8 @@ class NeuralConfig(BaseModel):
     )
 
 
-class SpatialMapConfig(BaseModel):
-    """Spatial map visualization configuration."""
+class SpatialMap2DConfig(BaseModel):
+    """Spatial map visualization configuration for 2D arena analysis."""
 
     bins: int = Field(
         ...,
@@ -259,6 +260,10 @@ class SpatialMap1DConfig(BaseModel):
 class BehaviorConfig(BaseModel):
     """Behavior / place-field configuration."""
 
+    type: Literal["arena", "maze"] = Field(
+        "arena",
+        description="Analysis type: 'arena' for 2D open-field, 'maze' for 1D tube analysis.",
+    )
     behavior_fps: float = Field(
         ...,
         gt=0.0,
@@ -295,18 +300,30 @@ class BehaviorConfig(BaseModel):
         description="Maximum plausible frame-to-frame displacement in mm. "
         "Larger jumps are treated as tracking errors and interpolated.",
     )
-    spatial_map: SpatialMapConfig = Field(
-        default_factory=SpatialMapConfig,
-        description="Spatial map visualization settings.",
+    spatial_map_2d: SpatialMap2DConfig | None = Field(
+        None,
+        description="Spatial map settings for 2D arena analysis. Required when type='arena'.",
     )
     maze: MazeConfig | None = Field(
         None,
-        description="Maze configuration for 1D tube analysis. None = standard 2D mode.",
+        description="Maze configuration for 1D tube analysis. Required when type='maze'.",
     )
     spatial_map_1d: SpatialMap1DConfig | None = Field(
         None,
-        description="Spatial map settings for 1D analysis. Required when maze is set.",
+        description="Spatial map settings for 1D analysis. Required when type='maze'.",
     )
+
+    @model_validator(mode="after")
+    def _validate_type_fields(self) -> "BehaviorConfig":
+        if self.type == "arena":
+            if self.spatial_map_2d is None:
+                raise ValueError("spatial_map_2d is required when type='arena'")
+        elif self.type == "maze":
+            if self.maze is None:
+                raise ValueError("maze is required when type='maze'")
+            if self.spatial_map_1d is None:
+                raise ValueError("spatial_map_1d is required when type='maze'")
+        return self
 
 
 class DataPathsConfig(BaseModel):

@@ -424,14 +424,18 @@ def compute_stability_score_1d(
             )
             rm1 = np.zeros_like(occ_first)
             rm1[valid_first] = ew1.astype(float)[valid_first] / occ_first[valid_first]
-            rm1 = gaussian_filter_normalized_1d(rm1, sigma=activity_sigma, segment_bins=segment_bins)
+            rm1 = gaussian_filter_normalized_1d(
+                rm1, sigma=activity_sigma, segment_bins=segment_bins
+            )
 
             ew2, _ = np.histogram(
                 traj_pos[traj_second_mask], bins=edges, weights=shifted[traj_second_mask]
             )
             rm2 = np.zeros_like(occ_second)
             rm2[valid_second] = ew2.astype(float)[valid_second] / occ_second[valid_second]
-            rm2 = gaussian_filter_normalized_1d(rm2, sigma=activity_sigma, segment_bins=segment_bins)
+            rm2 = gaussian_filter_normalized_1d(
+                rm2, sigma=activity_sigma, segment_bins=segment_bins
+            )
 
             bv = valid_first & valid_second
             if not np.any(bv):
