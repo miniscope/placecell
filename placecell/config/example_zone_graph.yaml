@@ -1,4 +1,4 @@
-mm_per_pixel: 1
+mm_per_pixel: 1.0
 
 zones:
   Room_1:

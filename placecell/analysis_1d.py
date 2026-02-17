@@ -218,7 +218,8 @@ def compute_spatial_information_1d(
 
     valid_si = (rate_map > 0) & valid_mask
     if np.any(valid_si):
-        si_term = P_i[valid_si] * rate_map[valid_si] * np.log2(rate_map[valid_si] / overall_lambda)
+        ratio = rate_map[valid_si] / overall_lambda
+        si_term = P_i[valid_si] * ratio * np.log2(ratio)
         actual_si = float(np.sum(si_term))
     else:
         actual_si = 0.0
@@ -258,8 +259,9 @@ def compute_spatial_information_1d(
 
         valid_s = (rate_shuf > 0) & valid_mask
         if np.any(valid_s):
+            ratio_s = rate_shuf[valid_s] / overall_lambda
             si_shuf = np.sum(
-                P_i[valid_s] * rate_shuf[valid_s] * np.log2(rate_shuf[valid_s] / overall_lambda)
+                P_i[valid_s] * ratio_s * np.log2(ratio_s)
             )
         else:
             si_shuf = 0.0

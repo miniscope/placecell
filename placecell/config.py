@@ -190,6 +190,12 @@ class MazeConfig(BaseModel):
         description="Split each tube into forward/reverse segments based on traversal direction. "
         "Doubles total segments (e.g. 4 tubes -> 8 directional segments).",
     )
+    require_complete_traversal: bool = Field(
+        False,
+        description="If True, keep only traversals where the animal crosses "
+        "from one room to a different room. Partial entries (animal enters "
+        "a tube and returns to the same room) are discarded.",
+    )
 
 
 class SpatialMap1DConfig(BaseModel):
@@ -254,6 +260,38 @@ class SpatialMap1DConfig(BaseModel):
         600.0,
         gt=0.0,
         description="Time window in seconds for trace display.",
+    )
+
+
+class ZoneDetectionConfig(BaseModel):
+    """Parameters for zone detection state machine."""
+
+    tube_max_distance: float = Field(
+        60.0,
+        gt=0.0,
+        description="Maximum distance (pixels) from tube centerline for zone classification.",
+    )
+    min_confidence: float = Field(
+        0.5,
+        ge=0.0,
+        le=1.0,
+        description="Minimum confidence for zone transitions.",
+    )
+    min_confidence_forbidden: float = Field(
+        0.8,
+        ge=0.0,
+        le=1.0,
+        description="Minimum confidence for forbidden (non-adjacent) transitions.",
+    )
+    min_frames_same: int = Field(
+        1,
+        ge=1,
+        description="Minimum frames in current zone before allowing transition.",
+    )
+    min_frames_forbidden: int = Field(
+        3,
+        ge=1,
+        description="Minimum consecutive frames for forbidden transition override.",
     )
 
 

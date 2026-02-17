@@ -18,6 +18,7 @@ from placecell.maze import (
     assign_traversal_direction,
     compute_speed_1d,
     compute_tube_lengths,
+    filter_complete_traversals,
     filter_tube_by_speed,
     load_graph_polylines,
     serialize_tube_position,
@@ -112,6 +113,15 @@ class MazeDataset(BasePlaceCellDataset):
             )
         else:
             self.effective_tube_order = list(mcfg.tube_order)
+
+        # Optionally filter to complete traversals only (room-to-room)
+        if mcfg.require_complete_traversal:
+            self.trajectory_1d = filter_complete_traversals(
+                self.trajectory_1d,
+                full_trajectory=self.trajectory,
+                tube_order=mcfg.tube_order,
+                zone_column=mcfg.zone_column,
+            )
 
         # Compute 1D speed
         bcfg = self.cfg.behavior

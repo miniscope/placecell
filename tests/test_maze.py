@@ -232,9 +232,11 @@ class TestComputeTubeLengths:
         """Straight-line polylines with known lengths."""
         graph = {
             "mm_per_pixel": 2.0,
-            "Tube_1": [[0, 0], [100, 0]],  # 100 px → 200 mm
-            "Tube_2": [[0, 0], [0, 50]],  # 50 px → 100 mm
-            "Room_1": [[0, 0], [10, 10]],  # ~14.14 px → ~28.28 mm
+            "zones": {
+                "Tube_1": {"type": "tube", "points": [[0, 0], [100, 0]]},  # 100 px → 200 mm
+                "Tube_2": {"type": "tube", "points": [[0, 0], [0, 50]]},  # 50 px → 100 mm
+                "Room_1": {"type": "room", "points": [[0, 0], [10, 10]]},  # ~14.14 px → ~28.28 mm
+            },
         }
         import yaml
 
@@ -250,7 +252,9 @@ class TestComputeTubeLengths:
         """L-shaped polyline: 3→0→4 in pixel coords."""
         graph = {
             "mm_per_pixel": 1.0,
-            "Tube_1": [[0, 0], [3, 0], [3, 4]],  # 3 + 4 = 7 px
+            "zones": {
+                "Tube_1": {"type": "tube", "points": [[0, 0], [3, 0], [3, 4]]},  # 3 + 4 = 7 px
+            },
         }
         import yaml
 
@@ -262,7 +266,9 @@ class TestComputeTubeLengths:
     def test_default_mm_per_pixel(self, tmp_path):
         """mm_per_pixel defaults to 1 if not in YAML."""
         graph = {
-            "Tube_1": [[0, 0], [10, 0]],
+            "zones": {
+                "Tube_1": {"type": "tube", "points": [[0, 0], [10, 0]]},
+            },
         }
         import yaml
 

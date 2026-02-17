@@ -17,7 +17,8 @@ def load_graph_polylines(graph_path: Path) -> tuple[dict[str, list[list[float]]]
     Parameters
     ----------
     graph_path:
-        Path to YAML file with ``mm_per_pixel`` and zone polylines.
+        Path to YAML file in combined zone format (``zones`` key with
+        ``type``, ``points``, and optionally ``connections`` per zone).
 
     Returns
     -------
@@ -30,12 +31,10 @@ def load_graph_polylines(graph_path: Path) -> tuple[dict[str, list[list[float]]]
     mm_per_pixel = float(data.get("mm_per_pixel", 1.0))
 
     polylines: dict[str, list[list[float]]] = {}
-    for key, waypoints in data.items():
-        if key == "mm_per_pixel":
-            continue
-        if not isinstance(waypoints, list) or len(waypoints) < 2:
-            continue
-        polylines[key] = waypoints
+    for zone_name, zone_data in data["zones"].items():
+        points = zone_data.get("points", [])
+        if isinstance(points, list) and len(points) >= 2:
+            polylines[zone_name] = points
 
     return polylines, mm_per_pixel
 
@@ -223,6 +222,88 @@ def assign_traversal_direction(
         effective_order,
     )
     return df, effective_order
+
+
+def filter_complete_traversals(
+    trajectory: pd.DataFrame,
+    full_trajectory: pd.DataFrame,
+    tube_order: list[str],
+    zone_column: str = "zone",
+) -> pd.DataFrame:
+    """Remove traversals where the animal did not cross from one room to another.
+
+    For each traversal, the zone immediately before entering and after
+    leaving the tube is looked up in *full_trajectory*.  A traversal is
+    "complete" when both zones are rooms (not tubes) and they differ
+    (i.e. the animal went Room A → Tube → Room B, not Room A → Tube → Room A).
+
+    If ``traversal_id`` is not yet present (e.g. ``split_by_direction``
+    is False), traversal boundaries are detected automatically.
+
+    Parameters
+    ----------
+    trajectory:
+        Tube-only DataFrame with ``frame_index`` column (and optionally
+        ``traversal_id`` from ``assign_traversal_direction``).
+    full_trajectory:
+        Complete trajectory including room frames, with ``frame_index``
+        and *zone_column*.
+    tube_order:
+        List of tube zone names (anything else is treated as a room).
+    zone_column:
+        Column containing zone labels in *full_trajectory*.
+
+    Returns
+    -------
+    pd.DataFrame
+        Filtered to only complete (room-to-room) traversals.
+    """
+    df = trajectory.sort_values("frame_index").copy()
+
+    # Assign traversal_id if not already present
+    if "traversal_id" not in df.columns:
+        zone_changed = df[zone_column] != df[zone_column].shift(1)
+        frame_gap = df["frame_index"].diff() > 1
+        boundary = zone_changed | frame_gap
+        boundary.iloc[0] = True
+        df["traversal_id"] = boundary.cumsum()
+
+    tube_set = set(tube_order)
+
+    # Build sorted lookup from full trajectory
+    full_sorted = full_trajectory.sort_values("frame_index")
+    full_fi = full_sorted["frame_index"].values
+    full_zone = full_sorted[zone_column].values
+
+    # For each traversal, check entry/exit rooms
+    bounds = df.groupby("traversal_id")["frame_index"].agg(["first", "last"])
+    complete_ids = []
+    for trav_id, (first_frame, last_frame) in bounds.iterrows():
+        idx_before = np.searchsorted(full_fi, first_frame, side="left") - 1
+        idx_after = np.searchsorted(full_fi, last_frame, side="right")
+
+        if idx_before < 0 or idx_after >= len(full_fi):
+            continue
+
+        entry_zone = full_zone[idx_before]
+        exit_zone = full_zone[idx_after]
+
+        if (
+            entry_zone not in tube_set
+            and exit_zone not in tube_set
+            and entry_zone != exit_zone
+        ):
+            complete_ids.append(trav_id)
+
+    n_total = bounds.shape[0]
+    n_kept = len(complete_ids)
+    result = df[df["traversal_id"].isin(complete_ids)].copy()
+    logger.info(
+        "Complete-traversal filter (room-based): kept %d/%d traversals",
+        n_kept,
+        n_total,
+    )
+    return result
 
 
 def compute_speed_1d(

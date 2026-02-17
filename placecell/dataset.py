@@ -600,6 +600,10 @@ class BasePlaceCellDataset(abc.ABC):
         path = Path(path)
         if path.suffix != ".pcellbundle":
             path = path.with_suffix(".pcellbundle")
+
+        # Avoid overwriting: append _1, _2, ... if path already exists
+        path = unique_bundle_path(path.parent, path.stem)
+
         path.mkdir(parents=True, exist_ok=True)
 
         # Metadata
