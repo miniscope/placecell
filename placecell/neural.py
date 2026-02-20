@@ -7,6 +7,10 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from placecell.logging import init_logger
+
+logger = init_logger(__name__)
+
 
 def load_calcium_traces(
     neural_path: Path,
@@ -90,7 +94,13 @@ def run_deconvolution(
     S_list : list[np.ndarray]
         Spike trains.
     """
-    from oasis.oasis_methods import oasisAR2
+    import warnings
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        from oasis.oasis_methods import oasisAR2
+    for w in caught:
+        logger.warning(str(w.message))
 
     good_unit_ids: list[int] = []
     S_list: list[np.ndarray] = []

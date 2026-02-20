@@ -25,6 +25,7 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinxcontrib.mermaid",
     "sphinx_design",
+    "sphinx_click",
 ]
 
 source_suffix = {

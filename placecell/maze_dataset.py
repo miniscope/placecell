@@ -1,4 +1,4 @@
-"""Dataset class for maze/tube 1D place cell analysis."""
+"""Dataset class for maze/arm 1D place cell analysis."""
 
 import json
 from pathlib import Path
@@ -11,23 +11,27 @@ from placecell.analysis_1d import (
     compute_occupancy_map_1d,
     compute_unit_analysis_1d,
 )
-from placecell.config import MazeConfig, SpatialMap1DConfig
+from placecell.behavior import build_event_place_dataframe
+from placecell.config import SpatialMap1DConfig
 from placecell.dataset import BasePlaceCellDataset, UnitResult
+from placecell.io import load_visualization_data
 from placecell.logging import init_logger
 from placecell.maze import (
     assign_traversal_direction,
+    compute_arm_lengths,
     compute_speed_1d,
-    compute_tube_lengths,
-    filter_tube_by_speed,
+    filter_arm_by_speed,
+    filter_complete_traversals,
     load_graph_polylines,
-    serialize_tube_position,
+    serialize_arm_position,
 )
+from placecell.neural import load_calcium_traces
 
 logger = init_logger(__name__)
 
 
 class MazeDataset(BasePlaceCellDataset):
-    """Dataset for 1D tube/maze place cell analysis.
+    """Dataset for 1D arm/maze place cell analysis.
 
     Overrides the behavior preprocessing, occupancy computation, and
     unit analysis steps to work on a concatenated 1D axis.
@@ -36,20 +40,16 @@ class MazeDataset(BasePlaceCellDataset):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.trajectory_1d: pd.DataFrame | None = None
+        self.trajectory_1d_all: pd.DataFrame | None = None
         self.trajectory_1d_filtered: pd.DataFrame | None = None
         self.pos_range: tuple[float, float] | None = None
         self.edges_1d: np.ndarray | None = None
-        self.tube_boundaries: list[float] = []
-        self.effective_tube_order: list[str] = []
-        self.tube_lengths: dict[str, float] | None = None
+        self.arm_boundaries: list[float] = []
+        self.effective_arm_order: list[str] = []
+        self.arm_lengths: dict[str, float] | None = None
         self.segment_bins: list[int] | None = None
         self.graph_polylines: dict[str, list[list[float]]] | None = None
         self.graph_mm_per_pixel: float | None = None
-
-    @property
-    def maze_cfg(self) -> "MazeConfig | None":
-        """Shortcut to maze config."""
-        return self.cfg.behavior.maze
 
     @property
     def spatial_1d(self) -> SpatialMap1DConfig:
@@ -61,88 +61,174 @@ class MazeDataset(BasePlaceCellDataset):
         """P-value threshold from 1D spatial map config."""
         return self.spatial_1d.p_value_threshold
 
-    def preprocess_behavior(self) -> None:
-        """Load behavior, serialize to 1D, compute speed, and filter.
+    def load(self) -> None:
+        """Load neural traces, behavior from zone_tracking CSV, and vis assets.
 
-        1. Calls super() to load standard trajectory (needed for timestamps).
-        2. Serializes tube_position to concatenated 1D axis.
-        3. Computes 1D speed within tubes.
-        4. Applies speed filter.
+        Unlike the parent, this does NOT load the raw behavior_position CSV.
+        The maze pipeline only needs the zone_tracking CSV (which already
+        contains x, y, zone, arm_position) plus behavior timestamps.
         """
-        super().preprocess_behavior()
+        ncfg = self.cfg.neural
+        dcfg = self.data_cfg
+        if dcfg is None or dcfg.bodypart is None:
+            raise RuntimeError("bodypart must be set in data config")
 
-        if self.trajectory is None:
-            raise RuntimeError("Behavior data not loaded.")
+        # Neural traces
+        self.traces = load_calcium_traces(self.neural_path, trace_name=ncfg.trace_name)
+        logger.info(
+            "Loaded traces: %d units, %d frames",
+            self.traces.sizes["unit_id"],
+            self.traces.sizes["frame"],
+        )
 
-        mcfg = self.maze_cfg
-        if mcfg is None:
-            raise RuntimeError("MazeDataset requires maze config.")
-
-        # Load extra columns (zone, tube_position) from the behavior CSV
-        self._load_maze_columns()
-
-        # Load behavior graph for physical tube lengths (optional)
-        if self.behavior_graph_path is not None and self.behavior_graph_path.exists():
-            self.graph_polylines, self.graph_mm_per_pixel = load_graph_polylines(
-                self.behavior_graph_path
+        # Behavior: load from zone_tracking CSV (not behavior_position)
+        zone_csv = self.zone_tracking_path
+        if zone_csv is None or not zone_csv.exists():
+            raise FileNotFoundError(
+                "zone_tracking CSV not found. Run 'placecell detect-zones' first "
+                f"to generate it. Expected: {zone_csv}"
             )
-            zone_lengths, _ = compute_tube_lengths(self.behavior_graph_path)
-            # Keep only the tubes we're using
-            self.tube_lengths = {t: zone_lengths[t] for t in mcfg.tube_order if t in zone_lengths}
+
+        df = pd.read_csv(zone_csv, header=[0, 1, 2])
+        scorer = df.columns[1][0]
+        bp = dcfg.bodypart
+        zone_col = dcfg.zone_column
+        tp_col = dcfg.arm_position_column
+
+        frame_index = df.iloc[:, 0].values
+        x = df[(scorer, bp, "x")].values.astype(float)
+        y = df[(scorer, bp, "y")].values.astype(float)
+        zone = df[(scorer, bp, zone_col)].values
+        arm_pos = pd.to_numeric(df[(scorer, bp, tp_col)].values, errors="coerce")
+
+        # Merge with behavior timestamps for unix_time
+        timestamps = pd.read_csv(self.behavior_timestamp_path)
+        ts_lookup = timestamps.set_index("frame_index")["unix_time"]
+        unix_time = ts_lookup.reindex(frame_index).values
+
+        self.trajectory = pd.DataFrame(
+            {
+                "frame_index": frame_index,
+                "x": x,
+                "y": y,
+                "unix_time": unix_time,
+                "speed": 0.0,  # placeholder; maze uses speed_1d instead
+                zone_col: zone,
+                tp_col: arm_pos,
+            }
+        )
+        logger.info("Loaded trajectory from zone_tracking: %d frames", len(self.trajectory))
+
+        # Visualization assets (max projection, footprints)
+        self.traces, self.max_proj, self.footprints = load_visualization_data(
+            neural_path=self.neural_path,
+            trace_name=ncfg.trace_name,
+        )
+
+        # Behavior video frame (single frame for overlay)
+        if self.behavior_video_path is not None and self.behavior_video_path.exists():
+            try:
+                import cv2
+
+                cap = cv2.VideoCapture(str(self.behavior_video_path))
+                ret, frame = cap.read()
+                cap.release()
+                if ret:
+                    self.behavior_video_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    logger.info(
+                        "Loaded behavior video frame from %s", self.behavior_video_path.name
+                    )
+                else:
+                    logger.warning("Could not read frame from %s", self.behavior_video_path)
+            except ImportError:
+                logger.warning("cv2 not installed — skipping behavior video frame")
+
+    def preprocess_behavior(self) -> None:
+        """Serialize to 1D, compute speed, and filter.
+
+        Zone and arm_position columns are already in self.trajectory
+        from load(), so no extra CSV loading is needed.
+        """
+        if self.trajectory is None:
+            raise RuntimeError("Behavior data not loaded. Call load() first.")
+
+        dcfg = self.data_cfg
+        if dcfg is None or dcfg.arm_order is None:
+            raise RuntimeError("arm_order must be set in data config for maze analysis.")
+
+        bcfg = self.cfg.behavior
+
+        # Load behavior graph for physical arm lengths (optional)
+        if self.behavior_graph_path is not None and self.behavior_graph_path.exists():
+            self.graph_polylines = load_graph_polylines(self.behavior_graph_path)
+            self.graph_mm_per_pixel = dcfg.mm_per_pixel or 1.0
+            zone_lengths = compute_arm_lengths(self.graph_polylines, self.graph_mm_per_pixel)
+            # Keep only the arms we're using
+            self.arm_lengths = {t: zone_lengths[t] for t in dcfg.arm_order if t in zone_lengths}
         else:
-            self.tube_lengths = None
+            self.arm_lengths = None
 
         # Serialize to 1D
-        self.trajectory_1d = serialize_tube_position(
+        self.trajectory_1d = serialize_arm_position(
             self.trajectory,
-            tube_order=mcfg.tube_order,
-            zone_column=mcfg.zone_column,
-            tube_position_column=mcfg.tube_position_column,
-            tube_lengths=self.tube_lengths,
+            arm_order=dcfg.arm_order,
+            zone_column=dcfg.zone_column,
+            arm_position_column=dcfg.arm_position_column,
+            arm_lengths=self.arm_lengths,
         )
 
         # Optionally split by traversal direction (doubles segments)
-        if mcfg.split_by_direction:
-            self.trajectory_1d, self.effective_tube_order = assign_traversal_direction(
+        if bcfg.split_by_direction:
+            self.trajectory_1d, self.effective_arm_order = assign_traversal_direction(
                 self.trajectory_1d,
-                tube_order=mcfg.tube_order,
-                zone_column=mcfg.zone_column,
-                tube_position_column=mcfg.tube_position_column,
-                tube_lengths=self.tube_lengths,
+                arm_order=dcfg.arm_order,
+                zone_column=dcfg.zone_column,
+                arm_position_column=dcfg.arm_position_column,
+                arm_lengths=self.arm_lengths,
             )
         else:
-            self.effective_tube_order = list(mcfg.tube_order)
+            self.effective_arm_order = list(dcfg.arm_order)
+
+        # Optionally filter to complete traversals only (room-to-room)
+        # Keep pre-filter copy for visualization
+        self.trajectory_1d_all = self.trajectory_1d.copy()
+        if bcfg.require_complete_traversal:
+            self.trajectory_1d = filter_complete_traversals(
+                self.trajectory_1d,
+                full_trajectory=self.trajectory,
+                arm_order=dcfg.arm_order,
+                zone_column=dcfg.zone_column,
+            )
 
         # Compute 1D speed
-        bcfg = self.cfg.behavior
         self.trajectory_1d = compute_speed_1d(
             self.trajectory_1d,
             window_frames=bcfg.speed_window_frames,
         )
 
         # Speed filter
-        self.trajectory_1d_filtered = filter_tube_by_speed(
+        self.trajectory_1d_filtered = filter_arm_by_speed(
             self.trajectory_1d,
             speed_threshold=bcfg.speed_threshold,
         )
 
-        # Compute pos_range and tube_boundaries
-        n_segments = len(self.effective_tube_order)
-        if self.tube_lengths is not None:
+        # Compute pos_range and arm_boundaries
+        n_segments = len(self.effective_arm_order)
+        if self.arm_lengths is not None:
             # Physical scaling: each segment spans its real length
             seg_lengths = []
-            for seg_name in self.effective_tube_order:
-                # Strip _fwd/_rev suffix to find parent tube
+            for seg_name in self.effective_arm_order:
+                # Strip _fwd/_rev suffix to find parent arm
                 base = (
                     seg_name.rsplit("_", 1)[0] if seg_name.endswith(("_fwd", "_rev")) else seg_name
                 )
-                seg_lengths.append(self.tube_lengths.get(base, 1.0))
+                seg_lengths.append(self.arm_lengths.get(base, 1.0))
             cumulative = np.concatenate([[0.0], np.cumsum(seg_lengths)])
-            self.tube_boundaries = cumulative.tolist()
+            self.arm_boundaries = cumulative.tolist()
             self.pos_range = (0.0, cumulative[-1])
         else:
             self.pos_range = (0.0, float(n_segments))
-            self.tube_boundaries = [float(i) for i in range(n_segments + 1)]
+            self.arm_boundaries = [float(i) for i in range(n_segments + 1)]
 
         logger.info(
             "1D trajectory: %d frames (%d after speed filter), %d segments%s, "
@@ -150,73 +236,37 @@ class MazeDataset(BasePlaceCellDataset):
             len(self.trajectory_1d),
             len(self.trajectory_1d_filtered),
             n_segments,
-            " (direction split)" if mcfg.split_by_direction else "",
+            " (direction split)" if bcfg.split_by_direction else "",
             self.pos_range[0],
             self.pos_range[1],
         )
 
-    def _load_maze_columns(self) -> None:
-        """Load zone and tube_position columns from behavior CSV into trajectory.
-
-        Joins on ``frame_index`` to handle trajectories that have been
-        trimmed or reordered by speed computation / time-range filtering.
-        """
-        mcfg = self.maze_cfg
-        zone_col = mcfg.zone_column
-        tp_col = mcfg.tube_position_column
-
-        if zone_col in self.trajectory.columns and tp_col in self.trajectory.columns:
-            return  # Already present
-
-        # Re-read the behavior CSV to get the extra columns
-        df = pd.read_csv(self.behavior_position_path, header=[0, 1, 2])
-        scorer = df.columns[1][0]
-        bodypart = self.cfg.behavior.bodypart
-
-        # Extract zone and tube_position from multi-index
-        zone_key = (scorer, bodypart, zone_col)
-        tp_key = (scorer, bodypart, tp_col)
-
-        if zone_key not in df.columns:
-            raise ValueError(
-                f"Column '{zone_col}' not found for bodypart '{bodypart}' in behavior CSV."
-            )
-        if tp_key not in df.columns:
-            raise ValueError(
-                f"Column '{tp_col}' not found for bodypart '{bodypart}' in behavior CSV."
-            )
-
-        # Build a lookup keyed by frame_index (first column of the CSV)
-        frame_index = df.iloc[:, 0].values
-        lookup = pd.DataFrame(
-            {
-                "frame_index": frame_index,
-                zone_col: df[zone_key].values,
-                tp_col: pd.to_numeric(df[tp_key].values, errors="coerce"),
-            }
-        )
-
-        # Merge on frame_index so alignment survives trimming / reordering
-        self.trajectory = self.trajectory.merge(lookup, on="frame_index", how="left")
-        logger.info(
-            "Loaded maze columns via frame_index join: %d/%d frames matched",
-            self.trajectory[zone_col].notna().sum(),
-            len(self.trajectory),
-        )
-
     def match_events(self) -> None:
-        """Match events to behavior, then add 1D position.
+        """Match neural events to behavior frames, then add 1D position.
 
-        Calls the parent match_events (which matches neural events to x, y),
-        then adds pos_1d by joining on beh_frame_index from trajectory_1d.
+        Unlike the parent, does NOT filter by 2D speed — the maze pipeline
+        filters by 1D arm speed in analyze_units() instead.
         """
-        super().match_events()
+        if self.event_index is None:
+            raise RuntimeError("Call deconvolve() first.")
+        if self.trajectory is None:
+            raise RuntimeError("Call load() first.")
+
+        bcfg = self.cfg.behavior
+
+        self.event_place = build_event_place_dataframe(
+            event_index=self.event_index,
+            neural_timestamp_path=self.neural_timestamp_path,
+            behavior_with_speed=self.trajectory,
+            behavior_fps=bcfg.behavior_fps,
+            speed_threshold=0.0,  # no 2D speed filter; use speed_1d later
+        )
 
         if self.trajectory_1d is None:
             raise RuntimeError("Call preprocess_behavior() first.")
 
         # Add pos_1d and speed_1d to event_place by joining on behavior frame
-        lookup_cols = ["frame_index", "pos_1d", "tube_index", "speed_1d"]
+        lookup_cols = ["frame_index", "pos_1d", "arm_index", "speed_1d"]
         if "direction" in self.trajectory_1d.columns:
             lookup_cols.append("direction")
         pos_lookup = self.trajectory_1d[lookup_cols].rename(
@@ -224,29 +274,29 @@ class MazeDataset(BasePlaceCellDataset):
         )
         self.event_place = self.event_place.merge(pos_lookup, on="beh_frame_index", how="left")
 
-        # Drop events not in tubes (pos_1d will be NaN)
+        # Drop events not in arms (pos_1d will be NaN)
         n_before = len(self.event_place)
         self.event_place = self.event_place.dropna(subset=["pos_1d"]).reset_index(drop=True)
         logger.info(
-            "1D event matching: %d/%d events in tubes",
+            "1D event matching: %d/%d events in arms",
             len(self.event_place),
             n_before,
         )
 
     def compute_occupancy(self) -> None:
-        """Compute 1D occupancy from speed-filtered tube trajectory."""
+        """Compute 1D occupancy from speed-filtered arm trajectory."""
         if self.trajectory_1d_filtered is None:
             raise RuntimeError("Call preprocess_behavior() first.")
 
         scfg = self.spatial_1d
-        n_segments = len(self.effective_tube_order)
+        n_segments = len(self.effective_arm_order)
 
         total_length = self.pos_range[1] - self.pos_range[0]
         n_bins = max(n_segments, round(total_length / scfg.bin_width_mm))
 
-        # Compute segment bin boundaries from tube boundaries
+        # Compute segment bin boundaries from arm boundaries
         edges_tmp = np.linspace(self.pos_range[0], self.pos_range[1], n_bins + 1)
-        self.segment_bins = [int(np.searchsorted(edges_tmp, b)) for b in self.tube_boundaries]
+        self.segment_bins = [int(np.searchsorted(edges_tmp, b)) for b in self.arm_boundaries]
 
         self.occupancy_time, self.valid_mask, self.edges_1d = compute_occupancy_map_1d(
             trajectory_df=self.trajectory_1d_filtered,
@@ -283,7 +333,7 @@ class MazeDataset(BasePlaceCellDataset):
         if scfg.random_seed is not None:
             np.random.seed(scfg.random_seed)
 
-        # Use 1D tube speed (same criterion as occupancy), not 2D camera speed
+        # Use 1D arm speed (same criterion as occupancy), not 2D camera speed
         df_filtered = self.event_place[self.event_place["speed_1d"] >= bcfg.speed_threshold].copy()
 
         unique_units = sorted(df_filtered["unit_id"].unique())
@@ -332,6 +382,7 @@ class MazeDataset(BasePlaceCellDataset):
                 p_val=result["p_val"],
                 shuffled_sis=result["shuffled_sis"],
                 shuffled_rate_p95=None,
+                overall_rate=result["overall_rate"],
                 stability_corr=result["stability_corr"],
                 stability_z=result["stability_z"],
                 stability_p_val=result["stability_p_val"],
@@ -346,22 +397,116 @@ class MazeDataset(BasePlaceCellDataset):
 
         logger.info("Done. %d units analyzed (1D).", len(self.unit_results))
 
-    def save_bundle(self, path: "str | Path") -> "Path":
+    def _save_summary_figures(self, figures_dir: "Path") -> list[str]:
+        """Maze-specific figures on top of the base set."""
+        saved = super()._save_summary_figures(figures_dir)
+
+        try:
+            import matplotlib
+            import matplotlib.pyplot as _plt
+        except ImportError:
+            return saved
+
+        from placecell.visualization import (
+            plot_graph_overlay,
+            plot_occupancy_preview_1d,
+            plot_position_and_traces_1d,
+            plot_shuffle_test_1d,
+        )
+
+        rc = {
+            "pdf.fonttype": 42,
+            "ps.fonttype": 42,
+            "font.family": "Arial",
+        }
+
+        with matplotlib.rc_context(rc):
+            if self.trajectory_1d_filtered is not None and self.occupancy_time is not None:
+                try:
+                    fig = plot_occupancy_preview_1d(
+                        self.trajectory_1d_filtered,
+                        self.occupancy_time,
+                        self.valid_mask,
+                        self.edges_1d,
+                        trajectory_1d=self.trajectory_1d,
+                        trajectory_1d_all=self.trajectory_1d_all,
+                        arm_boundaries=self.arm_boundaries,
+                        arm_labels=self.effective_arm_order,
+                    )
+                    fig.savefig(figures_dir / "occupancy.pdf", bbox_inches="tight")
+                    _plt.close(fig)
+                    saved.append("occupancy.pdf")
+                except Exception:
+                    logger.warning("Failed to save occupancy.pdf", exc_info=True)
+
+            if self.unit_results and self.edges_1d is not None:
+                try:
+                    fig = plot_shuffle_test_1d(
+                        self.unit_results,
+                        self.edges_1d,
+                        p_value_threshold=self.p_value_threshold,
+                        arm_boundaries=self.arm_boundaries,
+                        arm_labels=self.effective_arm_order,
+                    )
+                    fig.savefig(figures_dir / "population_rate_map.pdf", bbox_inches="tight")
+                    _plt.close(fig)
+                    saved.append("population_rate_map.pdf")
+                except Exception:
+                    logger.warning("Failed to save population_rate_map.pdf", exc_info=True)
+
+            place_cell_results = self.place_cells()
+            if place_cell_results and self.trajectory_1d is not None:
+                try:
+                    fig = plot_position_and_traces_1d(
+                        self.trajectory_1d,
+                        place_cell_results,
+                        self.edges_1d,
+                        behavior_fps=self.cfg.behavior.behavior_fps,
+                        speed_threshold=self.cfg.behavior.speed_threshold,
+                        trajectory_1d_filtered=self.trajectory_1d_filtered,
+                        arm_boundaries=self.arm_boundaries,
+                        arm_labels=self.effective_arm_order,
+                    )
+                    fig.savefig(figures_dir / "position_traces.pdf", bbox_inches="tight")
+                    _plt.close(fig)
+                    saved.append("position_traces.pdf")
+                except Exception:
+                    logger.warning("Failed to save position_traces.pdf", exc_info=True)
+
+            if self.graph_polylines is not None:
+                try:
+                    fig = plot_graph_overlay(
+                        self.graph_polylines,
+                        self.graph_mm_per_pixel,
+                        arm_order=self.data_cfg.arm_order,
+                        video_frame=self.behavior_video_frame,
+                    )
+                    fig.savefig(figures_dir / "graph_overlay.pdf", bbox_inches="tight")
+                    _plt.close(fig)
+                    saved.append("graph_overlay.pdf")
+                except Exception:
+                    logger.warning("Failed to save graph_overlay.pdf", exc_info=True)
+
+        return saved
+
+    def save_bundle(self, path: "str | Path", *, save_figures: bool = True) -> "Path":
         """Save bundle, including 1D trajectory and maze metadata."""
 
-        result = super().save_bundle(path)
+        result = super().save_bundle(path, save_figures=save_figures)
 
         # 1D trajectories
         if self.trajectory_1d is not None:
             self.trajectory_1d.to_parquet(result / "trajectory_1d.parquet")
+        if self.trajectory_1d_all is not None:
+            self.trajectory_1d_all.to_parquet(result / "trajectory_1d_all.parquet")
         if self.trajectory_1d_filtered is not None:
             self.trajectory_1d_filtered.to_parquet(result / "trajectory_1d_filtered.parquet")
 
         # Maze metadata needed for visualization
         maze_meta: dict[str, Any] = {
-            "tube_boundaries": self.tube_boundaries,
-            "effective_tube_order": self.effective_tube_order,
-            "tube_lengths": self.tube_lengths,
+            "arm_boundaries": self.arm_boundaries,
+            "effective_arm_order": self.effective_arm_order,
+            "arm_lengths": self.arm_lengths,
             "segment_bins": self.segment_bins,
             "pos_range": list(self.pos_range) if self.pos_range else None,
             "graph_polylines": self.graph_polylines,
@@ -376,7 +521,7 @@ class MazeDataset(BasePlaceCellDataset):
         """Load a saved ``.pcellbundle`` that contains 1D maze data.
 
         Restores all base attributes via the parent loader, then adds
-        1D-specific state (trajectories, tube boundaries, etc.).
+        1D-specific state (trajectories, arm boundaries, etc.).
         """
         path = Path(path)
 
@@ -387,6 +532,9 @@ class MazeDataset(BasePlaceCellDataset):
         t1d_path = path / "trajectory_1d.parquet"
         if t1d_path.exists():
             base.trajectory_1d = pd.read_parquet(t1d_path)
+        t1da_path = path / "trajectory_1d_all.parquet"
+        if t1da_path.exists():
+            base.trajectory_1d_all = pd.read_parquet(t1da_path)
         t1df_path = path / "trajectory_1d_filtered.parquet"
         if t1df_path.exists():
             base.trajectory_1d_filtered = pd.read_parquet(t1df_path)
@@ -395,9 +543,9 @@ class MazeDataset(BasePlaceCellDataset):
         meta_path = path / "maze_meta.json"
         if meta_path.exists():
             meta = json.loads(meta_path.read_text())
-            base.tube_boundaries = meta.get("tube_boundaries", [])
-            base.effective_tube_order = meta.get("effective_tube_order", [])
-            base.tube_lengths = meta.get("tube_lengths")
+            base.arm_boundaries = meta.get("arm_boundaries", [])
+            base.effective_arm_order = meta.get("effective_arm_order", [])
+            base.arm_lengths = meta.get("arm_lengths")
             base.segment_bins = meta.get("segment_bins")
             pr = meta.get("pos_range")
             base.pos_range = tuple(pr) if pr else None

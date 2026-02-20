@@ -16,20 +16,8 @@ behavior:
   behavior_fps: 20.0
   speed_threshold: 25.0
   speed_window_frames: 5
-  bodypart: LED
-  x_col: x_pinned
-  y_col: y_pinned
   jump_threshold_mm: 100.0
   spatial_map_2d: null
-  maze:
-    tube_order:
-    - Tube_1
-    - Tube_2
-    - Tube_3
-    - Tube_4
-    zone_column: zone
-    tube_position_column: tube_position
-    split_by_direction: true
   spatial_map_1d:
     bin_width_mm: 10.0
     min_occupancy: 0.1
@@ -44,3 +32,5 @@ behavior:
     block_shifts:
     - 0.0
     trace_time_window: 600.0
+  split_by_direction: true
+  require_complete_traversal: false

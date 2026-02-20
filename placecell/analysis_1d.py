@@ -1,4 +1,4 @@
-"""1D spatial analysis functions for place cells in linear tracks / tubes."""
+"""1D spatial analysis functions for place cells in linear tracks / arms."""
 
 import numpy as np
 import pandas as pd
@@ -65,7 +65,7 @@ def compute_occupancy_map_1d(
     trajectory_df:
         Speed-filtered trajectory with pos_column.
     n_bins:
-        Total number of spatial bins across all tubes.
+        Total number of spatial bins across all arms.
     pos_range:
         (min, max) of the 1D position axis.
     behavior_fps:
@@ -218,7 +218,8 @@ def compute_spatial_information_1d(
 
     valid_si = (rate_map > 0) & valid_mask
     if np.any(valid_si):
-        si_term = P_i[valid_si] * rate_map[valid_si] * np.log2(rate_map[valid_si] / overall_lambda)
+        ratio = rate_map[valid_si] / overall_lambda
+        si_term = P_i[valid_si] * ratio * np.log2(ratio)
         actual_si = float(np.sum(si_term))
     else:
         actual_si = 0.0
@@ -258,9 +259,8 @@ def compute_spatial_information_1d(
 
         valid_s = (rate_shuf > 0) & valid_mask
         if np.any(valid_s):
-            si_shuf = np.sum(
-                P_i[valid_s] * rate_shuf[valid_s] * np.log2(rate_shuf[valid_s] / overall_lambda)
-            )
+            ratio_s = rate_shuf[valid_s] / overall_lambda
+            si_shuf = np.sum(P_i[valid_s] * ratio_s * np.log2(ratio_s))
         else:
             si_shuf = 0.0
         shuffled_sis.append(si_shuf)
@@ -495,6 +495,16 @@ def compute_unit_analysis_1d(
     )
     rate_map_raw = compute_raw_rate_map_1d(unit_data, occupancy_time, valid_mask, edges, pos_column)
 
+    # Overall rate (lambda): total_events / total_time
+    valid_occ = valid_mask & (occupancy_time > 0)
+    if np.any(valid_occ):
+        overall_rate = float(
+            np.sum(rate_map_raw[valid_occ] * occupancy_time[valid_occ])
+            / np.sum(occupancy_time[valid_occ])
+        )
+    else:
+        overall_rate = 0.0
+
     si, p_val, shuffled_sis = compute_spatial_information_1d(
         unit_data,
         trajectory_df,
@@ -570,6 +580,7 @@ def compute_unit_analysis_1d(
     return {
         "rate_map": rate_map,
         "rate_map_raw": rate_map_raw,
+        "overall_rate": overall_rate,
         "si": si,
         "p_val": p_val,
         "shuffled_sis": shuffled_sis,

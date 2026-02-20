@@ -25,7 +25,12 @@ from placecell.behavior import (
     recompute_speed,
     remove_position_jumps,
 )
-from placecell.config import AnalysisConfig, DataPathsConfig, SpatialMap2DConfig
+from placecell.config import (
+    AnalysisConfig,
+    DataConfig,
+    SpatialMap1DConfig,
+    SpatialMap2DConfig,
+)
 from placecell.io import load_behavior_data, load_visualization_data
 from placecell.logging import init_logger
 from placecell.neural import build_event_index_dataframe, load_calcium_traces, run_deconvolution
@@ -97,6 +102,8 @@ class UnitResult:
         (used for plotting event dots on rate maps).
     unit_data:
         Speed-filtered deconvolved events for this unit (subset of event_place).
+    overall_rate:
+        Overall firing rate (total events / total time), i.e. lambda.
     trace_data:
         Raw calcium trace for this unit (None if traces unavailable).
     trace_times:
@@ -118,6 +125,7 @@ class UnitResult:
     rate_map_second: np.ndarray
     vis_data_above: pd.DataFrame
     unit_data: pd.DataFrame
+    overall_rate: float
     trace_data: np.ndarray | None
     trace_times: np.ndarray | None
 
@@ -159,7 +167,8 @@ class BasePlaceCellDataset(abc.ABC):
         behavior_timestamp_path: Path | None = None,
         behavior_video_path: Path | None = None,
         behavior_graph_path: Path | None = None,
-        data_cfg: DataPathsConfig | None = None,
+        zone_tracking_path: Path | None = None,
+        data_cfg: DataConfig | None = None,
     ) -> None:
         self.cfg = cfg
         self.neural_path = neural_path
@@ -168,6 +177,7 @@ class BasePlaceCellDataset(abc.ABC):
         self.behavior_timestamp_path = behavior_timestamp_path
         self.behavior_video_path = behavior_video_path
         self.behavior_graph_path = behavior_graph_path
+        self.zone_tracking_path = zone_tracking_path
         self.data_cfg = data_cfg
 
         # Neural data
@@ -218,7 +228,7 @@ class BasePlaceCellDataset(abc.ABC):
 
         data_path = Path(data_path)
         data_dir = data_path.parent
-        data_cfg = DataPathsConfig.from_yaml(data_path)
+        data_cfg = DataConfig.from_yaml(data_path)
         cfg = cfg.with_data_overrides(data_cfg)
 
         # Auto-select subclass based on behavior type
@@ -242,6 +252,9 @@ class BasePlaceCellDataset(abc.ABC):
             behavior_graph_path=(
                 data_dir / data_cfg.behavior_graph if data_cfg.behavior_graph else None
             ),
+            zone_tracking_path=(
+                data_dir / data_cfg.zone_tracking if data_cfg.zone_tracking else None
+            ),
             data_cfg=data_cfg,
         )
 
@@ -250,6 +263,24 @@ class BasePlaceCellDataset(abc.ABC):
     def p_value_threshold(self) -> float:
         """P-value threshold from the appropriate spatial config."""
         ...
+
+    @property
+    def _spatial_cfg(self) -> "SpatialMap2DConfig | SpatialMap1DConfig | None":
+        """Return whichever spatial map config is set."""
+        bcfg = self.cfg.behavior
+        return bcfg.spatial_map_2d or bcfg.spatial_map_1d
+
+    @property
+    def _shuffle_n(self) -> int | None:
+        """Number of shuffles from the spatial config."""
+        sc = self._spatial_cfg
+        return sc.n_shuffles if sc else None
+
+    @property
+    def _shuffle_shift(self) -> float | None:
+        """Minimum shift in seconds from the spatial config."""
+        sc = self._spatial_cfg
+        return sc.min_shift_seconds if sc else None
 
     @property
     def neural_fps(self) -> float:
@@ -270,14 +301,17 @@ class BasePlaceCellDataset(abc.ABC):
         )
 
         # Behavior — load positions and compute speed (px/s)
+        dcfg = self.data_cfg
+        if dcfg is None or dcfg.bodypart is None:
+            raise RuntimeError("bodypart must be set in data config")
         self.trajectory, _ = load_behavior_data(
             behavior_position=self.behavior_position_path,
             behavior_timestamp=self.behavior_timestamp_path,
-            bodypart=bcfg.bodypart,
+            bodypart=dcfg.bodypart,
             speed_window_frames=bcfg.speed_window_frames,
             speed_threshold=0.0,
-            x_col=bcfg.x_col,
-            y_col=bcfg.y_col,
+            x_col=dcfg.x_col,
+            y_col=dcfg.y_col,
         )
         logger.info("Loaded trajectory: %d frames", len(self.trajectory))
 
@@ -426,14 +460,13 @@ class BasePlaceCellDataset(abc.ABC):
             self.trajectory = recompute_speed(
                 self.trajectory, window_frames=bcfg.speed_window_frames
             )
-            logger.info("Speed recomputed in mm/s")
+            logger.info("Speed recomputed after coordinate correction (mm/s)")
             speed_unit = "mm/s"
         else:
             logger.warning(
-                "No arena_bounds — skipping spatial corrections "
-                "(jump removal, perspective correction, boundary clipping)"
+                "No arena_bounds — skipping spatial corrections; "
+                "speed and position remain in pixels"
             )
-            logger.warning("No arena calibration — speed and position remain in pixels")
             speed_unit = "px/s"
 
         # Speed filter (always applied)
@@ -580,7 +613,7 @@ class BasePlaceCellDataset(abc.ABC):
 
     # ── Bundle I/O ──────────────────────────────────────────────────────
 
-    def save_bundle(self, path: str | Path) -> Path:
+    def save_bundle(self, path: str | Path, *, save_figures: bool = True) -> Path:
         """Save all analysis results to a portable ``.pcellbundle`` directory.
 
         The bundle is self-contained: it stores config, behavior, neural,
@@ -600,6 +633,10 @@ class BasePlaceCellDataset(abc.ABC):
         path = Path(path)
         if path.suffix != ".pcellbundle":
             path = path.with_suffix(".pcellbundle")
+
+        # Avoid overwriting: append _1, _2, ... if path already exists
+        path = unique_bundle_path(path.parent, path.stem)
+
         path.mkdir(parents=True, exist_ok=True)
 
         # Metadata
@@ -661,14 +698,83 @@ class BasePlaceCellDataset(abc.ABC):
             ur_dir.mkdir(exist_ok=True)
             self._save_unit_results(ur_dir)
 
+        # Summary figures
+        if save_figures:
+            figures_dir = path / "figures"
+            figures_dir.mkdir(exist_ok=True)
+            saved = self._save_summary_figures(figures_dir)
+            if saved:
+                logger.info("Saved %d summary figures to %s", len(saved), figures_dir)
+
         logger.info("Bundle saved to %s", path)
         return path
+
+    def _save_summary_figures(self, figures_dir: Path) -> list[str]:
+        """Generate and save key summary figures as PDFs into *figures_dir*."""
+        try:
+            import matplotlib
+            import matplotlib.pyplot as _plt
+        except ImportError:
+            logger.warning("matplotlib not available — skipping figure export")
+            return []
+
+        from placecell.visualization import (
+            plot_diagnostics,
+            plot_footprints_filled,
+            plot_summary_scatter,
+        )
+
+        saved: list[str] = []
+        rc = {
+            "pdf.fonttype": 42,
+            "ps.fonttype": 42,
+            "font.family": "Arial",
+        }
+
+        with matplotlib.rc_context(rc):
+            if self.unit_results:
+                for name, fn in [
+                    (
+                        "diagnostics.pdf",
+                        lambda: plot_diagnostics(
+                            self.unit_results, p_value_threshold=self.p_value_threshold
+                        ),
+                    ),
+                    (
+                        "summary_scatter.pdf",
+                        lambda: plot_summary_scatter(
+                            self.unit_results,
+                            p_value_threshold=self.p_value_threshold,
+                            n_shuffles=self._shuffle_n,
+                            min_shift_seconds=self._shuffle_shift,
+                        ),
+                    ),
+                ]:
+                    try:
+                        fig = fn()
+                        fig.savefig(figures_dir / name, bbox_inches="tight")
+                        _plt.close(fig)
+                        saved.append(name)
+                    except Exception:
+                        logger.warning("Failed to save %s", name, exc_info=True)
+
+            if self.max_proj is not None and self.footprints is not None:
+                try:
+                    fig = plot_footprints_filled(self.max_proj, self.footprints)
+                    fig.savefig(figures_dir / "footprints.pdf", bbox_inches="tight")
+                    _plt.close(fig)
+                    saved.append("footprints.pdf")
+                except Exception:
+                    logger.warning("Failed to save footprints.pdf", exc_info=True)
+
+        return saved
 
     def _save_unit_results(self, ur_dir: Path) -> None:
         """Serialize unit_results into *ur_dir*."""
         scalar_fields = [
             "si",
             "p_val",
+            "overall_rate",
             "stability_corr",
             "stability_z",
             "stability_p_val",
@@ -819,6 +925,7 @@ class BasePlaceCellDataset(abc.ABC):
         scalar_fields = [
             "si",
             "p_val",
+            "overall_rate",
             "stability_corr",
             "stability_z",
             "stability_p_val",
@@ -827,10 +934,14 @@ class BasePlaceCellDataset(abc.ABC):
         scalars_df = pd.read_csv(ur_dir / "scalars.csv")
         unit_ids = scalars_df["unit_id"].tolist()
 
+        scalar_defaults = {"overall_rate": 0.0}
         scalars_by_uid: dict[int, dict] = {}
         for _, row in scalars_df.iterrows():
             uid = int(row["unit_id"])
-            scalars_by_uid[uid] = {f: row[f] for f in scalar_fields}
+            scalars_by_uid[uid] = {
+                f: row[f] if f in row.index else scalar_defaults.get(f, np.nan)
+                for f in scalar_fields
+            }
 
         # Read arrays
         arrays_by_uid: dict[int, dict] = {uid: {} for uid in unit_ids}
@@ -868,6 +979,7 @@ class BasePlaceCellDataset(abc.ABC):
                 rate_map_raw=ar.get("rate_map_raw", np.array([])),
                 si=float(sc["si"]),
                 p_val=float(sc["p_val"]),
+                overall_rate=float(sc.get("overall_rate", 0.0)),
                 shuffled_sis=ar.get("shuffled_sis", np.array([])),
                 shuffled_rate_p95=ar.get("shuffled_rate_p95", np.array([])),
                 stability_corr=float(sc["stability_corr"]),
@@ -995,6 +1107,7 @@ class ArenaDataset(BasePlaceCellDataset):
                 shuffled_sis=result["shuffled_sis"],
                 shuffled_rate_p95=result["shuffled_rate_p95"],
                 p_val=result["p_val"],
+                overall_rate=result["overall_rate"],
                 stability_corr=result["stability_corr"],
                 stability_z=result["stability_z"],
                 stability_p_val=result["stability_p_val"],
@@ -1008,3 +1121,95 @@ class ArenaDataset(BasePlaceCellDataset):
             )
 
         logger.info("Done. %d units analyzed.", len(self.unit_results))
+
+    def _save_summary_figures(self, figures_dir: Path) -> list[str]:
+        """Arena-specific figures on top of the base set."""
+        saved = super()._save_summary_figures(figures_dir)
+
+        try:
+            import matplotlib
+            import matplotlib.pyplot as _plt
+        except ImportError:
+            return saved
+
+        from placecell.visualization import (
+            plot_arena_calibration,
+            plot_coverage,
+            plot_occupancy_preview,
+            plot_preprocess_steps,
+        )
+
+        rc = {
+            "pdf.fonttype": 42,
+            "ps.fonttype": 42,
+            "font.family": "Arial",
+        }
+
+        with matplotlib.rc_context(rc):
+            if self.trajectory_filtered is not None and self.occupancy_time is not None:
+                try:
+                    fig = plot_occupancy_preview(
+                        self.trajectory_filtered,
+                        self.occupancy_time,
+                        self.valid_mask,
+                        self.x_edges,
+                        self.y_edges,
+                    )
+                    fig.savefig(figures_dir / "occupancy.pdf", bbox_inches="tight")
+                    _plt.close(fig)
+                    saved.append("occupancy.pdf")
+                except Exception:
+                    logger.warning("Failed to save occupancy.pdf", exc_info=True)
+
+            dcfg = self.data_cfg
+            if (
+                self.trajectory_raw is not None
+                and dcfg is not None
+                and dcfg.arena_bounds is not None
+            ):
+                try:
+                    fig = plot_arena_calibration(
+                        self.trajectory_raw,
+                        dcfg.arena_bounds,
+                        arena_size_mm=dcfg.arena_size_mm,
+                        mm_per_px=self.mm_per_px,
+                        video_frame=self.behavior_video_frame,
+                    )
+                    fig.savefig(figures_dir / "arena_calibration.pdf", bbox_inches="tight")
+                    _plt.close(fig)
+                    saved.append("arena_calibration.pdf")
+                except Exception:
+                    logger.warning("Failed to save arena_calibration.pdf", exc_info=True)
+
+            if (
+                hasattr(self, "_preprocess_steps")
+                and self._preprocess_steps
+                and dcfg is not None
+                and dcfg.arena_size_mm is not None
+            ):
+                try:
+                    fig = plot_preprocess_steps(self._preprocess_steps, dcfg.arena_size_mm)
+                    fig.savefig(figures_dir / "preprocess_steps.pdf", bbox_inches="tight")
+                    _plt.close(fig)
+                    saved.append("preprocess_steps.pdf")
+                except Exception:
+                    logger.warning("Failed to save preprocess_steps.pdf", exc_info=True)
+
+            place_cell_results = self.place_cells()
+            if place_cell_results:
+                try:
+                    coverage_map, _, _ = self.coverage()
+                    fig = plot_coverage(
+                        coverage_map,
+                        self.x_edges,
+                        self.y_edges,
+                        self.valid_mask,
+                        len(place_cell_results),
+                    )
+                    fig.savefig(figures_dir / "coverage.pdf", bbox_inches="tight")
+                    _plt.close(fig)
+                    saved.append("coverage.pdf")
+                except Exception:
+                    logger.warning("Failed to save coverage.pdf", exc_info=True)
+
+        return saved

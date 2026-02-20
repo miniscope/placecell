@@ -73,10 +73,12 @@ def plot_session_summary(summary_df: "pd.DataFrame") -> "Figure":
 def plot_summary_scatter(
     unit_results: dict,
     p_value_threshold: float = 0.05,
+    n_shuffles: int | None = None,
+    min_shift_seconds: float | None = None,
 ) -> "Figure":
     """Summary scatter plots: p-value, SI vs Z, and density contour.
 
-    Panel 1: Significance p-value vs stability p-value scatter.
+    Panel 1: SI p-value vs stability p-value scatter.
     Panel 2: SI vs Fisher Z scatter.
     Panel 3: SI vs stability density contour (Guo et al. style) with
              place cells vs non-place cells as separate contour groups
@@ -88,6 +90,10 @@ def plot_summary_scatter(
         Dictionary mapping unit_id to analysis results.
     p_value_threshold:
         Threshold for significance test.
+    n_shuffles:
+        Number of shuffles used for the SI significance test.
+    min_shift_seconds:
+        Minimum circular shift in seconds used for shuffling.
     """
     if plt is None:
         raise ImportError("matplotlib is required for plotting.")
@@ -100,6 +106,7 @@ def plot_summary_scatter(
     stab_pvals = np.array([unit_results[uid].stability_p_val for uid in unit_ids])
     fisher_z = np.array([unit_results[uid].stability_z for uid in unit_ids])
     si_vals = np.array([unit_results[uid].si for uid in unit_ids])
+    overall_rates = np.array([unit_results[uid].overall_rate for uid in unit_ids])
 
     # Classify units
     is_sig = p_vals < p_value_threshold
@@ -117,23 +124,41 @@ def plot_summary_scatter(
         else:
             colors.append("red")
 
+    n_total = len(unit_ids)
     n_both = int(np.sum(is_place_cell))
-    n_sig_only = int(np.sum(is_sig & ~is_stable))
+    n_si_only = int(np.sum(is_sig & ~is_stable))
     n_stab_only = int(np.sum(~is_sig & is_stable))
     n_neither = int(np.sum(~is_sig & ~is_stable))
 
-    # ── Figure layout: 3 panels ───────────────────────────────────
-    fig = plt.figure(figsize=(15, 4.5))
+    # Log summary
+    logger.info(
+        "Total: %d | SI pass: %d | Stability pass: %d | Both: %d | Neither: %d",
+        n_total,
+        int(is_sig.sum()),
+        int(is_stable.sum()),
+        n_both,
+        n_neither,
+    )
+    if n_shuffles is not None or min_shift_seconds is not None:
+        shuffle_parts = [f"p < {p_value_threshold}"]
+        if n_shuffles is not None:
+            shuffle_parts.append(f"{n_shuffles} shuffles")
+        if min_shift_seconds is not None:
+            shuffle_parts.append(f"min shift {min_shift_seconds}s")
+        logger.info("Shuffle test: %s", ", ".join(shuffle_parts))
 
-    ax1 = fig.add_axes([0.04, 0.14, 0.26, 0.78])
-    ax2 = fig.add_axes([0.37, 0.14, 0.26, 0.78])
+    # ── Figure layout: 4 panels ───────────────────────────────────
+    fig = plt.figure(figsize=(20, 4.5))
+
+    ax1 = fig.add_axes([0.03, 0.14, 0.20, 0.78])
+    ax2 = fig.add_axes([0.27, 0.14, 0.20, 0.78])
+    ax4 = fig.add_axes([0.51, 0.14, 0.20, 0.78])
 
     # Panel 3: density contour with marginals
-    # Main scatter area + marginal axes
-    left3 = 0.72
-    ax3 = fig.add_axes([left3, 0.14, 0.22, 0.64])
-    ax3_top = fig.add_axes([left3, 0.80, 0.22, 0.14])
-    ax3_right = fig.add_axes([left3 + 0.23, 0.14, 0.04, 0.64])
+    left3 = 0.76
+    ax3 = fig.add_axes([left3, 0.14, 0.18, 0.64])
+    ax3_top = fig.add_axes([left3, 0.80, 0.18, 0.14])
+    ax3_right = fig.add_axes([left3 + 0.19, 0.14, 0.035, 0.64])
 
     # ── Panel 1: P-value scatter ──────────────────────────────────
     ax1.scatter(
@@ -147,14 +172,13 @@ def plot_summary_scatter(
     )
     ax1.axvline(p_value_threshold, color="gray", linestyle="--", linewidth=1.5)
     ax1.axhline(p_value_threshold, color="gray", linestyle=":", linewidth=1.5)
-    ax1.set_xlabel("P-value (significance)", fontsize=10)
+    ax1.set_xlabel("P-value (SI)", fontsize=10)
     ax1.set_ylabel("P-value (stability)", fontsize=10)
-    ax1.set_title("Significance vs Stability", fontsize=11)
     ax1.set_aspect("equal", adjustable="datalim")
 
     legend_elements = [
-        Patch(facecolor="green", edgecolor="black", label=f"Both pass: {n_both}"),
-        Patch(facecolor="orange", edgecolor="black", label=f"Sig only: {n_sig_only}"),
+        Patch(facecolor="green", edgecolor="black", label=f"Both: {n_both}"),
+        Patch(facecolor="orange", edgecolor="black", label=f"SI only: {n_si_only}"),
         Patch(facecolor="blue", edgecolor="black", label=f"Stab only: {n_stab_only}"),
         Patch(facecolor="red", edgecolor="black", label=f"Neither: {n_neither}"),
     ]
@@ -170,12 +194,47 @@ def plot_summary_scatter(
         linewidths=0.5,
         c=colors,
     )
-    ax2.set_xlabel("Spatial Information (bits/s)", fontsize=10)
+    ax2.set_xlabel("Spatial Information (bits/spike)", fontsize=10)
     ax2.set_ylabel("Fisher Z (stability)", fontsize=10)
-    ax2.set_title("SI vs Stability", fontsize=11)
     ax2.grid(True, alpha=0.3, linestyle="--")
     ax2.axhline(0, color="gray", linestyle=":", linewidth=1, alpha=0.5)
-    ax2.set_aspect("equal", adjustable="datalim")
+
+    # Snap to smallest square with 0.5 step grid
+    step = 0.5
+    valid2 = np.isfinite(si_vals) & np.isfinite(fisher_z)
+    all_vals = np.concatenate([si_vals[valid2], fisher_z[valid2]])
+    lo = np.floor(all_vals.min() / step) * step if len(all_vals) > 0 else -1.0
+    hi = np.ceil(all_vals.max() / step) * step if len(all_vals) > 0 else 1.0
+    ax2.set_xlim(lo, hi)
+    ax2.set_ylim(lo, hi)
+    ax2.set_aspect("equal")
+
+    # ── Panel 4: Overall Rate (lambda) bar chart ───────────────────
+    has_rates = np.any(overall_rates > 0)
+    if has_rates:
+        sort_idx = np.argsort(overall_rates)[::-1]
+        sorted_rates = overall_rates[sort_idx]
+        ax4.bar(
+            np.arange(len(sorted_rates)),
+            sorted_rates,
+            color="gray",
+            edgecolor="none",
+            width=1.0,
+        )
+        ax4.set_xlim(-0.5, len(sorted_rates) - 0.5)
+    else:
+        ax4.text(
+            0.5,
+            0.5,
+            "Re-run pipeline\nto populate",
+            transform=ax4.transAxes,
+            ha="center",
+            va="center",
+            fontsize=10,
+            color="gray",
+        )
+    ax4.set_xlabel("Unit (sorted)", fontsize=10)
+    ax4.set_ylabel("Overall rate (events/s)", fontsize=10)
 
     # ── Panel 3: Density contour (Guo et al. style) ──────────────
     valid = np.isfinite(si_vals) & np.isfinite(fisher_z)
@@ -221,10 +280,20 @@ def plot_summary_scatter(
     )
     _contour_group(ax3, si_v[pc_mask], z_v[pc_mask], "green", f"Place cells ({int(pc_mask.sum())})")
 
-    ax3.set_xlabel("Spatial Information (bits/s)", fontsize=10)
+    ax3.set_xlabel("Spatial Information (bits/spike)", fontsize=10)
     ax3.set_ylabel("Stability score (Fisher Z)", fontsize=10)
-    ax3.set_title("SI vs Stability density", fontsize=11)
-    ax3.legend(fontsize=7, loc="upper right")
+    legend_elements_3 = [
+        Patch(facecolor="green", edgecolor="black", label=f"Place cells ({int(pc_mask.sum())})"),
+        Patch(
+            facecolor="darkorange",
+            edgecolor="black",
+            label=f"Non-place cells ({int(npc_mask.sum())})",
+        ),
+    ]
+    ax3.legend(handles=legend_elements_3, fontsize=7, loc="upper right")
+    hi3 = min(hi, 3.0)
+    ax3.set_xlim(lo, hi3)
+    ax3.set_ylim(lo, hi3)
 
     # Marginal KDE: top (SI)
     ax3_top.set_xlim(ax3.get_xlim())
@@ -265,96 +334,36 @@ def plot_diagnostics(
     unit_results: dict,
     p_value_threshold: float = 0.05,
 ) -> "Figure":
-    """Event count diagnostics: histogram, SI vs events, p-value vs events.
+    """Event count histogram across all units.
 
     Parameters
     ----------
     unit_results:
         Dictionary mapping unit_id to analysis results.
     p_value_threshold:
-        Threshold for significance test.
+        Threshold for significance test (used for logging only).
     """
     if plt is None:
         raise ImportError("matplotlib is required for plotting.")
 
     uids = list(unit_results.keys())
     n_events = [len(unit_results[u].unit_data) for u in uids]
-    si_vals = [unit_results[u].si for u in uids]
-    p_vals = [unit_results[u].p_val for u in uids]
 
-    fig, (ax_hist, ax_si, ax_pv) = plt.subplots(1, 3, figsize=(12, 3.5))
+    fig, ax = plt.subplots(figsize=(5, 3.5))
 
-    ax_hist.hist(n_events, bins=30, color="steelblue", edgecolor="black", alpha=0.7)
-    ax_hist.set_xlabel("Event count")
-    ax_hist.set_ylabel("Units")
-    ax_hist.axvline(
-        np.median(n_events),
-        color="red",
-        linestyle="--",
-        lw=1.5,
-        label=f"Median: {int(np.median(n_events))}",
-    )
-    ax_hist.legend(fontsize=8)
-
-    sig_mask = np.array([p < p_value_threshold for p in p_vals])
-    ns_mask = ~sig_mask
-    n_ev = np.array(n_events)
-    si = np.array(si_vals)
-    ax_si.scatter(
-        n_ev[ns_mask],
-        si[ns_mask],
-        c="gray",
-        s=20,
-        alpha=0.5,
-        edgecolors="black",
-        linewidths=0.3,
-        label=f"Not sig (p>={p_value_threshold})",
-    )
-    ax_si.scatter(
-        n_ev[sig_mask],
-        si[sig_mask],
-        c="green",
-        s=20,
-        alpha=0.6,
-        edgecolors="black",
-        linewidths=0.3,
-        label=f"Significant (p<{p_value_threshold})",
-    )
-    ax_si.set_xlabel("Event count")
-    ax_si.set_ylabel("Spatial Information (bits/s)")
-    ax_si.set_xscale("log")
-    ax_si.legend(fontsize=7)
-
-    ax_pv.scatter(
-        n_events,
-        p_vals,
-        c="steelblue",
-        s=20,
-        alpha=0.6,
-        edgecolors="black",
-        linewidths=0.3,
-    )
-    ax_pv.axhline(
-        p_value_threshold,
-        color="red",
-        linestyle="--",
-        lw=1.5,
-        label=f"p={p_value_threshold}",
-    )
-    ax_pv.set_xlabel("Event count")
-    ax_pv.set_ylabel("P-value")
-    ax_pv.set_xscale("log")
-    ax_pv.legend(fontsize=8)
+    ax.hist(n_events, bins=30, color="steelblue", edgecolor="black", alpha=0.7)
+    ax.set_xlabel("Event count")
+    ax.set_ylabel("Units")
 
     fig.tight_layout()
 
-    n_sig = int(sig_mask.sum())
-    logger.info("Total units: %d", len(uids))
+    p_vals = [unit_results[u].p_val for u in uids]
+    n_sig = sum(p < p_value_threshold for p in p_vals)
     logger.info(
-        "Significant (p<%s): %d (%.1f%%)", p_value_threshold, n_sig, 100 * n_sig / len(uids)
-    )
-    logger.info(
-        "Event count: median=%d, min=%d, max=%d",
+        "Diagnostics: %d units, %d significant (p<%.2f), events median=%d range=[%d, %d]",
+        len(uids),
+        n_sig,
+        p_value_threshold,
         int(np.median(n_events)),
         min(n_events),
         max(n_events),
@@ -598,23 +607,20 @@ def plot_footprints_filled(
 
 def plot_coverage(
     coverage_map: np.ndarray,
-    n_cells_arr: np.ndarray,
-    coverage_frac: np.ndarray,
     x_edges: np.ndarray,
     y_edges: np.ndarray,
     valid_mask: np.ndarray,
     n_place_cells: int,
 ) -> "Figure":
-    """Place field coverage map and cumulative coverage curve.
+    """Place field coverage heatmap.
+
+    Each bin shows the fraction of place cells whose place field
+    overlaps that location (overlapping fields / total place cells).
 
     Parameters
     ----------
     coverage_map:
         Overlap count per spatial bin.
-    n_cells_arr:
-        Number of place cells at each step of the cumulative curve.
-    coverage_frac:
-        Fraction of environment covered at each step.
     x_edges, y_edges:
         Spatial bin edges.
     valid_mask:
@@ -623,17 +629,24 @@ def plot_coverage(
         Total number of place cells.
     """
     ext = [x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]]
-    fig, (ax_map, ax_curve) = plt.subplots(1, 2, figsize=(10, 4))
+    fig, ax = plt.subplots(figsize=(5, 4))
 
-    im = ax_map.imshow(
-        coverage_map.T,
+    pct_map = 100.0 * coverage_map / max(n_place_cells, 1)
+
+    pct_max = np.nanmax(pct_map) if np.any(pct_map > 0) else 10.0
+    vmax_pct = int(np.ceil(pct_max / 10.0)) * 10
+
+    im = ax.imshow(
+        pct_map.T,
         origin="lower",
         extent=ext,
         cmap="inferno",
         aspect="equal",
+        vmin=0,
+        vmax=vmax_pct,
     )
     if np.any(coverage_map > 0):
-        ax_map.contour(
+        ax.contour(
             (coverage_map > 0).T.astype(float),
             levels=[0.5],
             colors="white",
@@ -641,43 +654,9 @@ def plot_coverage(
             extent=ext,
             origin="lower",
         )
-    plt.colorbar(im, ax=ax_map, label="Overlapping fields")
-    ax_map.set_title(f"Place Field Coverage ({n_place_cells} cells)")
-    ax_map.axis("off")
-
-    ax_curve.plot(n_cells_arr, coverage_frac * 100, "k-", linewidth=2)
-    ax_curve.fill_between(
-        n_cells_arr,
-        0,
-        coverage_frac * 100,
-        alpha=0.15,
-        color="steelblue",
-    )
-    ax_curve.set_xlabel("Number of place cells (sorted by field size)")
-    ax_curve.set_ylabel("Environment coverage (%)")
-    ax_curve.set_title("Cumulative Coverage")
-    ax_curve.set_ylim(0, 105)
-    ax_curve.set_xlim(0, n_place_cells)
-    ax_curve.axhline(100, color="gray", linestyle="--", linewidth=1, alpha=0.5)
-    ax_curve.grid(True, alpha=0.3, linestyle="--")
-
-    for pct in [90, 100]:
-        idx = np.searchsorted(coverage_frac, pct / 100.0)
-        if idx < len(n_cells_arr):
-            ax_curve.axvline(
-                n_cells_arr[idx],
-                color="red",
-                linestyle=":",
-                linewidth=1,
-                alpha=0.7,
-            )
-            ax_curve.text(
-                n_cells_arr[idx] + 1,
-                pct - 5,
-                f"{pct}% at {n_cells_arr[idx]} cells",
-                fontsize=8,
-                color="red",
-            )
+    plt.colorbar(im, ax=ax, label="Coverage (% of place cells)")
+    ax.set_title(f"Place Field Coverage ({n_place_cells} cells)")
+    ax.axis("off")
 
     fig.tight_layout()
 
@@ -841,13 +820,13 @@ def plot_preprocess_steps(
 def plot_graph_overlay(
     graph_polylines: dict[str, list[list[float]]],
     mm_per_pixel: float,
-    tube_order: list[str],
+    arm_order: list[str],
     video_frame: "np.ndarray | None" = None,
 ) -> "Figure":
     """Overlay behavior graph polylines on a video frame.
 
     Each zone's polyline is drawn in pixel coordinates on the video frame.
-    Tubes in ``tube_order`` are drawn with distinct colors; other zones
+    Arms in ``arm_order`` are drawn with distinct colors; other zones
     (rooms, etc.) are drawn in gray.
 
     Parameters
@@ -856,8 +835,8 @@ def plot_graph_overlay(
         Dict mapping zone name to list of [x, y] waypoints in pixels.
     mm_per_pixel:
         Scale factor (for title annotation).
-    tube_order:
-        Ordered list of tube zone names (drawn with distinct colors).
+    arm_order:
+        Ordered list of arm zone names (drawn with distinct colors).
     video_frame:
         RGB image (H, W, 3). If None, polylines are drawn on a white
         background.
@@ -880,16 +859,16 @@ def plot_graph_overlay(
             ax.set_ylim(max(ys) + pad, min(ys) - pad)
         ax.set_facecolor("white")
 
-    tube_set = set(tube_order)
+    arm_set = set(arm_order)
     colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
-    tube_color_map = {t: colors[i % len(colors)] for i, t in enumerate(tube_order)}
+    arm_color_map = {t: colors[i % len(colors)] for i, t in enumerate(arm_order)}
 
     for zone_name, waypoints in graph_polylines.items():
         xs = [p[0] for p in waypoints]
         ys = [p[1] for p in waypoints]
 
-        if zone_name in tube_set:
-            color = tube_color_map[zone_name]
+        if zone_name in arm_set:
+            color = arm_color_map[zone_name]
             lw = 2.5
             alpha = 0.9
         else:
@@ -899,8 +878,8 @@ def plot_graph_overlay(
 
         ax.plot(xs, ys, color=color, linewidth=lw, alpha=alpha, solid_capstyle="round")
 
-        # Forward-direction arrow at midpoint of tube polylines
-        if zone_name in tube_set and len(waypoints) >= 2:
+        # Forward-direction arrow at midpoint of arm polylines
+        if zone_name in arm_set and len(waypoints) >= 2:
             mid_idx = len(waypoints) // 2
             # Compute tangent from nearby points
             idx_a = max(mid_idx - 1, 0)
@@ -983,12 +962,12 @@ def plot_graph_overlay(
 def plot_rate_map_1d(
     rate_map: np.ndarray,
     edges: np.ndarray,
-    tube_boundaries: list[float] | None = None,
-    tube_labels: list[str] | None = None,
+    arm_boundaries: list[float] | None = None,
+    arm_labels: list[str] | None = None,
     title: str = "",
     ax: "Axes | None" = None,
 ) -> "Figure":
-    """Plot a 1D rate map as a filled line plot with tube boundaries.
+    """Plot a 1D rate map as a filled line plot with arm boundaries.
 
     Parameters
     ----------
@@ -996,10 +975,10 @@ def plot_rate_map_1d(
         1D rate map array (n_bins,).
     edges:
         Bin edges (n_bins + 1,).
-    tube_boundaries:
-        Position values at tube boundaries (vertical lines).
-    tube_labels:
-        Labels for each tube segment.
+    arm_boundaries:
+        Position values at arm boundaries (vertical lines).
+    arm_labels:
+        Labels for each arm segment.
     title:
         Plot title.
     ax:
@@ -1023,12 +1002,12 @@ def plot_rate_map_1d(
     rm_line = rate_map.copy()  # keep NaN for line gaps
     ax.plot(centers, rm_line, color="steelblue", linewidth=1.5)
 
-    if tube_boundaries:
-        for b in tube_boundaries:
+    if arm_boundaries:
+        for b in arm_boundaries:
             ax.axvline(b, color="gray", linestyle="--", linewidth=0.8, alpha=0.6)
-    if tube_labels and tube_boundaries and len(tube_labels) == len(tube_boundaries) - 1:
-        for i, label_text in enumerate(tube_labels):
-            mid = (tube_boundaries[i] + tube_boundaries[i + 1]) / 2
+    if arm_labels and arm_boundaries and len(arm_labels) == len(arm_boundaries) - 1:
+        for i, label_text in enumerate(arm_labels):
+            mid = (arm_boundaries[i] + arm_boundaries[i + 1]) / 2
             ax.text(mid, ax.get_ylim()[1] * 0.95, label_text, ha="center", fontsize=8, alpha=0.7)
 
     ax.set_xlabel("1D position")
@@ -1045,8 +1024,8 @@ def plot_shuffle_test_1d(
     unit_results: dict,
     edges: np.ndarray,
     p_value_threshold: float = 0.05,
-    tube_boundaries: "list[float] | None" = None,
-    tube_labels: "list[str] | None" = None,
+    arm_boundaries: "list[float] | None" = None,
+    arm_labels: "list[str] | None" = None,
 ) -> "Figure":
     """Population rate map heatmap for all place cells (Guo et al. 2023 style).
 
@@ -1061,10 +1040,10 @@ def plot_shuffle_test_1d(
         1D bin edges array.
     p_value_threshold:
         Threshold for classifying place cells.
-    tube_boundaries:
-        Tube boundary positions for vertical markers.
-    tube_labels:
-        Labels for each tube segment.
+    arm_boundaries:
+        Arm boundary positions for vertical markers.
+    arm_labels:
+        Labels for each arm segment.
     """
     if plt is None:
         raise ImportError("matplotlib is required for plotting.")
@@ -1109,15 +1088,15 @@ def plot_shuffle_test_1d(
     rate_maps_sorted = np.where(np.isfinite(rate_maps_sorted), rate_maps_sorted, 0.0)
     valid_centers = centers[valid_cols]
 
-    # Map tube boundaries to compressed column indices
+    # Map arm boundaries to compressed column indices
     compressed_boundaries = []
-    if tube_boundaries:
-        for b in tube_boundaries:
+    if arm_boundaries:
+        for b in arm_boundaries:
             # Find how many valid bins are to the left of this boundary
             idx = int(np.sum(valid_centers < b))
             compressed_boundaries.append(idx)
 
-    has_labels = tube_labels and tube_boundaries and len(tube_labels) == len(tube_boundaries) - 1
+    has_labels = arm_labels and arm_boundaries and len(arm_labels) == len(arm_boundaries) - 1
 
     fig, ax = plt.subplots(1, 1, figsize=(7, 6))
 
@@ -1141,7 +1120,7 @@ def plot_shuffle_test_1d(
         for b in compressed_boundaries:
             ax.axvline(b, color="white", linestyle="--", linewidth=0.8, alpha=0.7)
     if has_labels and compressed_boundaries:
-        for i, lbl in enumerate(tube_labels):
+        for i, lbl in enumerate(arm_labels):
             mid = (compressed_boundaries[i] + compressed_boundaries[i + 1]) / 2
             ax.text(
                 mid,
@@ -1165,8 +1144,9 @@ def plot_occupancy_preview_1d(
     valid_mask: np.ndarray,
     edges: np.ndarray,
     trajectory_1d: "pd.DataFrame | None" = None,
-    tube_boundaries: list[float] | None = None,
-    tube_labels: list[str] | None = None,
+    trajectory_1d_all: "pd.DataFrame | None" = None,
+    arm_boundaries: list[float] | None = None,
+    arm_labels: list[str] | None = None,
 ) -> "Figure":
     """1D position time series and occupancy bar chart.
 
@@ -1181,12 +1161,16 @@ def plot_occupancy_preview_1d(
     edges:
         Bin edges.
     trajectory_1d:
-        Unfiltered 1D trajectory (before speed filter). If provided,
-        plotted as a light background layer under the filtered trajectory.
-    tube_boundaries:
-        Position values at tube boundaries.
-    tube_labels:
-        Labels for each tube segment.
+        Unfiltered 1D trajectory (after complete-traversal filter but
+        before speed filter). Plotted as a layer under the speed-filtered.
+    trajectory_1d_all:
+        All traversals including incomplete ones (before complete-traversal
+        filter). If provided, incomplete traversals are shown as a
+        distinct background layer.
+    arm_boundaries:
+        Position values at arm boundaries.
+    arm_labels:
+        Labels for each arm segment.
     """
     if plt is None:
         raise ImportError("matplotlib is required for plotting.")
@@ -1197,27 +1181,49 @@ def plot_occupancy_preview_1d(
     pos_col = "pos_1d"
     time_col = "unix_time"
 
-    # Unfiltered trajectory as background
+    # Determine t0 from the earliest available data
+    t0 = None
+    for src in [trajectory_1d_all, trajectory_1d, trajectory_1d_filtered]:
+        if src is not None and time_col in src.columns and len(src) > 0:
+            t0 = src[time_col].iloc[0]
+            break
+
+    # Layer 1: incomplete traversals (from trajectory_1d_all minus trajectory_1d)
+    if (
+        trajectory_1d_all is not None
+        and trajectory_1d is not None
+        and time_col in trajectory_1d_all.columns
+    ):
+        complete_frames = set(trajectory_1d["frame_index"].values)
+        incomplete_mask = ~trajectory_1d_all["frame_index"].isin(complete_frames)
+        incomplete = trajectory_1d_all[incomplete_mask]
+        if len(incomplete) > 0:
+            t_inc = incomplete[time_col] - t0
+            ax_traj.scatter(
+                t_inc,
+                incomplete[pos_col],
+                s=0.5,
+                alpha=0.15,
+                color="lightcoral",
+                label=f"Incomplete ({len(incomplete)})",
+                rasterized=True,
+            )
+
+    # Layer 2: all complete traversals (before speed filter)
     if trajectory_1d is not None and time_col in trajectory_1d.columns:
-        t0 = trajectory_1d[time_col].iloc[0]
         t_all = trajectory_1d[time_col] - t0
         ax_traj.scatter(
             t_all,
             trajectory_1d[pos_col],
             s=0.5,
             alpha=0.15,
-            color="lightcoral",
-            label=f"All ({len(trajectory_1d)})",
+            color="goldenrod",
+            label=f"Complete ({len(trajectory_1d)})",
             rasterized=True,
         )
 
-    # Filtered trajectory on top
+    # Layer 3: speed-filtered on top
     if time_col in trajectory_1d_filtered.columns:
-        t0 = (
-            trajectory_1d[time_col].iloc[0]
-            if trajectory_1d is not None and time_col in trajectory_1d.columns
-            else trajectory_1d_filtered[time_col].iloc[0]
-        )
         t = trajectory_1d_filtered[time_col] - t0
         ax_traj.scatter(
             t,
@@ -1240,10 +1246,10 @@ def plot_occupancy_preview_1d(
         ax_traj.set_xlabel("Frame")
     ax_traj.set_ylabel("1D position")
     ax_traj.legend(markerscale=8, fontsize=7, loc="upper right")
-    ax_traj.set_title("Tube trajectory")
+    ax_traj.set_title("Arm trajectory")
 
-    if tube_boundaries:
-        for b in tube_boundaries:
+    if arm_boundaries:
+        for b in arm_boundaries:
             ax_traj.axhline(b, color="gray", linestyle="--", linewidth=0.8, alpha=0.6)
 
     # Right: occupancy bar chart
@@ -1255,8 +1261,8 @@ def plot_occupancy_preview_1d(
     ax_occ.set_ylabel("Time (s)")
     ax_occ.set_title(f"Occupancy ({valid_mask.sum()}/{valid_mask.size} valid bins)")
 
-    if tube_boundaries:
-        for b in tube_boundaries:
+    if arm_boundaries:
+        for b in arm_boundaries:
             ax_occ.axvline(b, color="gray", linestyle="--", linewidth=0.8, alpha=0.6)
 
     fig.tight_layout()
@@ -1270,8 +1276,8 @@ def plot_position_and_traces_1d(
     behavior_fps: float,
     speed_threshold: float = 0.0,
     trajectory_1d_filtered: "pd.DataFrame | None" = None,
-    tube_boundaries: list[float] | None = None,
-    tube_labels: list[str] | None = None,
+    arm_boundaries: list[float] | None = None,
+    arm_labels: list[str] | None = None,
     n_units: int = 20,
     trace_height: float = 0.5,
     time_unit: str = "min",
@@ -1298,10 +1304,10 @@ def plot_position_and_traces_1d(
     trajectory_1d_filtered:
         Speed-filtered trajectory.  If provided, overlaid on top of the
         unfiltered trace.
-    tube_boundaries:
-        Position values at tube segment boundaries.
-    tube_labels:
-        Labels for each tube segment.
+    arm_boundaries:
+        Position values at arm segment boundaries.
+    arm_labels:
+        Labels for each arm segment.
     n_units:
         Maximum number of traces to show (default 25).
     """
@@ -1375,16 +1381,16 @@ def plot_position_and_traces_1d(
     ax_pos.set_ylabel("1D position (mm)")
     ax_pos.legend(markerscale=10, fontsize=7, loc="upper right")
 
-    if tube_boundaries:
-        for b in tube_boundaries:
+    if arm_boundaries:
+        for b in arm_boundaries:
             ax_pos.axhline(b, color="gray", linestyle=":", linewidth=0.5, alpha=0.6)
 
     ax_pos.set_title("Serialized 1D position + place cell traces", fontsize=10)
 
     # Arm labels on the right side of position axis
-    if tube_boundaries and tube_labels and len(tube_labels) == len(tube_boundaries) - 1:
-        for i, lbl in enumerate(tube_labels):
-            mid = (tube_boundaries[i] + tube_boundaries[i + 1]) / 2
+    if arm_boundaries and arm_labels and len(arm_labels) == len(arm_boundaries) - 1:
+        for i, lbl in enumerate(arm_labels):
+            mid = (arm_boundaries[i] + arm_boundaries[i + 1]) / 2
             ax_pos.annotate(
                 lbl,
                 xy=(1.0, mid),
@@ -1435,6 +1441,143 @@ def plot_position_and_traces_1d(
         if res.trace_times is not None:
             t_max = max(t_max, res.trace_times[-1] / time_scale)
     ax_pos.set_xlim(0, t_max)
+
+    fig.tight_layout()
+    return fig
+
+
+def plot_position_and_traces_2d(
+    trajectory: "pd.DataFrame",
+    unit_results: dict,
+    behavior_fps: float,
+    speed_threshold: float = 0.0,
+    trajectory_filtered: "pd.DataFrame | None" = None,
+    n_units: int = 20,
+    trace_height: float = 0.5,
+    time_unit: str = "min",
+    speed_unit: str = "mm/s",
+) -> "Figure":
+    """Time-synced 2D speed trace and example place cell calcium traces.
+
+    Top panel shows animal speed over time with the speed threshold.
+    Bottom panel shows *n_units* calcium traces (from place cells, sorted
+    by spatial information) stacked vertically with a shared time axis.
+
+    Parameters
+    ----------
+    trajectory:
+        Unfiltered trajectory with ``speed`` and ``frame_index`` columns.
+    unit_results:
+        Dict of unit_id -> UnitResult.  Only units whose ``trace_data``
+        is not None are plotted.
+    behavior_fps:
+        Behavior sampling rate (Hz).
+    speed_threshold:
+        Speed threshold used for filtering (shown as dashed line).
+    trajectory_filtered:
+        Speed-filtered trajectory.  If provided, filtered count is shown
+        in the legend.
+    n_units:
+        Maximum number of traces to show (default 20).
+    trace_height:
+        Vertical extent of each normalized trace (controls density).
+    time_unit:
+        ``"min"`` (default) or ``"s"`` for x-axis labels.
+    speed_unit:
+        Label for speed axis (e.g. ``"mm/s"`` or ``"px/s"``).
+    """
+    if plt is None:
+        raise ImportError("matplotlib is required for plotting.")
+
+    # Select units with trace data, sorted by SI (highest first)
+    candidates = []
+    for uid, res in unit_results.items():
+        if res.trace_data is not None and res.trace_times is not None:
+            candidates.append((uid, res.si))
+    candidates.sort(key=lambda x: -x[1])
+    selected = [uid for uid, _ in candidates[:n_units]]
+
+    if not selected:
+        fig, ax = plt.subplots(1, 1, figsize=(10, 2))
+        ax.text(0.5, 0.5, "No trace data available", ha="center", va="center")
+        return fig
+
+    n_sel = len(selected)
+    fig, (ax_spd, ax_tr) = plt.subplots(
+        2,
+        1,
+        figsize=(10, 1.5 + 0.3 * n_sel),
+        sharex=True,
+        gridspec_kw={"height_ratios": [1, 2]},
+    )
+
+    time_scale = 60.0 if time_unit == "min" else 1.0
+    time_label = "Time (min)" if time_unit == "min" else "Time (s)"
+
+    # --- Top: speed over time ---
+    beh_time = trajectory["frame_index"].values / behavior_fps / time_scale
+    speed = trajectory["speed"].values
+
+    ax_spd.scatter(
+        beh_time,
+        speed,
+        s=0.3,
+        alpha=0.3,
+        color="steelblue",
+        rasterized=True,
+    )
+    if speed_threshold > 0:
+        ax_spd.axhline(
+            speed_threshold,
+            color="red",
+            linestyle="--",
+            linewidth=1,
+            alpha=0.7,
+            label=f"threshold = {speed_threshold:.0f} {speed_unit}",
+        )
+    n_total = len(trajectory)
+    n_filt = len(trajectory_filtered) if trajectory_filtered is not None else n_total
+    ax_spd.set_ylabel(f"Speed ({speed_unit})")
+    ax_spd.legend(fontsize=7, loc="upper right")
+    ax_spd.set_title(
+        f"Speed + place cell traces  ({n_filt}/{n_total} frames after filter)",
+        fontsize=10,
+    )
+
+    # --- Bottom: stacked calcium traces ---
+    colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+
+    for i, uid in enumerate(selected):
+        res = unit_results[uid]
+        trace = res.trace_data
+        t = res.trace_times / time_scale
+
+        tmin, tmax = np.nanmin(trace), np.nanmax(trace)
+        trace_norm = (trace - tmin) / (tmax - tmin) if tmax - tmin > 0 else np.zeros_like(trace)
+
+        offset_val = i * trace_height
+        ax_tr.plot(
+            t,
+            trace_norm * trace_height + offset_val,
+            linewidth=1,
+            alpha=1,
+            color=colors[i % len(colors)],
+        )
+
+    tick_ids = [i for i in [1, 5, 10, 15, 20, 25] if i <= n_sel]
+    ax_tr.set_yticks([(i - 1) * trace_height + trace_height * 0.5 for i in tick_ids])
+    ax_tr.set_yticklabels([str(i) for i in tick_ids], fontsize=6)
+    ax_tr.set_ylabel("Cell #")
+    ax_tr.set_xlabel(time_label)
+    ax_tr.set_ylim(-0.1 * trace_height, n_sel * trace_height + 0.1 * trace_height)
+
+    # Set xlim to data boundaries
+    t_max = beh_time[-1]
+    for uid in selected:
+        res = unit_results[uid]
+        if res.trace_times is not None:
+            t_max = max(t_max, res.trace_times[-1] / time_scale)
+    ax_spd.set_xlim(0, t_max)
 
     fig.tight_layout()
     return fig

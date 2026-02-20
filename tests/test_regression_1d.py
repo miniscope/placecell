@@ -124,24 +124,24 @@ def test_trajectory_1d_filtered_shape(
     )
 
 
-def test_tube_boundaries(
+def test_arm_boundaries(
     pipeline_result: MazeDataset,
     reference: MazeDataset,
 ) -> None:
-    """Tube boundaries must match reference."""
+    """Arm boundaries must match reference."""
     np.testing.assert_allclose(
-        pipeline_result.tube_boundaries,
-        reference.tube_boundaries,
+        pipeline_result.arm_boundaries,
+        reference.arm_boundaries,
         rtol=1e-5,
     )
 
 
-def test_effective_tube_order(
+def test_effective_arm_order(
     pipeline_result: MazeDataset,
     reference: MazeDataset,
 ) -> None:
-    """Effective tube order (with direction splits) must match."""
-    assert pipeline_result.effective_tube_order == reference.effective_tube_order
+    """Effective arm order (with direction splits) must match."""
+    assert pipeline_result.effective_arm_order == reference.effective_arm_order
 
 
 def test_pos_range(

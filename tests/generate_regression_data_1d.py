@@ -33,13 +33,13 @@ OUT_DIR = Path(__file__).parent / "assets" / "regression_1d"
 
 
 def main() -> None:  # noqa: D103
-    from placecell.config import AnalysisConfig, DataPathsConfig
+    from placecell.config import AnalysisConfig, DataConfig
 
     # Load source configs
     cfg = AnalysisConfig.from_id(SOURCE_CONFIG_ID)
     data_path = Path(SOURCE_DATA_PATH)
     data_dir = data_path.parent
-    data_cfg = DataPathsConfig.from_yaml(data_path)
+    data_cfg = DataConfig.from_yaml(data_path)
 
     # ── Prepare output directory ────────────────────────────────────
     if OUT_DIR.exists():
