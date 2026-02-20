@@ -1,5 +1,3 @@
-mm_per_pixel: 1
-
 zones:
   Room_1:
     type: room

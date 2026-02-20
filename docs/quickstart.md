@@ -27,7 +27,7 @@ Create `data_paths.yaml` with paths relative to this file:
 :::{dropdown} data_paths.yaml
 ```yaml
 id: your_data
-mio_model: placecell.config.DataPathsConfig
+mio_model: placecell.config.DataConfig
 mio_version: 0.8.1
 # Directory containing zarr files (C.zarr, A.zarr, max_proj.zarr)
 neural_path: path/to/minian_output

@@ -85,10 +85,11 @@ class MazeDataset(BasePlaceCellDataset):
 
         # Load behavior graph for physical tube lengths (optional)
         if self.behavior_graph_path is not None and self.behavior_graph_path.exists():
-            self.graph_polylines, self.graph_mm_per_pixel = load_graph_polylines(
-                self.behavior_graph_path
-            )
-            zone_lengths, _ = compute_tube_lengths(self.behavior_graph_path)
+            self.graph_polylines = load_graph_polylines(self.behavior_graph_path)
+            self.graph_mm_per_pixel = (
+                self.data_cfg.mm_per_pixel if self.data_cfg else None
+            ) or 1.0
+            zone_lengths = compute_tube_lengths(self.graph_polylines, self.graph_mm_per_pixel)
             # Keep only the tubes we're using
             self.tube_lengths = {t: zone_lengths[t] for t in mcfg.tube_order if t in zone_lengths}
         else:

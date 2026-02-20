@@ -87,6 +87,29 @@ def analysis(
     click.echo(f"Full analysis saved to {bundle_path}")
 
 
+@cli.command("define-zones")
+@click.option("-v", "--video", required=True, type=click.Path(exists=True), help="Video file.")
+@click.option(
+    "-o", "--output", default="zone_config.yaml",
+    help="Output YAML file (default: zone_config.yaml).",
+)
+@click.option("--rooms", type=int, required=True, help="Number of rooms.")
+@click.option("--tubes", type=int, required=True, help="Number of tubes.")
+def define_zones_cmd(video: str, output: str, rooms: int, tubes: int) -> None:
+    """Interactive zone definition tool (requires OpenCV)."""
+    from placecell.define_zones import define_zones
+
+    zone_names = [f"Room_{i+1}" for i in range(rooms)] + [f"Tube_{i+1}" for i in range(tubes)]
+    zone_types = {name: "room" if name.startswith("Room") else "tube" for name in zone_names}
+
+    define_zones(
+        video_path=video,
+        output_file=output,
+        zone_names=zone_names,
+        zone_types=zone_types,
+    )
+
+
 def _show_figures(figures_dir: Path) -> None:
     """Open all PDF figures in the default viewer."""
     import platform

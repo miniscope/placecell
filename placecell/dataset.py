@@ -25,7 +25,7 @@ from placecell.behavior import (
     recompute_speed,
     remove_position_jumps,
 )
-from placecell.config import AnalysisConfig, DataPathsConfig, SpatialMap2DConfig
+from placecell.config import AnalysisConfig, DataConfig, SpatialMap2DConfig
 from placecell.io import load_behavior_data, load_visualization_data
 from placecell.logging import init_logger
 from placecell.neural import build_event_index_dataframe, load_calcium_traces, run_deconvolution
@@ -162,7 +162,7 @@ class BasePlaceCellDataset(abc.ABC):
         behavior_timestamp_path: Path | None = None,
         behavior_video_path: Path | None = None,
         behavior_graph_path: Path | None = None,
-        data_cfg: DataPathsConfig | None = None,
+        data_cfg: DataConfig | None = None,
     ) -> None:
         self.cfg = cfg
         self.neural_path = neural_path
@@ -221,7 +221,7 @@ class BasePlaceCellDataset(abc.ABC):
 
         data_path = Path(data_path)
         data_dir = data_path.parent
-        data_cfg = DataPathsConfig.from_yaml(data_path)
+        data_cfg = DataConfig.from_yaml(data_path)
         cfg = cfg.with_data_overrides(data_cfg)
 
         # Auto-select subclass based on behavior type
@@ -447,14 +447,13 @@ class BasePlaceCellDataset(abc.ABC):
             self.trajectory = recompute_speed(
                 self.trajectory, window_frames=bcfg.speed_window_frames
             )
-            logger.info("Speed recomputed in mm/s")
+            logger.info("Speed recomputed after coordinate correction (mm/s)")
             speed_unit = "mm/s"
         else:
             logger.warning(
-                "No arena_bounds — skipping spatial corrections "
-                "(jump removal, perspective correction, boundary clipping)"
+                "No arena_bounds — skipping spatial corrections; "
+                "speed and position remain in pixels"
             )
-            logger.warning("No arena calibration — speed and position remain in pixels")
             speed_unit = "px/s"
 
         # Speed filter (always applied)

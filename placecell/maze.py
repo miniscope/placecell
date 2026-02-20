@@ -11,7 +11,7 @@ from placecell.logging import init_logger
 logger = init_logger(__name__)
 
 
-def load_graph_polylines(graph_path: Path) -> tuple[dict[str, list[list[float]]], float]:
+def load_graph_polylines(graph_path: Path) -> dict[str, list[list[float]]]:
     """Load behavior graph YAML and return raw polyline waypoints.
 
     Parameters
@@ -22,13 +22,11 @@ def load_graph_polylines(graph_path: Path) -> tuple[dict[str, list[list[float]]]
 
     Returns
     -------
-    tuple of (polylines, mm_per_pixel)
-        polylines maps zone name to list of [x, y] waypoints in pixel coords.
+    dict[str, list[list[float]]]
+        Maps zone name to list of [x, y] waypoints in pixel coords.
     """
     with open(graph_path) as f:
         data = yaml.safe_load(f)
-
-    mm_per_pixel = float(data.get("mm_per_pixel", 1.0))
 
     polylines: dict[str, list[list[float]]] = {}
     for zone_name, zone_data in data["zones"].items():
@@ -36,24 +34,26 @@ def load_graph_polylines(graph_path: Path) -> tuple[dict[str, list[list[float]]]
         if isinstance(points, list) and len(points) >= 2:
             polylines[zone_name] = points
 
-    return polylines, mm_per_pixel
+    return polylines
 
 
-def compute_tube_lengths(graph_path: Path) -> tuple[dict[str, float], float]:
-    """Load behavior graph YAML and compute polyline lengths for each zone.
+def compute_tube_lengths(
+    polylines: dict[str, list[list[float]]], mm_per_pixel: float,
+) -> dict[str, float]:
+    """Compute polyline lengths for each zone.
 
     Parameters
     ----------
-    graph_path:
-        Path to YAML file with ``mm_per_pixel`` and zone polylines.
+    polylines:
+        Maps zone name to list of [x, y] waypoints in pixel coords.
+    mm_per_pixel:
+        Scale factor for converting pixel distances to mm.
 
     Returns
     -------
-    tuple of (zone_lengths, mm_per_pixel)
-        zone_lengths maps zone name to physical length in mm.
+    dict[str, float]
+        Maps zone name to physical length in mm.
     """
-    polylines, mm_per_pixel = load_graph_polylines(graph_path)
-
     zone_lengths: dict[str, float] = {}
     for key, waypoints in polylines.items():
         length = 0.0
@@ -64,12 +64,11 @@ def compute_tube_lengths(graph_path: Path) -> tuple[dict[str, float], float]:
         zone_lengths[key] = length * mm_per_pixel
 
     logger.info(
-        "Loaded behavior graph: %d zones, mm_per_pixel=%.2f, tube lengths: %s",
-        len(zone_lengths),
+        "Tube lengths (mm_per_pixel=%.2f): %s",
         mm_per_pixel,
         {k: f"{v:.1f}" for k, v in zone_lengths.items()},
     )
-    return zone_lengths, mm_per_pixel
+    return zone_lengths
 
 
 def serialize_tube_position(

@@ -33,7 +33,6 @@ def define_zones(
     output_file: str = "zone_config.yaml",
     zone_names: list[str] | None = None,
     zone_types: dict[str, str] | None = None,
-    mm_per_pixel: float | None = None,
     connections: dict[str, list[str]] | None = None,
 ) -> None:
     """Interactive tool to define zone polygons by clicking points on video.
@@ -48,8 +47,6 @@ def define_zones(
         Ordered list of zone names to define. If None, uses default maze zones.
     zone_types:
         Dict mapping zone name to "room" or "tube". If None, inferred from name.
-    mm_per_pixel:
-        Scale factor. Preserved from existing file if not specified.
     connections:
         Dict of room -> list of connected tubes. Preserved from existing file.
     """
@@ -89,7 +86,6 @@ def define_zones(
     current_polygon: list[list[int]] = []
     polygons: dict[str, list[list[int]]] = {zone: [] for zone in zone_names}
     existing_connections: dict[str, list[str]] = connections or {}
-    existing_mm_per_pixel = mm_per_pixel
 
     frame = None
 
@@ -171,10 +167,6 @@ def define_zones(
     def save_zones() -> None:
         save_data: dict = {}
 
-        # mm_per_pixel
-        if existing_mm_per_pixel is not None:
-            save_data["mm_per_pixel"] = existing_mm_per_pixel
-
         # Build zones dict
         zones_dict: dict = {}
         for zone in zone_names:
@@ -209,9 +201,6 @@ def define_zones(
     try:
         with open(output_file) as f:
             existing = yaml.safe_load(f) or {}
-
-        if existing_mm_per_pixel is None:
-            existing_mm_per_pixel = existing.get("mm_per_pixel")
 
         for zone in zone_names:
             if zone in existing.get("zones", {}):
@@ -329,13 +318,6 @@ if __name__ == "__main__":
         default=None,
         help="Zone names (default: Room_1 Room_2 Room_3 Tube_1..4)",
     )
-    parser.add_argument(
-        "--mm-per-pixel",
-        type=float,
-        default=None,
-        help="Scale factor (mm per pixel)",
-    )
-
     args = parser.parse_args()
 
     # Infer zone types from names
@@ -350,5 +332,4 @@ if __name__ == "__main__":
         output_file=args.output,
         zone_names=args.zones,
         zone_types=ztypes,
-        mm_per_pixel=args.mm_per_pixel,
     )

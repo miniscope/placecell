@@ -1,5 +1,5 @@
 id: regression_test_data
-mio_model: placecell.config.DataPathsConfig
+mio_model: placecell.config.DataConfig
 mio_version: 0.8.1
 neural_path: neural_data
 neural_timestamp: neural_timestamp.csv

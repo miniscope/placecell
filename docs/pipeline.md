@@ -176,7 +176,7 @@ Four independent computations from the same inputs (events, filtered trajectory,
 :::{dropdown} data_paths.yaml
 ```yaml
 id: data_paths
-mio_model: placecell.config.DataPathsConfig
+mio_model: placecell.config.DataConfig
 mio_version: 0.8.1
 neural_path: path/to/neural
 neural_timestamp: path/to/neural_timestamp.csv

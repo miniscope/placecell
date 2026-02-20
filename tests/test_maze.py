@@ -228,55 +228,25 @@ class TestFilterTubeBySpeed:
 
 
 class TestComputeTubeLengths:
-    def test_simple_straight_tubes(self, tmp_path):
+    def test_simple_straight_tubes(self):
         """Straight-line polylines with known lengths."""
-        graph = {
-            "mm_per_pixel": 2.0,
-            "zones": {
-                "Tube_1": {"type": "tube", "points": [[0, 0], [100, 0]]},  # 100 px → 200 mm
-                "Tube_2": {"type": "tube", "points": [[0, 0], [0, 50]]},  # 50 px → 100 mm
-                "Room_1": {"type": "room", "points": [[0, 0], [10, 10]]},  # ~14.14 px → ~28.28 mm
-            },
+        polylines = {
+            "Tube_1": [[0, 0], [100, 0]],  # 100 px → 200 mm
+            "Tube_2": [[0, 0], [0, 50]],  # 50 px → 100 mm
+            "Room_1": [[0, 0], [10, 10]],  # ~14.14 px → ~28.28 mm
         }
-        import yaml
-
-        p = tmp_path / "graph.yaml"
-        p.write_text(yaml.dump(graph))
-        lengths, mm_pp = compute_tube_lengths(p)
-        assert mm_pp == 2.0
+        lengths = compute_tube_lengths(polylines, mm_per_pixel=2.0)
         assert lengths["Tube_1"] == pytest.approx(200.0)
         assert lengths["Tube_2"] == pytest.approx(100.0)
         assert "Room_1" in lengths  # rooms are also returned
 
-    def test_polyline_with_corners(self, tmp_path):
+    def test_polyline_with_corners(self):
         """L-shaped polyline: 3→0→4 in pixel coords."""
-        graph = {
-            "mm_per_pixel": 1.0,
-            "zones": {
-                "Tube_1": {"type": "tube", "points": [[0, 0], [3, 0], [3, 4]]},  # 3 + 4 = 7 px
-            },
+        polylines = {
+            "Tube_1": [[0, 0], [3, 0], [3, 4]],  # 3 + 4 = 7 px
         }
-        import yaml
-
-        p = tmp_path / "graph.yaml"
-        p.write_text(yaml.dump(graph))
-        lengths, _ = compute_tube_lengths(p)
+        lengths = compute_tube_lengths(polylines, mm_per_pixel=1.0)
         assert lengths["Tube_1"] == pytest.approx(7.0)
-
-    def test_default_mm_per_pixel(self, tmp_path):
-        """mm_per_pixel defaults to 1 if not in YAML."""
-        graph = {
-            "zones": {
-                "Tube_1": {"type": "tube", "points": [[0, 0], [10, 0]]},
-            },
-        }
-        import yaml
-
-        p = tmp_path / "graph.yaml"
-        p.write_text(yaml.dump(graph))
-        lengths, mm_pp = compute_tube_lengths(p)
-        assert mm_pp == 1.0
-        assert lengths["Tube_1"] == pytest.approx(10.0)
 
 
 class TestSerializeTubePositionPhysical:

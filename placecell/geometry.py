@@ -351,12 +351,11 @@ def is_valid_transition(
 
 def load_zone_config(
     path: str | Path,
-) -> tuple[dict[str, np.ndarray], dict[str, str], dict[str, list[str]], float]:
+) -> tuple[dict[str, np.ndarray], dict[str, str], dict[str, list[str]]]:
     """Load zone configuration from combined YAML format.
 
     Expected format::
 
-        mm_per_pixel: 1.0
         zones:
           Room_1:
             type: room
@@ -373,16 +372,13 @@ def load_zone_config(
 
     Returns
     -------
-    tuple of (zone_polygons, zone_types, zone_graph, mm_per_pixel)
+    tuple of (zone_polygons, zone_types, zone_graph)
         - zone_polygons: dict mapping zone name to np.ndarray of points.
         - zone_types: dict mapping zone name to "room" or "tube".
         - zone_graph: bidirectional adjacency dict (zone -> list of connected zones).
-        - mm_per_pixel: scale factor.
     """
     with open(path) as f:
         data = yaml.safe_load(f)
-
-    mm_per_pixel = float(data.get("mm_per_pixel", 1.0))
 
     zone_polygons: dict[str, np.ndarray] = {}
     zone_types: dict[str, str] = {}
@@ -408,9 +404,5 @@ def load_zone_config(
             if zone_name not in zone_graph[connected]:
                 zone_graph[connected].append(zone_name)
 
-    logger.info(
-        "Loaded zone config: %d zones, mm_per_pixel=%.2f",
-        len(zone_polygons),
-        mm_per_pixel,
-    )
-    return zone_polygons, zone_types, zone_graph, mm_per_pixel
+    logger.info("Loaded zone config: %d zones", len(zone_polygons))
+    return zone_polygons, zone_types, zone_graph

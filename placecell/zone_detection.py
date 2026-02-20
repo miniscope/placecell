@@ -225,14 +225,9 @@ def detect_zones_from_csv(
 
     x_coords = df[x_col].values.astype(float)
     y_coords = df[y_col].values.astype(float)
-    logger.info("Loaded %d position samples", len(x_coords))
-
     # Load zone config
-    zone_polygons, zone_types, zone_graph, _ = load_zone_config(zone_config_path)
-    logger.info("Loaded %d zones", len(zone_polygons))
-
-    # Run detection
-    logger.info("Detecting zones...")
+    zone_polygons, zone_types, zone_graph = load_zone_config(zone_config_path)
+    logger.info("Loaded %d position samples, %d zones", len(x_coords), len(zone_polygons))
     result = detect_zones(
         x_coords,
         y_coords,

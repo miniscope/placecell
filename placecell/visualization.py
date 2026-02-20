@@ -345,15 +345,10 @@ def plot_diagnostics(
 
     p_vals = [unit_results[u].p_val for u in uids]
     n_sig = sum(p < p_value_threshold for p in p_vals)
-    logger.info("Total units: %d", len(uids))
     logger.info(
-        "Significant (p<%s): %d (%.1f%%)", p_value_threshold, n_sig, 100 * n_sig / len(uids)
-    )
-    logger.info(
-        "Event count: median=%d, min=%d, max=%d",
-        int(np.median(n_events)),
-        min(n_events),
-        max(n_events),
+        "Diagnostics: %d units, %d significant (p<%.2f), events median=%d range=[%d, %d]",
+        len(uids), n_sig, p_value_threshold,
+        int(np.median(n_events)), min(n_events), max(n_events),
     )
 
     return fig

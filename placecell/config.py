@@ -1,12 +1,16 @@
 """Configuration models for pcell, loaded from YAML."""
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Union, get_args, get_origin
 
 import yaml
 from mio.models import MiniscopeConfig
 from mio.models.mixins import ConfigYAMLMixin
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from placecell.logging import init_logger
+
+logger = init_logger(__name__)
 
 CONFIG_DIR = Path(__file__).parent / "config"
 
@@ -364,11 +368,28 @@ class BehaviorConfig(BaseModel):
         return self
 
 
-class DataPathsConfig(BaseModel):
-    """Bundle of data file paths for neural and behavior data."""
+_MIO_METADATA_KEYS = frozenset({"id", "mio_model", "mio_version"})
+
+
+class DataConfig(BaseModel):
+    """Per-session data configuration (file paths, calibration, overrides)."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _warn_unknown_keys(cls, data: Any) -> Any:
+        """Warn on unrecognised keys (catches typos like ``config_ovrride``)."""
+        if isinstance(data, dict):
+            known = set(cls.model_fields) | _MIO_METADATA_KEYS
+            for key in data:
+                if key not in known:
+                    logger.warning(
+                        "DataConfig: unknown key '%s' (valid: %s)",
+                        key, ", ".join(sorted(cls.model_fields)),
+                    )
+        return data
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> "DataPathsConfig":
+    def from_yaml(cls, path: str | Path) -> "DataConfig":
         """Load from a YAML file."""
         with open(path) as f:
             data = yaml.safe_load(f)
@@ -422,7 +443,12 @@ class DataPathsConfig(BaseModel):
     )
     behavior_graph: str | None = Field(
         None,
-        description="Path to behavior graph YAML with zone polylines and mm_per_pixel.",
+        description="Path to behavior graph YAML with zone polylines.",
+    )
+    mm_per_pixel: float | None = Field(
+        None,
+        gt=0.0,
+        description="Scale factor (mm per pixel) for converting graph coordinates to mm.",
     )
     config_override: dict[str, Any] | None = Field(
         None,
@@ -454,6 +480,28 @@ def _deep_merge(base: dict, override: dict) -> None:
             base[key] = val
 
 
+def _validate_override_keys(
+    model_cls: type[BaseModel], override: dict, path: str = "",
+) -> None:
+    """Warn on keys in *override* that don't match *model_cls* fields."""
+    for key, val in override.items():
+        if key not in model_cls.model_fields:
+            logger.warning(
+                "config_override: unknown key '%s' (valid: %s)",
+                f"{path}{key}", ", ".join(model_cls.model_fields),
+            )
+            continue
+        if isinstance(val, dict):
+            # Unwrap Optional[X] / X | None to get the inner model type
+            ann = model_cls.model_fields[key].annotation
+            if get_origin(ann) is Union:
+                args = [a for a in get_args(ann) if a is not type(None)]
+                if len(args) == 1:
+                    ann = args[0]
+            if isinstance(ann, type) and issubclass(ann, BaseModel):
+                _validate_override_keys(ann, val, f"{path}{key}.")
+
+
 class AnalysisConfig(MiniscopeConfig, _PlacecellConfigMixin):
     """Top-level application configuration."""
 
@@ -462,12 +510,12 @@ class AnalysisConfig(MiniscopeConfig, _PlacecellConfigMixin):
     neural: NeuralConfig
     behavior: BehaviorConfig
 
-    def with_data_overrides(self, data_cfg: DataPathsConfig) -> "AnalysisConfig":
+    def with_data_overrides(self, data_cfg: DataConfig) -> "AnalysisConfig":
         """Create a new config with data-specific overrides applied.
 
         Parameters
         ----------
-        data_cfg : DataPathsConfig
+        data_cfg : DataConfig
             Data configuration that may contain a ``config_override`` dict.
 
         Returns
@@ -477,6 +525,9 @@ class AnalysisConfig(MiniscopeConfig, _PlacecellConfigMixin):
         """
         if not data_cfg.config_override:
             return self
+        _validate_override_keys(type(self), data_cfg.config_override)
+        for key, val in data_cfg.config_override.items():
+            logger.info("Overriding %s = %s", key, val)
         base = self.model_dump()
         _deep_merge(base, data_cfg.config_override)
         return type(self)(**base)
