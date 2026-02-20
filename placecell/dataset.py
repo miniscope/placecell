@@ -97,6 +97,8 @@ class UnitResult:
         (used for plotting event dots on rate maps).
     unit_data:
         Speed-filtered deconvolved events for this unit (subset of event_place).
+    overall_rate:
+        Overall firing rate (total events / total time), i.e. lambda.
     trace_data:
         Raw calcium trace for this unit (None if traces unavailable).
     trace_times:
@@ -118,6 +120,7 @@ class UnitResult:
     rate_map_second: np.ndarray
     vis_data_above: pd.DataFrame
     unit_data: pd.DataFrame
+    overall_rate: float
     trace_data: np.ndarray | None
     trace_times: np.ndarray | None
 
@@ -673,6 +676,7 @@ class BasePlaceCellDataset(abc.ABC):
         scalar_fields = [
             "si",
             "p_val",
+            "overall_rate",
             "stability_corr",
             "stability_z",
             "stability_p_val",
@@ -823,6 +827,7 @@ class BasePlaceCellDataset(abc.ABC):
         scalar_fields = [
             "si",
             "p_val",
+            "overall_rate",
             "stability_corr",
             "stability_z",
             "stability_p_val",
@@ -831,10 +836,14 @@ class BasePlaceCellDataset(abc.ABC):
         scalars_df = pd.read_csv(ur_dir / "scalars.csv")
         unit_ids = scalars_df["unit_id"].tolist()
 
+        scalar_defaults = {"overall_rate": 0.0}
         scalars_by_uid: dict[int, dict] = {}
         for _, row in scalars_df.iterrows():
             uid = int(row["unit_id"])
-            scalars_by_uid[uid] = {f: row[f] for f in scalar_fields}
+            scalars_by_uid[uid] = {
+                f: row[f] if f in row.index else scalar_defaults.get(f, np.nan)
+                for f in scalar_fields
+            }
 
         # Read arrays
         arrays_by_uid: dict[int, dict] = {uid: {} for uid in unit_ids}
@@ -872,6 +881,7 @@ class BasePlaceCellDataset(abc.ABC):
                 rate_map_raw=ar.get("rate_map_raw", np.array([])),
                 si=float(sc["si"]),
                 p_val=float(sc["p_val"]),
+                overall_rate=float(sc.get("overall_rate", 0.0)),
                 shuffled_sis=ar.get("shuffled_sis", np.array([])),
                 shuffled_rate_p95=ar.get("shuffled_rate_p95", np.array([])),
                 stability_corr=float(sc["stability_corr"]),
@@ -999,6 +1009,7 @@ class ArenaDataset(BasePlaceCellDataset):
                 shuffled_sis=result["shuffled_sis"],
                 shuffled_rate_p95=result["shuffled_rate_p95"],
                 p_val=result["p_val"],
+                overall_rate=result["overall_rate"],
                 stability_corr=result["stability_corr"],
                 stability_z=result["stability_z"],
                 stability_p_val=result["stability_p_val"],

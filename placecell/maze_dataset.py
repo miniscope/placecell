@@ -37,6 +37,7 @@ class MazeDataset(BasePlaceCellDataset):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.trajectory_1d: pd.DataFrame | None = None
+        self.trajectory_1d_all: pd.DataFrame | None = None
         self.trajectory_1d_filtered: pd.DataFrame | None = None
         self.pos_range: tuple[float, float] | None = None
         self.edges_1d: np.ndarray | None = None
@@ -115,6 +116,8 @@ class MazeDataset(BasePlaceCellDataset):
             self.effective_tube_order = list(mcfg.tube_order)
 
         # Optionally filter to complete traversals only (room-to-room)
+        # Keep pre-filter copy for visualization
+        self.trajectory_1d_all = self.trajectory_1d.copy()
         if mcfg.require_complete_traversal:
             self.trajectory_1d = filter_complete_traversals(
                 self.trajectory_1d,
@@ -342,6 +345,7 @@ class MazeDataset(BasePlaceCellDataset):
                 p_val=result["p_val"],
                 shuffled_sis=result["shuffled_sis"],
                 shuffled_rate_p95=None,
+                overall_rate=result["overall_rate"],
                 stability_corr=result["stability_corr"],
                 stability_z=result["stability_z"],
                 stability_p_val=result["stability_p_val"],
@@ -364,6 +368,8 @@ class MazeDataset(BasePlaceCellDataset):
         # 1D trajectories
         if self.trajectory_1d is not None:
             self.trajectory_1d.to_parquet(result / "trajectory_1d.parquet")
+        if self.trajectory_1d_all is not None:
+            self.trajectory_1d_all.to_parquet(result / "trajectory_1d_all.parquet")
         if self.trajectory_1d_filtered is not None:
             self.trajectory_1d_filtered.to_parquet(result / "trajectory_1d_filtered.parquet")
 
@@ -397,6 +403,9 @@ class MazeDataset(BasePlaceCellDataset):
         t1d_path = path / "trajectory_1d.parquet"
         if t1d_path.exists():
             base.trajectory_1d = pd.read_parquet(t1d_path)
+        t1da_path = path / "trajectory_1d_all.parquet"
+        if t1da_path.exists():
+            base.trajectory_1d_all = pd.read_parquet(t1da_path)
         t1df_path = path / "trajectory_1d_filtered.parquet"
         if t1df_path.exists():
             base.trajectory_1d_filtered = pd.read_parquet(t1df_path)

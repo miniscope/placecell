@@ -100,6 +100,7 @@ def plot_summary_scatter(
     stab_pvals = np.array([unit_results[uid].stability_p_val for uid in unit_ids])
     fisher_z = np.array([unit_results[uid].stability_z for uid in unit_ids])
     si_vals = np.array([unit_results[uid].si for uid in unit_ids])
+    overall_rates = np.array([unit_results[uid].overall_rate for uid in unit_ids])
 
     # Classify units
     is_sig = p_vals < p_value_threshold
@@ -122,18 +123,18 @@ def plot_summary_scatter(
     n_stab_only = int(np.sum(~is_sig & is_stable))
     n_neither = int(np.sum(~is_sig & ~is_stable))
 
-    # ── Figure layout: 3 panels ───────────────────────────────────
-    fig = plt.figure(figsize=(15, 4.5))
+    # ── Figure layout: 4 panels ───────────────────────────────────
+    fig = plt.figure(figsize=(20, 4.5))
 
-    ax1 = fig.add_axes([0.04, 0.14, 0.26, 0.78])
-    ax2 = fig.add_axes([0.37, 0.14, 0.26, 0.78])
+    ax1 = fig.add_axes([0.03, 0.14, 0.20, 0.78])
+    ax2 = fig.add_axes([0.27, 0.14, 0.20, 0.78])
+    ax4 = fig.add_axes([0.51, 0.14, 0.20, 0.78])
 
     # Panel 3: density contour with marginals
-    # Main scatter area + marginal axes
-    left3 = 0.72
-    ax3 = fig.add_axes([left3, 0.14, 0.22, 0.64])
-    ax3_top = fig.add_axes([left3, 0.80, 0.22, 0.14])
-    ax3_right = fig.add_axes([left3 + 0.23, 0.14, 0.04, 0.64])
+    left3 = 0.76
+    ax3 = fig.add_axes([left3, 0.14, 0.18, 0.64])
+    ax3_top = fig.add_axes([left3, 0.80, 0.18, 0.14])
+    ax3_right = fig.add_axes([left3 + 0.19, 0.14, 0.035, 0.64])
 
     # ── Panel 1: P-value scatter ──────────────────────────────────
     ax1.scatter(
@@ -149,7 +150,6 @@ def plot_summary_scatter(
     ax1.axhline(p_value_threshold, color="gray", linestyle=":", linewidth=1.5)
     ax1.set_xlabel("P-value (significance)", fontsize=10)
     ax1.set_ylabel("P-value (stability)", fontsize=10)
-    ax1.set_title("Significance vs Stability", fontsize=11)
     ax1.set_aspect("equal", adjustable="datalim")
 
     legend_elements = [
@@ -170,9 +170,8 @@ def plot_summary_scatter(
         linewidths=0.5,
         c=colors,
     )
-    ax2.set_xlabel("Spatial Information (bits/s)", fontsize=10)
+    ax2.set_xlabel("Spatial Information (bits/spike)", fontsize=10)
     ax2.set_ylabel("Fisher Z (stability)", fontsize=10)
-    ax2.set_title("SI vs Stability", fontsize=11)
     ax2.grid(True, alpha=0.3, linestyle="--")
     ax2.axhline(0, color="gray", linestyle=":", linewidth=1, alpha=0.5)
 
@@ -185,6 +184,25 @@ def plot_summary_scatter(
     ax2.set_xlim(lo, hi)
     ax2.set_ylim(lo, hi)
     ax2.set_aspect("equal")
+
+    # ── Panel 4: Overall Rate (lambda) bar chart ───────────────────
+    has_rates = np.any(overall_rates > 0)
+    if has_rates:
+        sort_idx = np.argsort(overall_rates)[::-1]
+        sorted_rates = overall_rates[sort_idx]
+        ax4.bar(
+            np.arange(len(sorted_rates)),
+            sorted_rates,
+            color="gray",
+            edgecolor="none",
+            width=1.0,
+        )
+        ax4.set_xlim(-0.5, len(sorted_rates) - 0.5)
+    else:
+        ax4.text(0.5, 0.5, "Re-run pipeline\nto populate", transform=ax4.transAxes,
+                 ha="center", va="center", fontsize=10, color="gray")
+    ax4.set_xlabel("Unit (sorted)", fontsize=10)
+    ax4.set_ylabel("Overall rate (events/s)", fontsize=10)
 
     # ── Panel 3: Density contour (Guo et al. style) ──────────────
     valid = np.isfinite(si_vals) & np.isfinite(fisher_z)
@@ -230,9 +248,8 @@ def plot_summary_scatter(
     )
     _contour_group(ax3, si_v[pc_mask], z_v[pc_mask], "green", f"Place cells ({int(pc_mask.sum())})")
 
-    ax3.set_xlabel("Spatial Information (bits/s)", fontsize=10)
+    ax3.set_xlabel("Spatial Information (bits/spike)", fontsize=10)
     ax3.set_ylabel("Stability score (Fisher Z)", fontsize=10)
-    ax3.set_title("SI vs Stability density", fontsize=11)
     legend_elements_3 = [
         Patch(facecolor="green", edgecolor="black",
               label=f"Place cells ({int(pc_mask.sum())})"),
@@ -339,7 +356,7 @@ def plot_diagnostics(
         label=f"Significant (p<{p_value_threshold})",
     )
     ax_si.set_xlabel("Event count")
-    ax_si.set_ylabel("Spatial Information (bits/s)")
+    ax_si.set_ylabel("Spatial Information (bits/spike)")
     ax_si.set_xscale("log")
     ax_si.legend(fontsize=7)
 
@@ -1153,6 +1170,7 @@ def plot_occupancy_preview_1d(
     valid_mask: np.ndarray,
     edges: np.ndarray,
     trajectory_1d: "pd.DataFrame | None" = None,
+    trajectory_1d_all: "pd.DataFrame | None" = None,
     tube_boundaries: list[float] | None = None,
     tube_labels: list[str] | None = None,
 ) -> "Figure":
@@ -1169,8 +1187,12 @@ def plot_occupancy_preview_1d(
     edges:
         Bin edges.
     trajectory_1d:
-        Unfiltered 1D trajectory (before speed filter). If provided,
-        plotted as a light background layer under the filtered trajectory.
+        Unfiltered 1D trajectory (after complete-traversal filter but
+        before speed filter). Plotted as a layer under the speed-filtered.
+    trajectory_1d_all:
+        All traversals including incomplete ones (before complete-traversal
+        filter). If provided, incomplete traversals are shown as a
+        distinct background layer.
     tube_boundaries:
         Position values at tube boundaries.
     tube_labels:
@@ -1185,27 +1207,45 @@ def plot_occupancy_preview_1d(
     pos_col = "pos_1d"
     time_col = "unix_time"
 
-    # Unfiltered trajectory as background
+    # Determine t0 from the earliest available data
+    t0 = None
+    for src in [trajectory_1d_all, trajectory_1d, trajectory_1d_filtered]:
+        if src is not None and time_col in src.columns and len(src) > 0:
+            t0 = src[time_col].iloc[0]
+            break
+
+    # Layer 1: incomplete traversals (from trajectory_1d_all minus trajectory_1d)
+    if trajectory_1d_all is not None and trajectory_1d is not None and time_col in trajectory_1d_all.columns:
+        complete_frames = set(trajectory_1d["frame_index"].values)
+        incomplete_mask = ~trajectory_1d_all["frame_index"].isin(complete_frames)
+        incomplete = trajectory_1d_all[incomplete_mask]
+        if len(incomplete) > 0:
+            t_inc = incomplete[time_col] - t0
+            ax_traj.scatter(
+                t_inc,
+                incomplete[pos_col],
+                s=0.5,
+                alpha=0.15,
+                color="lightcoral",
+                label=f"Incomplete ({len(incomplete)})",
+                rasterized=True,
+            )
+
+    # Layer 2: all complete traversals (before speed filter)
     if trajectory_1d is not None and time_col in trajectory_1d.columns:
-        t0 = trajectory_1d[time_col].iloc[0]
         t_all = trajectory_1d[time_col] - t0
         ax_traj.scatter(
             t_all,
             trajectory_1d[pos_col],
             s=0.5,
             alpha=0.15,
-            color="lightcoral",
-            label=f"All ({len(trajectory_1d)})",
+            color="goldenrod",
+            label=f"Complete ({len(trajectory_1d)})",
             rasterized=True,
         )
 
-    # Filtered trajectory on top
+    # Layer 3: speed-filtered on top
     if time_col in trajectory_1d_filtered.columns:
-        t0 = (
-            trajectory_1d[time_col].iloc[0]
-            if trajectory_1d is not None and time_col in trajectory_1d.columns
-            else trajectory_1d_filtered[time_col].iloc[0]
-        )
         t = trajectory_1d_filtered[time_col] - t0
         ax_traj.scatter(
             t,
