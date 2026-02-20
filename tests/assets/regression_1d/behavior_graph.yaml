@@ -7,9 +7,9 @@ zones:
       - [400, 147]
       - [390, 16]
     connections:
-      - Tube_1
-      - Tube_2
-      - Tube_3
+      - Arm_1
+      - Arm_2
+      - Arm_3
 
   Room_2:
     type: room
@@ -19,9 +19,9 @@ zones:
       - [126, 431]
       - [4, 437]
     connections:
-      - Tube_1
-      - Tube_3
-      - Tube_4
+      - Arm_1
+      - Arm_3
+      - Arm_4
 
   Room_3:
     type: room
@@ -31,11 +31,11 @@ zones:
       - [563, 461]
       - [554, 588]
     connections:
-      - Tube_2
-      - Tube_4
+      - Arm_2
+      - Arm_4
 
-  Tube_1:
-    type: tube
+  Arm_1:
+    type: arm
     points:
       - [237, 93]
       - [179, 103]
@@ -44,8 +44,8 @@ zones:
       - [80, 219]
       - [74, 264]
 
-  Tube_2:
-    type: tube
+  Arm_2:
+    type: arm
     points:
       - [400, 97]
       - [441, 112]
@@ -55,8 +55,8 @@ zones:
       - [489, 372]
       - [492, 453]
 
-  Tube_3:
-    type: tube
+  Arm_3:
+    type: arm
     points:
       - [315, 147]
       - [313, 213]
@@ -70,8 +70,8 @@ zones:
       - [95, 485]
       - [71, 438]
 
-  Tube_4:
-    type: tube
+  Arm_4:
+    type: arm
     points:
       - [133, 353]
       - [197, 359]

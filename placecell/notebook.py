@@ -578,8 +578,8 @@ def create_shuffle_browser_1d(
     unit_results: dict[int, Any],
     edges: np.ndarray,
     p_value_threshold: float = 0.05,
-    tube_boundaries: list[float] | None = None,
-    tube_labels: list[str] | None = None,
+    arm_boundaries: list[float] | None = None,
+    arm_labels: list[str] | None = None,
 ) -> tuple[plt.Figure, widgets.VBox]:
     """Per-unit shuffle distribution browser for 1D maze analysis.
 
@@ -596,10 +596,10 @@ def create_shuffle_browser_1d(
         1D bin edges array.
     p_value_threshold:
         Threshold for significance / stability classification.
-    tube_boundaries:
-        Tube boundary positions for vertical markers.
-    tube_labels:
-        Labels for each tube segment.
+    arm_boundaries:
+        Arm boundary positions for vertical markers.
+    arm_labels:
+        Labels for each arm segment.
     """
     sorted_ids = sorted(unit_results.keys())
     n_units = len(sorted_ids)
@@ -638,13 +638,13 @@ def create_shuffle_browser_1d(
         )
         ax.plot(centers, rm, color="steelblue", linewidth=1.0)
 
-        if tube_boundaries:
-            for b in tube_boundaries:
+        if arm_boundaries:
+            for b in arm_boundaries:
                 ax.axvline(b, color="gray", linestyle=":", linewidth=0.5, alpha=0.5)
-        if tube_labels and tube_boundaries and len(tube_labels) == len(tube_boundaries) - 1:
+        if arm_labels and arm_boundaries and len(arm_labels) == len(arm_boundaries) - 1:
             ymax = ax.get_ylim()[1]
-            for i, lbl in enumerate(tube_labels):
-                mid = (tube_boundaries[i] + tube_boundaries[i + 1]) / 2
+            for i, lbl in enumerate(arm_labels):
+                mid = (arm_boundaries[i] + arm_boundaries[i + 1]) / 2
                 ax.text(
                     mid,
                     ymax * 1.02,
@@ -801,8 +801,8 @@ def create_unit_browser_1d(
     speed_threshold: float,
     p_value_threshold: float,
     trace_time_window: float = 600.0,
-    tube_boundaries: list[float] | None = None,
-    tube_labels: list[str] | None = None,
+    arm_boundaries: list[float] | None = None,
+    arm_labels: list[str] | None = None,
     speed_unit: str = "pos/s",
 ) -> tuple[plt.Figure, widgets.VBox]:
     """Interactive unit browser for 1D maze analysis.
@@ -828,10 +828,10 @@ def create_unit_browser_1d(
         Threshold for significance / stability classification.
     trace_time_window:
         Visible time window in seconds for trace panel.
-    tube_boundaries:
-        Tube boundary positions for vertical markers.
-    tube_labels:
-        Labels for each tube segment.
+    arm_boundaries:
+        Arm boundary positions for vertical markers.
+    arm_labels:
+        Labels for each arm segment.
     """
     sorted_ids = sorted(unit_results.keys())
     n_units = len(sorted_ids)
@@ -894,12 +894,12 @@ def create_unit_browser_1d(
             label="2nd half",
         )
 
-        if tube_boundaries:
-            for b in tube_boundaries:
+        if arm_boundaries:
+            for b in arm_boundaries:
                 ax_rm.axvline(b, color="gray", linestyle=":", linewidth=0.5, alpha=0.5)
-        if tube_labels and tube_boundaries and len(tube_labels) == len(tube_boundaries) - 1:
-            for i, lbl in enumerate(tube_labels):
-                mid = (tube_boundaries[i] + tube_boundaries[i + 1]) / 2
+        if arm_labels and arm_boundaries and len(arm_labels) == len(arm_boundaries) - 1:
+            for i, lbl in enumerate(arm_labels):
+                mid = (arm_boundaries[i] + arm_boundaries[i + 1]) / 2
                 ax_rm.text(
                     mid,
                     -0.06,
@@ -1193,7 +1193,7 @@ def browse_units_1d(
         speed_threshold=ds.cfg.behavior.speed_threshold,
         p_value_threshold=scfg.p_value_threshold,
         trace_time_window=scfg.trace_time_window,
-        tube_boundaries=ds.tube_boundaries,
-        tube_labels=ds.effective_tube_order,
-        speed_unit="mm/s" if ds.tube_lengths is not None else "pos/s",
+        arm_boundaries=ds.arm_boundaries,
+        arm_labels=ds.effective_arm_order,
+        speed_unit="mm/s" if ds.arm_lengths is not None else "pos/s",
     )

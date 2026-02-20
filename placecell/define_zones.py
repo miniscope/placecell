@@ -33,9 +33,12 @@ def define_zones(
     output_file: str = "zone_config.yaml",
     zone_names: list[str] | None = None,
     zone_types: dict[str, str] | None = None,
-    connections: dict[str, list[str]] | None = None,
 ) -> None:
     """Interactive tool to define zone polygons by clicking points on video.
+
+    Zone connections (adjacency graph) are stored separately in the data
+    config YAML under ``zone_connections``, so redefining polygons here
+    will not lose the graph topology.
 
     Parameters
     ----------
@@ -46,9 +49,7 @@ def define_zones(
     zone_names:
         Ordered list of zone names to define. If None, uses default maze zones.
     zone_types:
-        Dict mapping zone name to "room" or "tube". If None, inferred from name.
-    connections:
-        Dict of room -> list of connected tubes. Preserved from existing file.
+        Dict mapping zone name to "room" or "arm". If None, inferred from name.
     """
     try:
         import cv2
@@ -63,10 +64,10 @@ def define_zones(
             "Room_1",
             "Room_2",
             "Room_3",
-            "Tube_1",
-            "Tube_2",
-            "Tube_3",
-            "Tube_4",
+            "Arm_1",
+            "Arm_2",
+            "Arm_3",
+            "Arm_4",
         ]
 
     if zone_types is None:
@@ -75,7 +76,7 @@ def define_zones(
             if name.startswith("Room"):
                 zone_types[name] = "room"
             else:
-                zone_types[name] = "tube"
+                zone_types[name] = "arm"
 
     zone_colors = {
         name: _DEFAULT_COLORS[i % len(_DEFAULT_COLORS)] for i, name in enumerate(zone_names)
@@ -85,7 +86,6 @@ def define_zones(
     current_zone_idx = 0
     current_polygon: list[list[int]] = []
     polygons: dict[str, list[list[int]]] = {zone: [] for zone in zone_names}
-    existing_connections: dict[str, list[str]] = connections or {}
 
     frame = None
 
@@ -175,19 +175,16 @@ def define_zones(
             if len(poly) < min_points:
                 continue
 
-            # Remove duplicate closing point for tubes
+            # Remove duplicate closing point for arms
             final_poly = poly.copy()
-            if zone_types.get(zone) == "tube" and len(final_poly) > 1:
+            if zone_types.get(zone) == "arm" and len(final_poly) > 1:
                 if final_poly[-1] == final_poly[0]:
                     final_poly = final_poly[:-1]
 
             zone_entry: dict = {
-                "type": zone_types.get(zone, "tube"),
+                "type": zone_types.get(zone, "arm"),
                 "points": final_poly,
             }
-            # Preserve connections
-            if zone in existing_connections:
-                zone_entry["connections"] = existing_connections[zone]
             zones_dict[zone] = zone_entry
 
         save_data["zones"] = zones_dict
@@ -209,9 +206,6 @@ def define_zones(
                 if pts:
                     polygons[zone] = [list(p) for p in pts]
                     logger.info("Loaded existing %s (%d points)", zone, len(pts))
-                conns = zone_info.get("connections", [])
-                if conns:
-                    existing_connections[zone] = conns
     except FileNotFoundError:
         logger.info("No existing file found. Starting fresh.")
 
@@ -247,7 +241,7 @@ def define_zones(
             min_points = 3 if zone_types.get(current_zone) == "room" else 2
             if len(current_polygon) >= min_points:
                 final_poly = current_polygon.copy()
-                if zone_types.get(current_zone) == "tube" and len(final_poly) > 1:
+                if zone_types.get(current_zone) == "arm" and len(final_poly) > 1:
                     if final_poly[-1] == final_poly[0]:
                         final_poly = final_poly[:-1]
                 polygons[current_zone] = final_poly
@@ -316,7 +310,7 @@ if __name__ == "__main__":
         "--zones",
         nargs="+",
         default=None,
-        help="Zone names (default: Room_1 Room_2 Room_3 Tube_1..4)",
+        help="Zone names (default: Room_1 Room_2 Room_3 Arm_1..4)",
     )
     args = parser.parse_args()
 
@@ -325,7 +319,7 @@ if __name__ == "__main__":
     if args.zones:
         ztypes = {}
         for name in args.zones:
-            ztypes[name] = "room" if name.startswith("Room") else "tube"
+            ztypes[name] = "room" if name.startswith("Room") else "arm"
 
     define_zones(
         video_path=args.video,

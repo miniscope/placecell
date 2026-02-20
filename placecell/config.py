@@ -175,35 +175,16 @@ class SpatialMap2DConfig(BaseModel):
 
 
 class MazeConfig(BaseModel):
-    """Configuration for maze/tube-based 1D analysis."""
+    """Configuration for maze/arm-based 1D analysis.
 
-    tube_order: list[str] = Field(
-        ["Tube_1", "Tube_2", "Tube_3", "Tube_4"],
-        description="Ordered list of tube zone names. Determines concatenation order on 1D axis.",
-    )
-    zone_column: str = Field(
-        "zone",
-        description="Column name in behavior CSV containing zone labels.",
-    )
-    tube_position_column: str = Field(
-        "tube_position",
-        description="Column name in behavior CSV containing within-tube position (0-1).",
-    )
-    split_by_direction: bool = Field(
-        True,
-        description="Split each tube into forward/reverse segments based on traversal direction. "
-        "Doubles total segments (e.g. 4 tubes -> 8 directional segments).",
-    )
-    require_complete_traversal: bool = Field(
-        False,
-        description="If True, keep only traversals where the animal crosses "
-        "from one room to a different room. Partial entries (animal enters "
-        "a tube and returns to the same room) are discarded.",
-    )
+    Note: arm_order, zone_column, arm_position_column are in DataConfig
+    (per-session data properties). split_by_direction and
+    require_complete_traversal are in BehaviorConfig (analysis parameters).
+    """
 
 
 class SpatialMap1DConfig(BaseModel):
-    """Spatial map settings for 1D tube analysis."""
+    """Spatial map settings for 1D arm analysis."""
 
     bin_width_mm: float = Field(
         10.0,
@@ -270,10 +251,10 @@ class SpatialMap1DConfig(BaseModel):
 class ZoneDetectionConfig(BaseModel):
     """Parameters for zone detection state machine."""
 
-    tube_max_distance: float = Field(
+    arm_max_distance: float = Field(
         60.0,
         gt=0.0,
-        description="Maximum distance (pixels) from tube centerline for zone classification.",
+        description="Maximum distance (pixels) from arm centerline for zone classification.",
     )
     min_confidence: float = Field(
         0.5,
@@ -297,6 +278,33 @@ class ZoneDetectionConfig(BaseModel):
         ge=1,
         description="Minimum consecutive frames for forbidden transition override.",
     )
+    room_decay_power: float = Field(
+        2.0,
+        gt=0.0,
+        description=(
+            "Exponent for room boundary probability decay. "
+            "Controls how quickly room probability drops near edges. "
+            "Higher = steeper drop-off."
+        ),
+    )
+    arm_decay_power: float = Field(
+        0.5,
+        gt=0.0,
+        description=(
+            "Exponent for arm boundary probability decay. "
+            "Controls how quickly arm probability drops with distance from centerline. "
+            "Lower = more fuzzy/gradual."
+        ),
+    )
+    soft_boundary: bool = Field(
+        True,
+        description="Use fuzzy distance-based boundaries instead of hard inside/outside.",
+    )
+    interpolate: int = Field(
+        5,
+        ge=1,
+        description="Frame subsampling factor for video export.",
+    )
 
 
 class BehaviorConfig(BaseModel):
@@ -304,7 +312,7 @@ class BehaviorConfig(BaseModel):
 
     type: Literal["arena", "maze"] = Field(
         ...,
-        description="Analysis type: 'arena' for 2D open-field, 'maze' for 1D tube analysis.",
+        description="Analysis type: 'arena' for 2D open-field, 'maze' for 1D arm analysis.",
     )
     behavior_fps: float = Field(
         ...,
@@ -324,18 +332,6 @@ class BehaviorConfig(BaseModel):
         "Larger values give more stable speed estimates but less temporal resolution. "
         "Default 5 frames (0.25s at 20 fps).",
     )
-    bodypart: str = Field(
-        ...,
-        description="Body part name to use for position tracking (e.g. 'LED').",
-    )
-    x_col: str = Field(
-        "x",
-        description="Coordinate column name for the x-axis in the behavior CSV.",
-    )
-    y_col: str = Field(
-        "y",
-        description="Coordinate column name for the y-axis in the behavior CSV.",
-    )
     jump_threshold_mm: float = Field(
         100.0,
         gt=0.0,
@@ -348,11 +344,22 @@ class BehaviorConfig(BaseModel):
     )
     maze: MazeConfig | None = Field(
         None,
-        description="Maze configuration for 1D tube analysis. Required when type='maze'.",
+        description="Maze configuration for 1D arm analysis. Required when type='maze'.",
     )
     spatial_map_1d: SpatialMap1DConfig | None = Field(
         None,
         description="Spatial map settings for 1D analysis. Required when type='maze'.",
+    )
+    split_by_direction: bool = Field(
+        True,
+        description="Split each arm into forward/reverse segments based on traversal direction. "
+        "Doubles total segments (e.g. 4 arms -> 8 directional segments).",
+    )
+    require_complete_traversal: bool = Field(
+        False,
+        description="If True, keep only traversals where the animal crosses "
+        "from one room to a different room. Partial entries (animal enters "
+        "a arm and returns to the same room) are discarded.",
     )
 
     @model_validator(mode="after")
@@ -449,6 +456,48 @@ class DataConfig(BaseModel):
         None,
         gt=0.0,
         description="Scale factor (mm per pixel) for converting graph coordinates to mm.",
+    )
+    bodypart: str | None = Field(
+        None,
+        description="Body part name to use for position tracking (e.g. 'LED').",
+    )
+    x_col: str = Field(
+        "x",
+        description="Coordinate column name for the x-axis in the behavior CSV.",
+    )
+    y_col: str = Field(
+        "y",
+        description="Coordinate column name for the y-axis in the behavior CSV.",
+    )
+    arm_order: list[str] | None = Field(
+        None,
+        description="Ordered list of arm zone names for maze analysis. "
+        "Determines concatenation order on 1D axis.",
+    )
+    zone_column: str = Field(
+        "zone",
+        description="Column name in behavior CSV containing zone labels.",
+    )
+    arm_position_column: str = Field(
+        "arm_position",
+        description="Column name in behavior CSV containing within-arm position (0-1).",
+    )
+    zone_tracking: str | None = Field(
+        None,
+        description="Path to zone-detected tracking CSV (output of detect-zones). "
+        "Contains zone, x_pinned, y_pinned, arm_position columns. "
+        "Read by the maze analysis pipeline for 1D serialization.",
+    )
+    zone_connections: dict[str, list[str]] | None = Field(
+        None,
+        description="Zone adjacency graph mapping each room to its connected arms. "
+        "Defines which transitions are legal vs forbidden. "
+        "Example: {Room_1: [Arm_1, Arm_2], Room_2: [Arm_2, Arm_3]}",
+    )
+    zone_detection: ZoneDetectionConfig | None = Field(
+        None,
+        description="Zone detection algorithm parameters. "
+        "Required for the detect-zones CLI command.",
     )
     config_override: dict[str, Any] | None = Field(
         None,

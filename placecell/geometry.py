@@ -259,8 +259,10 @@ def get_zone_probabilities(
     y: float,
     zone_polygons: dict[str, np.ndarray],
     zone_types: dict[str, str],
-    tube_max_distance: float = 40.0,
+    arm_max_distance: float = 40.0,
     soft_boundary: bool = True,
+    room_decay_power: float = 2.0,
+    arm_decay_power: float = 0.5,
     normalize: bool = True,
 ) -> dict[str, float]:
     """Compute probability of belonging to each zone.
@@ -272,11 +274,17 @@ def get_zone_probabilities(
     zone_polygons:
         Dict mapping zone name to polygon/polyline array.
     zone_types:
-        Dict mapping zone name to type ("room" or "tube").
-    tube_max_distance:
-        Maximum distance for tube classification.
+        Dict mapping zone name to type ("room" or "arm").
+    arm_max_distance:
+        Maximum distance for arm classification.
     soft_boundary:
         Use soft boundaries with distance decay.
+    room_decay_power:
+        Exponent for room boundary decay.  Higher values produce a
+        steeper drop-off near room edges (from both inside and outside).
+    arm_decay_power:
+        Exponent for arm boundary decay.  Lower values produce a more
+        gradual (fuzzy) drop-off away from the arm centerline.
     normalize:
         Normalize probabilities to sum to 1.
     """
@@ -285,22 +293,26 @@ def get_zone_probabilities(
 
     for zone_name, polygon in zone_polygons.items():
         if zone_types.get(zone_name) == "room":
-            if point_in_polygon(point, polygon):
-                probs[zone_name] = 1.0
-            elif soft_boundary:
+            if soft_boundary:
+                # signed dist: positive inside, negative outside
                 dist = signed_distance_to_polygon(point, polygon)
-                # dist is negative when outside
-                if dist > -tube_max_distance:
-                    normalized_dist = max(0.0, 1.0 + dist / tube_max_distance)
-                    probs[zone_name] = normalized_dist * normalized_dist
+                if dist >= arm_max_distance:
+                    probs[zone_name] = 1.0
+                elif dist > -arm_max_distance:
+                    # Smooth decay across the boundary band
+                    normalized = (dist + arm_max_distance) / (2 * arm_max_distance)
+                    probs[zone_name] = normalized**room_decay_power
+                # else: 0.0 (too far outside)
+            else:
+                probs[zone_name] = 1.0 if point_in_polygon(point, polygon) else 0.0
 
     for zone_name, polyline in zone_polygons.items():
-        if zone_types.get(zone_name) == "tube":
+        if zone_types.get(zone_name) == "arm":
             min_dist = min_distance_to_polyline(point, polyline)
-            if min_dist <= tube_max_distance:
+            if min_dist <= arm_max_distance:
                 if soft_boundary:
-                    normalized_dist = min_dist / tube_max_distance
-                    probs[zone_name] = max(0.0, 1.0 - normalized_dist**0.5)
+                    normalized_dist = min_dist / arm_max_distance
+                    probs[zone_name] = max(0.0, 1.0 - normalized_dist**arm_decay_power)
                 else:
                     probs[zone_name] = 1.0
 
@@ -330,7 +342,7 @@ def is_valid_transition(
     zone_graph:
         Dict mapping zone name to list of connected zone names.
     zone_types:
-        Dict mapping zone name to type ("room" or "tube").
+        Dict mapping zone name to type ("room" or "arm").
     """
     if current_zone == new_zone:
         return True
@@ -349,6 +361,31 @@ def is_valid_transition(
     return True
 
 
+def build_zone_graph(connections: dict[str, list[str]]) -> dict[str, list[str]]:
+    """Build a bidirectional adjacency dict from a connections mapping.
+
+    Parameters
+    ----------
+    connections:
+        Dict mapping room names to lists of connected arm names.
+        Example: ``{"Room_1": ["Arm_1", "Arm_2"]}``.
+
+    Returns
+    -------
+    Bidirectional adjacency dict where every zone lists its neighbors.
+    """
+    graph: dict[str, list[str]] = {}
+    for zone, neighbors in connections.items():
+        graph.setdefault(zone, [])
+        for neighbor in neighbors:
+            if neighbor not in graph[zone]:
+                graph[zone].append(neighbor)
+            graph.setdefault(neighbor, [])
+            if zone not in graph[neighbor]:
+                graph[neighbor].append(zone)
+    return graph
+
+
 def load_zone_config(
     path: str | Path,
 ) -> tuple[dict[str, np.ndarray], dict[str, str], dict[str, list[str]]]:
@@ -360,9 +397,9 @@ def load_zone_config(
           Room_1:
             type: room
             points: [[x,y], ...]
-            connections: [Tube_1, Tube_2]
-          Tube_1:
-            type: tube
+            connections: [Arm_1, Arm_2]
+          Arm_1:
+            type: arm
             points: [[x,y], ...]
 
     Parameters
@@ -374,7 +411,7 @@ def load_zone_config(
     -------
     tuple of (zone_polygons, zone_types, zone_graph)
         - zone_polygons: dict mapping zone name to np.ndarray of points.
-        - zone_types: dict mapping zone name to "room" or "tube".
+        - zone_types: dict mapping zone name to "room" or "arm".
         - zone_graph: bidirectional adjacency dict (zone -> list of connected zones).
     """
     with open(path) as f:
@@ -390,7 +427,7 @@ def load_zone_config(
         if points:
             zone_polygons[zone_name] = np.array(points, dtype=np.int32)
 
-        zone_types[zone_name] = zone_info.get("type", "tube")
+        zone_types[zone_name] = zone_info.get("type", "arm")
 
         connections = zone_info.get("connections", [])
         if connections:

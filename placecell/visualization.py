@@ -802,13 +802,13 @@ def plot_preprocess_steps(
 def plot_graph_overlay(
     graph_polylines: dict[str, list[list[float]]],
     mm_per_pixel: float,
-    tube_order: list[str],
+    arm_order: list[str],
     video_frame: "np.ndarray | None" = None,
 ) -> "Figure":
     """Overlay behavior graph polylines on a video frame.
 
     Each zone's polyline is drawn in pixel coordinates on the video frame.
-    Tubes in ``tube_order`` are drawn with distinct colors; other zones
+    Arms in ``arm_order`` are drawn with distinct colors; other zones
     (rooms, etc.) are drawn in gray.
 
     Parameters
@@ -817,8 +817,8 @@ def plot_graph_overlay(
         Dict mapping zone name to list of [x, y] waypoints in pixels.
     mm_per_pixel:
         Scale factor (for title annotation).
-    tube_order:
-        Ordered list of tube zone names (drawn with distinct colors).
+    arm_order:
+        Ordered list of arm zone names (drawn with distinct colors).
     video_frame:
         RGB image (H, W, 3). If None, polylines are drawn on a white
         background.
@@ -841,16 +841,16 @@ def plot_graph_overlay(
             ax.set_ylim(max(ys) + pad, min(ys) - pad)
         ax.set_facecolor("white")
 
-    tube_set = set(tube_order)
+    arm_set = set(arm_order)
     colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
-    tube_color_map = {t: colors[i % len(colors)] for i, t in enumerate(tube_order)}
+    arm_color_map = {t: colors[i % len(colors)] for i, t in enumerate(arm_order)}
 
     for zone_name, waypoints in graph_polylines.items():
         xs = [p[0] for p in waypoints]
         ys = [p[1] for p in waypoints]
 
-        if zone_name in tube_set:
-            color = tube_color_map[zone_name]
+        if zone_name in arm_set:
+            color = arm_color_map[zone_name]
             lw = 2.5
             alpha = 0.9
         else:
@@ -860,8 +860,8 @@ def plot_graph_overlay(
 
         ax.plot(xs, ys, color=color, linewidth=lw, alpha=alpha, solid_capstyle="round")
 
-        # Forward-direction arrow at midpoint of tube polylines
-        if zone_name in tube_set and len(waypoints) >= 2:
+        # Forward-direction arrow at midpoint of arm polylines
+        if zone_name in arm_set and len(waypoints) >= 2:
             mid_idx = len(waypoints) // 2
             # Compute tangent from nearby points
             idx_a = max(mid_idx - 1, 0)
@@ -944,12 +944,12 @@ def plot_graph_overlay(
 def plot_rate_map_1d(
     rate_map: np.ndarray,
     edges: np.ndarray,
-    tube_boundaries: list[float] | None = None,
-    tube_labels: list[str] | None = None,
+    arm_boundaries: list[float] | None = None,
+    arm_labels: list[str] | None = None,
     title: str = "",
     ax: "Axes | None" = None,
 ) -> "Figure":
-    """Plot a 1D rate map as a filled line plot with tube boundaries.
+    """Plot a 1D rate map as a filled line plot with arm boundaries.
 
     Parameters
     ----------
@@ -957,10 +957,10 @@ def plot_rate_map_1d(
         1D rate map array (n_bins,).
     edges:
         Bin edges (n_bins + 1,).
-    tube_boundaries:
-        Position values at tube boundaries (vertical lines).
-    tube_labels:
-        Labels for each tube segment.
+    arm_boundaries:
+        Position values at arm boundaries (vertical lines).
+    arm_labels:
+        Labels for each arm segment.
     title:
         Plot title.
     ax:
@@ -984,12 +984,12 @@ def plot_rate_map_1d(
     rm_line = rate_map.copy()  # keep NaN for line gaps
     ax.plot(centers, rm_line, color="steelblue", linewidth=1.5)
 
-    if tube_boundaries:
-        for b in tube_boundaries:
+    if arm_boundaries:
+        for b in arm_boundaries:
             ax.axvline(b, color="gray", linestyle="--", linewidth=0.8, alpha=0.6)
-    if tube_labels and tube_boundaries and len(tube_labels) == len(tube_boundaries) - 1:
-        for i, label_text in enumerate(tube_labels):
-            mid = (tube_boundaries[i] + tube_boundaries[i + 1]) / 2
+    if arm_labels and arm_boundaries and len(arm_labels) == len(arm_boundaries) - 1:
+        for i, label_text in enumerate(arm_labels):
+            mid = (arm_boundaries[i] + arm_boundaries[i + 1]) / 2
             ax.text(mid, ax.get_ylim()[1] * 0.95, label_text, ha="center", fontsize=8, alpha=0.7)
 
     ax.set_xlabel("1D position")
@@ -1006,8 +1006,8 @@ def plot_shuffle_test_1d(
     unit_results: dict,
     edges: np.ndarray,
     p_value_threshold: float = 0.05,
-    tube_boundaries: "list[float] | None" = None,
-    tube_labels: "list[str] | None" = None,
+    arm_boundaries: "list[float] | None" = None,
+    arm_labels: "list[str] | None" = None,
 ) -> "Figure":
     """Population rate map heatmap for all place cells (Guo et al. 2023 style).
 
@@ -1022,10 +1022,10 @@ def plot_shuffle_test_1d(
         1D bin edges array.
     p_value_threshold:
         Threshold for classifying place cells.
-    tube_boundaries:
-        Tube boundary positions for vertical markers.
-    tube_labels:
-        Labels for each tube segment.
+    arm_boundaries:
+        Arm boundary positions for vertical markers.
+    arm_labels:
+        Labels for each arm segment.
     """
     if plt is None:
         raise ImportError("matplotlib is required for plotting.")
@@ -1070,15 +1070,15 @@ def plot_shuffle_test_1d(
     rate_maps_sorted = np.where(np.isfinite(rate_maps_sorted), rate_maps_sorted, 0.0)
     valid_centers = centers[valid_cols]
 
-    # Map tube boundaries to compressed column indices
+    # Map arm boundaries to compressed column indices
     compressed_boundaries = []
-    if tube_boundaries:
-        for b in tube_boundaries:
+    if arm_boundaries:
+        for b in arm_boundaries:
             # Find how many valid bins are to the left of this boundary
             idx = int(np.sum(valid_centers < b))
             compressed_boundaries.append(idx)
 
-    has_labels = tube_labels and tube_boundaries and len(tube_labels) == len(tube_boundaries) - 1
+    has_labels = arm_labels and arm_boundaries and len(arm_labels) == len(arm_boundaries) - 1
 
     fig, ax = plt.subplots(1, 1, figsize=(7, 6))
 
@@ -1102,7 +1102,7 @@ def plot_shuffle_test_1d(
         for b in compressed_boundaries:
             ax.axvline(b, color="white", linestyle="--", linewidth=0.8, alpha=0.7)
     if has_labels and compressed_boundaries:
-        for i, lbl in enumerate(tube_labels):
+        for i, lbl in enumerate(arm_labels):
             mid = (compressed_boundaries[i] + compressed_boundaries[i + 1]) / 2
             ax.text(
                 mid,
@@ -1127,8 +1127,8 @@ def plot_occupancy_preview_1d(
     edges: np.ndarray,
     trajectory_1d: "pd.DataFrame | None" = None,
     trajectory_1d_all: "pd.DataFrame | None" = None,
-    tube_boundaries: list[float] | None = None,
-    tube_labels: list[str] | None = None,
+    arm_boundaries: list[float] | None = None,
+    arm_labels: list[str] | None = None,
 ) -> "Figure":
     """1D position time series and occupancy bar chart.
 
@@ -1149,10 +1149,10 @@ def plot_occupancy_preview_1d(
         All traversals including incomplete ones (before complete-traversal
         filter). If provided, incomplete traversals are shown as a
         distinct background layer.
-    tube_boundaries:
-        Position values at tube boundaries.
-    tube_labels:
-        Labels for each tube segment.
+    arm_boundaries:
+        Position values at arm boundaries.
+    arm_labels:
+        Labels for each arm segment.
     """
     if plt is None:
         raise ImportError("matplotlib is required for plotting.")
@@ -1224,10 +1224,10 @@ def plot_occupancy_preview_1d(
         ax_traj.set_xlabel("Frame")
     ax_traj.set_ylabel("1D position")
     ax_traj.legend(markerscale=8, fontsize=7, loc="upper right")
-    ax_traj.set_title("Tube trajectory")
+    ax_traj.set_title("Arm trajectory")
 
-    if tube_boundaries:
-        for b in tube_boundaries:
+    if arm_boundaries:
+        for b in arm_boundaries:
             ax_traj.axhline(b, color="gray", linestyle="--", linewidth=0.8, alpha=0.6)
 
     # Right: occupancy bar chart
@@ -1239,8 +1239,8 @@ def plot_occupancy_preview_1d(
     ax_occ.set_ylabel("Time (s)")
     ax_occ.set_title(f"Occupancy ({valid_mask.sum()}/{valid_mask.size} valid bins)")
 
-    if tube_boundaries:
-        for b in tube_boundaries:
+    if arm_boundaries:
+        for b in arm_boundaries:
             ax_occ.axvline(b, color="gray", linestyle="--", linewidth=0.8, alpha=0.6)
 
     fig.tight_layout()
@@ -1254,8 +1254,8 @@ def plot_position_and_traces_1d(
     behavior_fps: float,
     speed_threshold: float = 0.0,
     trajectory_1d_filtered: "pd.DataFrame | None" = None,
-    tube_boundaries: list[float] | None = None,
-    tube_labels: list[str] | None = None,
+    arm_boundaries: list[float] | None = None,
+    arm_labels: list[str] | None = None,
     n_units: int = 20,
     trace_height: float = 0.5,
     time_unit: str = "min",
@@ -1282,10 +1282,10 @@ def plot_position_and_traces_1d(
     trajectory_1d_filtered:
         Speed-filtered trajectory.  If provided, overlaid on top of the
         unfiltered trace.
-    tube_boundaries:
-        Position values at tube segment boundaries.
-    tube_labels:
-        Labels for each tube segment.
+    arm_boundaries:
+        Position values at arm segment boundaries.
+    arm_labels:
+        Labels for each arm segment.
     n_units:
         Maximum number of traces to show (default 25).
     """
@@ -1359,16 +1359,16 @@ def plot_position_and_traces_1d(
     ax_pos.set_ylabel("1D position (mm)")
     ax_pos.legend(markerscale=10, fontsize=7, loc="upper right")
 
-    if tube_boundaries:
-        for b in tube_boundaries:
+    if arm_boundaries:
+        for b in arm_boundaries:
             ax_pos.axhline(b, color="gray", linestyle=":", linewidth=0.5, alpha=0.6)
 
     ax_pos.set_title("Serialized 1D position + place cell traces", fontsize=10)
 
     # Arm labels on the right side of position axis
-    if tube_boundaries and tube_labels and len(tube_labels) == len(tube_boundaries) - 1:
-        for i, lbl in enumerate(tube_labels):
-            mid = (tube_boundaries[i] + tube_boundaries[i + 1]) / 2
+    if arm_boundaries and arm_labels and len(arm_labels) == len(arm_boundaries) - 1:
+        for i, lbl in enumerate(arm_labels):
+            mid = (arm_boundaries[i] + arm_boundaries[i + 1]) / 2
             ax_pos.annotate(
                 lbl,
                 xy=(1.0, mid),

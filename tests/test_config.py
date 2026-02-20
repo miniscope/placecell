@@ -14,7 +14,7 @@ def test_config_loads(example_config_path: Path) -> None:
     assert cfg.neural is not None
     assert cfg.behavior is not None
     assert cfg.neural.oasis is not None
-    assert cfg.behavior.bodypart == "LED_clean"
+    assert cfg.behavior.speed_threshold == 50.0
 
 
 def test_oasis_config_g_required() -> None:

@@ -5,6 +5,7 @@ neural_path: neural_data
 neural_timestamp: neural_timestamp.csv
 behavior_position: behavior_position.csv
 behavior_timestamp: behavior_timestamp.csv
+bodypart: LED
 arena_bounds:
 - 52
 - 565

@@ -1,4 +1,4 @@
-"""1D spatial analysis functions for place cells in linear tracks / tubes."""
+"""1D spatial analysis functions for place cells in linear tracks / arms."""
 
 import numpy as np
 import pandas as pd
@@ -65,7 +65,7 @@ def compute_occupancy_map_1d(
     trajectory_df:
         Speed-filtered trajectory with pos_column.
     n_bins:
-        Total number of spatial bins across all tubes.
+        Total number of spatial bins across all arms.
     pos_range:
         (min, max) of the 1D position axis.
     behavior_fps:

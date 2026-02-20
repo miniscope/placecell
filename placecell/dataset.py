@@ -162,6 +162,7 @@ class BasePlaceCellDataset(abc.ABC):
         behavior_timestamp_path: Path | None = None,
         behavior_video_path: Path | None = None,
         behavior_graph_path: Path | None = None,
+        zone_tracking_path: Path | None = None,
         data_cfg: DataConfig | None = None,
     ) -> None:
         self.cfg = cfg
@@ -171,6 +172,7 @@ class BasePlaceCellDataset(abc.ABC):
         self.behavior_timestamp_path = behavior_timestamp_path
         self.behavior_video_path = behavior_video_path
         self.behavior_graph_path = behavior_graph_path
+        self.zone_tracking_path = zone_tracking_path
         self.data_cfg = data_cfg
 
         # Neural data
@@ -245,6 +247,9 @@ class BasePlaceCellDataset(abc.ABC):
             behavior_graph_path=(
                 data_dir / data_cfg.behavior_graph if data_cfg.behavior_graph else None
             ),
+            zone_tracking_path=(
+                data_dir / data_cfg.zone_tracking if data_cfg.zone_tracking else None
+            ),
             data_cfg=data_cfg,
         )
 
@@ -291,14 +296,17 @@ class BasePlaceCellDataset(abc.ABC):
         )
 
         # Behavior — load positions and compute speed (px/s)
+        dcfg = self.data_cfg
+        if dcfg is None or dcfg.bodypart is None:
+            raise RuntimeError("bodypart must be set in data config")
         self.trajectory, _ = load_behavior_data(
             behavior_position=self.behavior_position_path,
             behavior_timestamp=self.behavior_timestamp_path,
-            bodypart=bcfg.bodypart,
+            bodypart=dcfg.bodypart,
             speed_window_frames=bcfg.speed_window_frames,
             speed_threshold=0.0,
-            x_col=bcfg.x_col,
-            y_col=bcfg.y_col,
+            x_col=dcfg.x_col,
+            y_col=dcfg.y_col,
         )
         logger.info("Loaded trajectory: %d frames", len(self.trajectory))
 

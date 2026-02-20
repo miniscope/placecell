@@ -18,7 +18,6 @@ behavior:
   behavior_fps: 20.0
   speed_threshold: 10.0  # mm/s
   speed_window_frames: 5
-  bodypart: LED
   jump_threshold_mm: 100  # Max plausible frame-to-frame displacement (mm). Larger = tracking error.
   spatial_map_2d:
     id: spatial_map

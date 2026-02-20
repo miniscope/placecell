@@ -16,9 +16,6 @@ behavior:
   behavior_fps: 20.0
   speed_threshold: 25.0
   speed_window_frames: 5
-  bodypart: LED
-  x_col: x
-  y_col: y
   jump_threshold_mm: 100.0
   spatial_map_2d:
     bins: 50
