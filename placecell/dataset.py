@@ -255,6 +255,24 @@ class BasePlaceCellDataset(abc.ABC):
         ...
 
     @property
+    def _spatial_cfg(self) -> "SpatialMap2DConfig | SpatialMap1DConfig | None":
+        """Return whichever spatial map config is set."""
+        bcfg = self.cfg.behavior
+        return bcfg.spatial_map_2d or bcfg.spatial_map_1d
+
+    @property
+    def _shuffle_n(self) -> int | None:
+        """Number of shuffles from the spatial config."""
+        sc = self._spatial_cfg
+        return sc.n_shuffles if sc else None
+
+    @property
+    def _shuffle_shift(self) -> float | None:
+        """Minimum shift in seconds from the spatial config."""
+        sc = self._spatial_cfg
+        return sc.min_shift_seconds if sc else None
+
+    @property
     def neural_fps(self) -> float:
         """Neural sampling rate in Hz."""
         return self.cfg.neural.fps
@@ -707,7 +725,8 @@ class BasePlaceCellDataset(abc.ABC):
                     ("diagnostics.pdf", lambda: plot_diagnostics(
                         self.unit_results, p_value_threshold=self.p_value_threshold)),
                     ("summary_scatter.pdf", lambda: plot_summary_scatter(
-                        self.unit_results, p_value_threshold=self.p_value_threshold)),
+                        self.unit_results, p_value_threshold=self.p_value_threshold,
+                        n_shuffles=self._shuffle_n, min_shift_seconds=self._shuffle_shift)),
                 ]:
                     try:
                         fig = fn()

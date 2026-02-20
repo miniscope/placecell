@@ -73,10 +73,12 @@ def plot_session_summary(summary_df: "pd.DataFrame") -> "Figure":
 def plot_summary_scatter(
     unit_results: dict,
     p_value_threshold: float = 0.05,
+    n_shuffles: int | None = None,
+    min_shift_seconds: float | None = None,
 ) -> "Figure":
     """Summary scatter plots: p-value, SI vs Z, and density contour.
 
-    Panel 1: Significance p-value vs stability p-value scatter.
+    Panel 1: SI p-value vs stability p-value scatter.
     Panel 2: SI vs Fisher Z scatter.
     Panel 3: SI vs stability density contour (Guo et al. style) with
              place cells vs non-place cells as separate contour groups
@@ -88,6 +90,10 @@ def plot_summary_scatter(
         Dictionary mapping unit_id to analysis results.
     p_value_threshold:
         Threshold for significance test.
+    n_shuffles:
+        Number of shuffles used for the SI significance test.
+    min_shift_seconds:
+        Minimum circular shift in seconds used for shuffling.
     """
     if plt is None:
         raise ImportError("matplotlib is required for plotting.")
@@ -118,10 +124,24 @@ def plot_summary_scatter(
         else:
             colors.append("red")
 
+    n_total = len(unit_ids)
     n_both = int(np.sum(is_place_cell))
-    n_sig_only = int(np.sum(is_sig & ~is_stable))
+    n_si_only = int(np.sum(is_sig & ~is_stable))
     n_stab_only = int(np.sum(~is_sig & is_stable))
     n_neither = int(np.sum(~is_sig & ~is_stable))
+
+    # Log summary
+    logger.info(
+        "Total: %d | SI pass: %d | Stability pass: %d | Both: %d | Neither: %d",
+        n_total, int(is_sig.sum()), int(is_stable.sum()), n_both, n_neither,
+    )
+    if n_shuffles is not None or min_shift_seconds is not None:
+        shuffle_parts = [f"p < {p_value_threshold}"]
+        if n_shuffles is not None:
+            shuffle_parts.append(f"{n_shuffles} shuffles")
+        if min_shift_seconds is not None:
+            shuffle_parts.append(f"min shift {min_shift_seconds}s")
+        logger.info("Shuffle test: %s", ", ".join(shuffle_parts))
 
     # ── Figure layout: 4 panels ───────────────────────────────────
     fig = plt.figure(figsize=(20, 4.5))
@@ -148,13 +168,13 @@ def plot_summary_scatter(
     )
     ax1.axvline(p_value_threshold, color="gray", linestyle="--", linewidth=1.5)
     ax1.axhline(p_value_threshold, color="gray", linestyle=":", linewidth=1.5)
-    ax1.set_xlabel("P-value (significance)", fontsize=10)
+    ax1.set_xlabel("P-value (SI)", fontsize=10)
     ax1.set_ylabel("P-value (stability)", fontsize=10)
     ax1.set_aspect("equal", adjustable="datalim")
 
     legend_elements = [
-        Patch(facecolor="green", edgecolor="black", label=f"Both pass: {n_both}"),
-        Patch(facecolor="orange", edgecolor="black", label=f"Sig only: {n_sig_only}"),
+        Patch(facecolor="green", edgecolor="black", label=f"Both: {n_both}"),
+        Patch(facecolor="orange", edgecolor="black", label=f"SI only: {n_si_only}"),
         Patch(facecolor="blue", edgecolor="black", label=f"Stab only: {n_stab_only}"),
         Patch(facecolor="red", edgecolor="black", label=f"Neither: {n_neither}"),
     ]
