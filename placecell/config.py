@@ -174,15 +174,6 @@ class SpatialMap2DConfig(BaseModel):
     )
 
 
-class MazeConfig(BaseModel):
-    """Configuration for maze/arm-based 1D analysis.
-
-    Note: arm_order, zone_column, arm_position_column are in DataConfig
-    (per-session data properties). split_by_direction and
-    require_complete_traversal are in BehaviorConfig (analysis parameters).
-    """
-
-
 class SpatialMap1DConfig(BaseModel):
     """Spatial map settings for 1D arm analysis."""
 
@@ -342,10 +333,6 @@ class BehaviorConfig(BaseModel):
         None,
         description="Spatial map settings for 2D arena analysis. Required when type='arena'.",
     )
-    maze: MazeConfig | None = Field(
-        None,
-        description="Maze configuration for 1D arm analysis. Required when type='maze'.",
-    )
     spatial_map_1d: SpatialMap1DConfig | None = Field(
         None,
         description="Spatial map settings for 1D analysis. Required when type='maze'.",
@@ -367,11 +354,8 @@ class BehaviorConfig(BaseModel):
         if self.type == "arena":
             if self.spatial_map_2d is None:
                 raise ValueError("spatial_map_2d is required when type='arena'")
-        elif self.type == "maze":
-            if self.maze is None:
-                raise ValueError("maze is required when type='maze'")
-            if self.spatial_map_1d is None:
-                raise ValueError("spatial_map_1d is required when type='maze'")
+        elif self.type == "maze" and self.spatial_map_1d is None:
+            raise ValueError("spatial_map_1d is required when type='maze'")
         return self
 
 
@@ -391,7 +375,8 @@ class DataConfig(BaseModel):
                 if key not in known:
                     logger.warning(
                         "DataConfig: unknown key '%s' (valid: %s)",
-                        key, ", ".join(sorted(cls.model_fields)),
+                        key,
+                        ", ".join(sorted(cls.model_fields)),
                     )
         return data
 
@@ -530,14 +515,17 @@ def _deep_merge(base: dict, override: dict) -> None:
 
 
 def _validate_override_keys(
-    model_cls: type[BaseModel], override: dict, path: str = "",
+    model_cls: type[BaseModel],
+    override: dict,
+    path: str = "",
 ) -> None:
     """Warn on keys in *override* that don't match *model_cls* fields."""
     for key, val in override.items():
         if key not in model_cls.model_fields:
             logger.warning(
                 "config_override: unknown key '%s' (valid: %s)",
-                f"{path}{key}", ", ".join(model_cls.model_fields),
+                f"{path}{key}",
+                ", ".join(model_cls.model_fields),
             )
             continue
         if isinstance(val, dict):

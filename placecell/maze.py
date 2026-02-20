@@ -38,7 +38,8 @@ def load_graph_polylines(graph_path: Path) -> dict[str, list[list[float]]]:
 
 
 def compute_arm_lengths(
-    polylines: dict[str, list[list[float]]], mm_per_pixel: float,
+    polylines: dict[str, list[list[float]]],
+    mm_per_pixel: float,
 ) -> dict[str, float]:
     """Compute polyline lengths for each zone.
 
@@ -287,11 +288,7 @@ def filter_complete_traversals(
         entry_zone = full_zone[idx_before]
         exit_zone = full_zone[idx_after]
 
-        if (
-            entry_zone not in arm_set
-            and exit_zone not in arm_set
-            and entry_zone != exit_zone
-        ):
+        if entry_zone not in arm_set and exit_zone not in arm_set and entry_zone != exit_zone:
             complete_ids.append(trav_id)
 
     n_total = bounds.shape[0]

@@ -18,7 +18,6 @@ behavior:
   speed_window_frames: 5
   jump_threshold_mm: 100.0
   spatial_map_2d: null
-  maze: {}
   spatial_map_1d:
     bin_width_mm: 10.0
     min_occupancy: 0.1

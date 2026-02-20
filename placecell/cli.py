@@ -17,25 +17,37 @@ def cli() -> None:
 @cli.command()
 @click.option("-c", "--config", required=True, help="Analysis config file path or config ID.")
 @click.option(
-    "-d", "--data", "data_path", required=True,
-    type=click.Path(exists=True), help="Per-session data paths YAML file.",
+    "-d",
+    "--data",
+    "data_path",
+    required=True,
+    type=click.Path(exists=True),
+    help="Per-session data paths YAML file.",
 )
 @click.option("-o", "--output", default=None, help="Output bundle path.")
 @click.option(
-    "-y", "--yes", is_flag=True,
+    "-y",
+    "--yes",
+    is_flag=True,
     help="Skip confirmation prompt and run full analysis.",
 )
 @click.option(
-    "--prep-only", is_flag=True,
+    "--prep-only",
+    is_flag=True,
     help="Stop after occupancy — save QC figures only, skip analyze_units.",
 )
 @click.option(
-    "--show", is_flag=True,
+    "--show",
+    is_flag=True,
     help="Open QC figures interactively before the confirmation prompt.",
 )
 def analysis(
-    config: str, data_path: str, output: str | None,
-    yes: bool, prep_only: bool, show: bool,
+    config: str,
+    data_path: str,
+    output: str | None,
+    yes: bool,
+    prep_only: bool,
+    show: bool,
 ) -> None:
     """Run the place cell analysis pipeline."""
     from tqdm.auto import tqdm
@@ -67,10 +79,9 @@ def analysis(
     if prep_only:
         return
 
-    if not yes:
-        if not click.confirm("Proceed with analyze_units?"):
-            click.echo("Stopped after prep.")
-            return
+    if not yes and not click.confirm("Proceed with analyze_units?"):
+        click.echo("Stopped after prep.")
+        return
 
     # Run the expensive analysis step
     ds.analyze_units(progress_bar=tqdm)
@@ -89,8 +100,12 @@ def analysis(
 
 @cli.command("define-zones")
 @click.option(
-    "-d", "--data", "data_path", required=True,
-    type=click.Path(exists=True), help="Data config YAML (reads behavior_video and behavior_graph).",
+    "-d",
+    "--data",
+    "data_path",
+    required=True,
+    type=click.Path(exists=True),
+    help="Data config YAML (reads behavior_video and behavior_graph).",
 )
 @click.option("--rooms", type=int, required=True, help="Number of rooms.")
 @click.option("--arms", type=int, required=True, help="Number of arms.")
@@ -110,9 +125,8 @@ def define_zones_cmd(data_path: str, rooms: int, arms: int) -> None:
 
     if data_cfg.behavior_graph:
         output = str(data_dir / data_cfg.behavior_graph)
-        if Path(output).exists():
-            if not click.confirm(f"{output} already exists. Overwrite?"):
-                return
+        if Path(output).exists() and not click.confirm(f"{output} already exists. Overwrite?"):
+            return
     else:
         graph_rel = f"zone_{data_p.stem}.yaml"
         output = str(data_dir / graph_rel)
@@ -133,11 +147,22 @@ def define_zones_cmd(data_path: str, rooms: int, arms: int) -> None:
 
 @cli.command("detect-zones")
 @click.option(
-    "-d", "--data", "data_path", required=True,
-    type=click.Path(exists=True), help="Data config YAML (reads behavior_position and behavior_graph).",
+    "-d",
+    "--data",
+    "data_path",
+    required=True,
+    type=click.Path(exists=True),
+    help="Data config YAML (reads behavior_position and behavior_graph).",
 )
-@click.option("-o", "--output", default=None, help="Output CSV path (default: zone_tracking_{stem}.csv).")
-@click.option("--interpolate", type=int, default=None, help="Frame subsampling factor for video export (default: from config, or 5).")
+@click.option(
+    "-o", "--output", default=None, help="Output CSV path (default: zone_tracking_{stem}.csv)."
+)
+@click.option(
+    "--interpolate",
+    type=int,
+    default=None,
+    help="Frame subsampling factor for video export (default: from config, or 5).",
+)
 def detect_zones_cmd(data_path: str, output: str | None, interpolate: int | None) -> None:
     """Run zone detection on tracking CSV using the zone graph."""
     from tqdm.auto import tqdm

@@ -12,16 +12,16 @@ from placecell.analysis_1d import (
     compute_unit_analysis_1d,
 )
 from placecell.behavior import build_event_place_dataframe
-from placecell.config import MazeConfig, SpatialMap1DConfig
+from placecell.config import SpatialMap1DConfig
 from placecell.dataset import BasePlaceCellDataset, UnitResult
 from placecell.io import load_visualization_data
 from placecell.logging import init_logger
 from placecell.maze import (
     assign_traversal_direction,
-    compute_speed_1d,
     compute_arm_lengths,
-    filter_complete_traversals,
+    compute_speed_1d,
     filter_arm_by_speed,
+    filter_complete_traversals,
     load_graph_polylines,
     serialize_arm_position,
 )
@@ -50,11 +50,6 @@ class MazeDataset(BasePlaceCellDataset):
         self.segment_bins: list[int] | None = None
         self.graph_polylines: dict[str, list[list[float]]] | None = None
         self.graph_mm_per_pixel: float | None = None
-
-    @property
-    def maze_cfg(self) -> "MazeConfig | None":
-        """Shortcut to maze config."""
-        return self.cfg.behavior.maze
 
     @property
     def spatial_1d(self) -> SpatialMap1DConfig:
@@ -111,15 +106,17 @@ class MazeDataset(BasePlaceCellDataset):
         ts_lookup = timestamps.set_index("frame_index")["unix_time"]
         unix_time = ts_lookup.reindex(frame_index).values
 
-        self.trajectory = pd.DataFrame({
-            "frame_index": frame_index,
-            "x": x,
-            "y": y,
-            "unix_time": unix_time,
-            "speed": 0.0,  # placeholder; maze uses speed_1d instead
-            zone_col: zone,
-            tp_col: arm_pos,
-        })
+        self.trajectory = pd.DataFrame(
+            {
+                "frame_index": frame_index,
+                "x": x,
+                "y": y,
+                "unix_time": unix_time,
+                "speed": 0.0,  # placeholder; maze uses speed_1d instead
+                zone_col: zone,
+                tp_col: arm_pos,
+            }
+        )
         logger.info("Loaded trajectory from zone_tracking: %d frames", len(self.trajectory))
 
         # Visualization assets (max projection, footprints)
@@ -155,10 +152,6 @@ class MazeDataset(BasePlaceCellDataset):
         if self.trajectory is None:
             raise RuntimeError("Behavior data not loaded. Call load() first.")
 
-        mcfg = self.maze_cfg
-        if mcfg is None:
-            raise RuntimeError("MazeDataset requires maze config.")
-
         dcfg = self.data_cfg
         if dcfg is None or dcfg.arm_order is None:
             raise RuntimeError("arm_order must be set in data config for maze analysis.")
@@ -168,7 +161,7 @@ class MazeDataset(BasePlaceCellDataset):
         # Load behavior graph for physical arm lengths (optional)
         if self.behavior_graph_path is not None and self.behavior_graph_path.exists():
             self.graph_polylines = load_graph_polylines(self.behavior_graph_path)
-            self.graph_mm_per_pixel = (dcfg.mm_per_pixel or 1.0)
+            self.graph_mm_per_pixel = dcfg.mm_per_pixel or 1.0
             zone_lengths = compute_arm_lengths(self.graph_polylines, self.graph_mm_per_pixel)
             # Keep only the arms we're using
             self.arm_lengths = {t: zone_lengths[t] for t in dcfg.arm_order if t in zone_lengths}
@@ -431,8 +424,10 @@ class MazeDataset(BasePlaceCellDataset):
             if self.trajectory_1d_filtered is not None and self.occupancy_time is not None:
                 try:
                     fig = plot_occupancy_preview_1d(
-                        self.trajectory_1d_filtered, self.occupancy_time,
-                        self.valid_mask, self.edges_1d,
+                        self.trajectory_1d_filtered,
+                        self.occupancy_time,
+                        self.valid_mask,
+                        self.edges_1d,
                         trajectory_1d=self.trajectory_1d,
                         trajectory_1d_all=self.trajectory_1d_all,
                         arm_boundaries=self.arm_boundaries,
@@ -447,7 +442,8 @@ class MazeDataset(BasePlaceCellDataset):
             if self.unit_results and self.edges_1d is not None:
                 try:
                     fig = plot_shuffle_test_1d(
-                        self.unit_results, self.edges_1d,
+                        self.unit_results,
+                        self.edges_1d,
                         p_value_threshold=self.p_value_threshold,
                         arm_boundaries=self.arm_boundaries,
                         arm_labels=self.effective_arm_order,
@@ -462,7 +458,9 @@ class MazeDataset(BasePlaceCellDataset):
             if place_cell_results and self.trajectory_1d is not None:
                 try:
                     fig = plot_position_and_traces_1d(
-                        self.trajectory_1d, place_cell_results, self.edges_1d,
+                        self.trajectory_1d,
+                        place_cell_results,
+                        self.edges_1d,
                         behavior_fps=self.cfg.behavior.behavior_fps,
                         speed_threshold=self.cfg.behavior.speed_threshold,
                         trajectory_1d_filtered=self.trajectory_1d_filtered,
@@ -478,7 +476,8 @@ class MazeDataset(BasePlaceCellDataset):
             if self.graph_polylines is not None:
                 try:
                     fig = plot_graph_overlay(
-                        self.graph_polylines, self.graph_mm_per_pixel,
+                        self.graph_polylines,
+                        self.graph_mm_per_pixel,
                         arm_order=self.data_cfg.arm_order,
                         video_frame=self.behavior_video_frame,
                     )

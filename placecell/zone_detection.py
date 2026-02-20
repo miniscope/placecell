@@ -103,23 +103,26 @@ def detect_zones(
             pred_confidence = 0.0
 
         # Zone transition logic with graph constraints
-        if current_zone is not None and new_zone is not None:
-            if not is_valid_transition(current_zone, new_zone, zone_graph, zone_types):
-                # Check for valid alternatives
-                valid_alternatives = []
-                for alt_zone, alt_prob in zone_probs.items():
-                    if (
-                        alt_prob > 0
-                        and alt_zone != new_zone
-                        and is_valid_transition(current_zone, alt_zone, zone_graph, zone_types)
-                    ):
-                        valid_alternatives.append((alt_zone, alt_prob))
+        if (
+            current_zone is not None
+            and new_zone is not None
+            and not is_valid_transition(current_zone, new_zone, zone_graph, zone_types)
+        ):
+            # Check for valid alternatives
+            valid_alternatives = []
+            for alt_zone, alt_prob in zone_probs.items():
+                if (
+                    alt_prob > 0
+                    and alt_zone != new_zone
+                    and is_valid_transition(current_zone, alt_zone, zone_graph, zone_types)
+                ):
+                    valid_alternatives.append((alt_zone, alt_prob))
 
-                if valid_alternatives:
-                    best_alt_zone = max(valid_alternatives, key=lambda x: x[1])
-                    if best_alt_zone[1] >= min_confidence and best_alt_zone[1] > pred_confidence:
-                        new_zone = best_alt_zone[0]
-                        pred_confidence = best_alt_zone[1]
+            if valid_alternatives:
+                best_alt_zone = max(valid_alternatives, key=lambda x: x[1])
+                if best_alt_zone[1] >= min_confidence and best_alt_zone[1] > pred_confidence:
+                    new_zone = best_alt_zone[0]
+                    pred_confidence = best_alt_zone[1]
 
         if current_zone is None:
             if new_zone and pred_confidence >= min_confidence:
@@ -268,8 +271,7 @@ def export_zone_video(
         import cv2
     except ImportError:
         raise ImportError(
-            "OpenCV is required for video export. "
-            "Install with: pip install opencv-python"
+            "OpenCV is required for video export. " "Install with: pip install opencv-python"
         ) from None
 
     cap = cv2.VideoCapture(str(video_path))
@@ -332,14 +334,24 @@ def export_zone_video(
 
         # Zone label text
         cv2.putText(
-            frame, zone_label, (10, 30),
-            cv2.FONT_HERSHEY_SIMPLEX, 1, overlay_color, 2,
+            frame,
+            zone_label,
+            (10, 30),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1,
+            overlay_color,
+            2,
         )
 
         # Frame number
         cv2.putText(
-            frame, str(frame_idx), (10, height - 15),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2,
+            frame,
+            str(frame_idx),
+            (10, height - 15),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (255, 255, 255),
+            2,
         )
 
         writer.write(frame)
@@ -503,9 +515,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Detect zones from tracking CSV")
     parser.add_argument("--input", "-i", required=True, help="Input tracking CSV")
     parser.add_argument("--output", "-o", required=True, help="Output CSV")
-    parser.add_argument(
-        "--zone-config", "-z", required=True, help="Zone config YAML"
-    )
+    parser.add_argument("--zone-config", "-z", required=True, help="Zone config YAML")
     parser.add_argument("--bodypart", "-b", default=None, help="Body part name")
     parser.add_argument(
         "--arm-max-distance", type=float, default=60.0, help="Max arm distance (px)"

@@ -260,9 +260,7 @@ def compute_spatial_information_1d(
         valid_s = (rate_shuf > 0) & valid_mask
         if np.any(valid_s):
             ratio_s = rate_shuf[valid_s] / overall_lambda
-            si_shuf = np.sum(
-                P_i[valid_s] * ratio_s * np.log2(ratio_s)
-            )
+            si_shuf = np.sum(P_i[valid_s] * ratio_s * np.log2(ratio_s))
         else:
             si_shuf = 0.0
         shuffled_sis.append(si_shuf)

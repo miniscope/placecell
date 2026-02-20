@@ -351,9 +351,7 @@ def is_valid_transition(
         # Without a graph, forbid same-type transitions
         cur_type = zone_types.get(current_zone, "")
         new_type = zone_types.get(new_zone, "")
-        if cur_type == new_type:
-            return False
-        return True
+        return cur_type != new_type
 
     if current_zone in zone_graph:
         return new_zone in zone_graph[current_zone]

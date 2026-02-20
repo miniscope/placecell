@@ -19,7 +19,6 @@ behavior:
   jump_threshold_mm: 100.0
   split_by_direction: true
   spatial_map_2d: null
-  maze: {}
   spatial_map_1d:
     bin_width_mm: 10.0
     min_occupancy: 0.1

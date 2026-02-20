@@ -4,7 +4,6 @@ Requires ``opencv-python`` (install with ``pip install placecell[zones]``).
 """
 
 import argparse
-from pathlib import Path
 
 import numpy as np
 import yaml
@@ -55,8 +54,7 @@ def define_zones(
         import cv2
     except ImportError:
         raise ImportError(
-            "OpenCV is required for define_zones. "
-            "Install with: pip install opencv-python"
+            "OpenCV is required for define_zones. " "Install with: pip install opencv-python"
         ) from None
 
     if zone_names is None:
@@ -177,9 +175,12 @@ def define_zones(
 
             # Remove duplicate closing point for arms
             final_poly = poly.copy()
-            if zone_types.get(zone) == "arm" and len(final_poly) > 1:
-                if final_poly[-1] == final_poly[0]:
-                    final_poly = final_poly[:-1]
+            if (
+                zone_types.get(zone) == "arm"
+                and len(final_poly) > 1
+                and final_poly[-1] == final_poly[0]
+            ):
+                final_poly = final_poly[:-1]
 
             zone_entry: dict = {
                 "type": zone_types.get(zone, "arm"),
@@ -241,9 +242,12 @@ def define_zones(
             min_points = 3 if zone_types.get(current_zone) == "room" else 2
             if len(current_polygon) >= min_points:
                 final_poly = current_polygon.copy()
-                if zone_types.get(current_zone) == "arm" and len(final_poly) > 1:
-                    if final_poly[-1] == final_poly[0]:
-                        final_poly = final_poly[:-1]
+                if (
+                    zone_types.get(current_zone) == "arm"
+                    and len(final_poly) > 1
+                    and final_poly[-1] == final_poly[0]
+                ):
+                    final_poly = final_poly[:-1]
                 polygons[current_zone] = final_poly
                 logger.info("Finished %s with %d points", current_zone, len(final_poly))
                 current_zone_idx = (current_zone_idx + 1) % len(zone_names)

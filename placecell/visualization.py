@@ -133,7 +133,11 @@ def plot_summary_scatter(
     # Log summary
     logger.info(
         "Total: %d | SI pass: %d | Stability pass: %d | Both: %d | Neither: %d",
-        n_total, int(is_sig.sum()), int(is_stable.sum()), n_both, n_neither,
+        n_total,
+        int(is_sig.sum()),
+        int(is_stable.sum()),
+        n_both,
+        n_neither,
     )
     if n_shuffles is not None or min_shift_seconds is not None:
         shuffle_parts = [f"p < {p_value_threshold}"]
@@ -219,8 +223,16 @@ def plot_summary_scatter(
         )
         ax4.set_xlim(-0.5, len(sorted_rates) - 0.5)
     else:
-        ax4.text(0.5, 0.5, "Re-run pipeline\nto populate", transform=ax4.transAxes,
-                 ha="center", va="center", fontsize=10, color="gray")
+        ax4.text(
+            0.5,
+            0.5,
+            "Re-run pipeline\nto populate",
+            transform=ax4.transAxes,
+            ha="center",
+            va="center",
+            fontsize=10,
+            color="gray",
+        )
     ax4.set_xlabel("Unit (sorted)", fontsize=10)
     ax4.set_ylabel("Overall rate (events/s)", fontsize=10)
 
@@ -271,10 +283,12 @@ def plot_summary_scatter(
     ax3.set_xlabel("Spatial Information (bits/spike)", fontsize=10)
     ax3.set_ylabel("Stability score (Fisher Z)", fontsize=10)
     legend_elements_3 = [
-        Patch(facecolor="green", edgecolor="black",
-              label=f"Place cells ({int(pc_mask.sum())})"),
-        Patch(facecolor="darkorange", edgecolor="black",
-              label=f"Non-place cells ({int(npc_mask.sum())})"),
+        Patch(facecolor="green", edgecolor="black", label=f"Place cells ({int(pc_mask.sum())})"),
+        Patch(
+            facecolor="darkorange",
+            edgecolor="black",
+            label=f"Non-place cells ({int(npc_mask.sum())})",
+        ),
     ]
     ax3.legend(handles=legend_elements_3, fontsize=7, loc="upper right")
     hi3 = min(hi, 3.0)
@@ -347,8 +361,12 @@ def plot_diagnostics(
     n_sig = sum(p < p_value_threshold for p in p_vals)
     logger.info(
         "Diagnostics: %d units, %d significant (p<%.2f), events median=%d range=[%d, %d]",
-        len(uids), n_sig, p_value_threshold,
-        int(np.median(n_events)), min(n_events), max(n_events),
+        len(uids),
+        n_sig,
+        p_value_threshold,
+        int(np.median(n_events)),
+        min(n_events),
+        max(n_events),
     )
 
     return fig
@@ -1171,7 +1189,11 @@ def plot_occupancy_preview_1d(
             break
 
     # Layer 1: incomplete traversals (from trajectory_1d_all minus trajectory_1d)
-    if trajectory_1d_all is not None and trajectory_1d is not None and time_col in trajectory_1d_all.columns:
+    if (
+        trajectory_1d_all is not None
+        and trajectory_1d is not None
+        and time_col in trajectory_1d_all.columns
+    ):
         complete_frames = set(trajectory_1d["frame_index"].values)
         incomplete_mask = ~trajectory_1d_all["frame_index"].isin(complete_frames)
         incomplete = trajectory_1d_all[incomplete_mask]
@@ -1531,9 +1553,7 @@ def plot_position_and_traces_2d(
         t = res.trace_times / time_scale
 
         tmin, tmax = np.nanmin(trace), np.nanmax(trace)
-        trace_norm = (
-            (trace - tmin) / (tmax - tmin) if tmax - tmin > 0 else np.zeros_like(trace)
-        )
+        trace_norm = (trace - tmin) / (tmax - tmin) if tmax - tmin > 0 else np.zeros_like(trace)
 
         offset_val = i * trace_height
         ax_tr.plot(

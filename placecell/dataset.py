@@ -25,7 +25,12 @@ from placecell.behavior import (
     recompute_speed,
     remove_position_jumps,
 )
-from placecell.config import AnalysisConfig, DataConfig, SpatialMap2DConfig
+from placecell.config import (
+    AnalysisConfig,
+    DataConfig,
+    SpatialMap1DConfig,
+    SpatialMap2DConfig,
+)
 from placecell.io import load_behavior_data, load_visualization_data
 from placecell.logging import init_logger
 from placecell.neural import build_event_index_dataframe, load_calcium_traces, run_deconvolution
@@ -729,11 +734,21 @@ class BasePlaceCellDataset(abc.ABC):
         with matplotlib.rc_context(rc):
             if self.unit_results:
                 for name, fn in [
-                    ("diagnostics.pdf", lambda: plot_diagnostics(
-                        self.unit_results, p_value_threshold=self.p_value_threshold)),
-                    ("summary_scatter.pdf", lambda: plot_summary_scatter(
-                        self.unit_results, p_value_threshold=self.p_value_threshold,
-                        n_shuffles=self._shuffle_n, min_shift_seconds=self._shuffle_shift)),
+                    (
+                        "diagnostics.pdf",
+                        lambda: plot_diagnostics(
+                            self.unit_results, p_value_threshold=self.p_value_threshold
+                        ),
+                    ),
+                    (
+                        "summary_scatter.pdf",
+                        lambda: plot_summary_scatter(
+                            self.unit_results,
+                            p_value_threshold=self.p_value_threshold,
+                            n_shuffles=self._shuffle_n,
+                            min_shift_seconds=self._shuffle_shift,
+                        ),
+                    ),
                 ]:
                     try:
                         fig = fn()
@@ -1134,8 +1149,11 @@ class ArenaDataset(BasePlaceCellDataset):
             if self.trajectory_filtered is not None and self.occupancy_time is not None:
                 try:
                     fig = plot_occupancy_preview(
-                        self.trajectory_filtered, self.occupancy_time,
-                        self.valid_mask, self.x_edges, self.y_edges,
+                        self.trajectory_filtered,
+                        self.occupancy_time,
+                        self.valid_mask,
+                        self.x_edges,
+                        self.y_edges,
                     )
                     fig.savefig(figures_dir / "occupancy.pdf", bbox_inches="tight")
                     _plt.close(fig)
@@ -1183,7 +1201,9 @@ class ArenaDataset(BasePlaceCellDataset):
                     coverage_map, _, _ = self.coverage()
                     fig = plot_coverage(
                         coverage_map,
-                        self.x_edges, self.y_edges, self.valid_mask,
+                        self.x_edges,
+                        self.y_edges,
+                        self.valid_mask,
                         len(place_cell_results),
                     )
                     fig.savefig(figures_dir / "coverage.pdf", bbox_inches="tight")
