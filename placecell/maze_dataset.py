@@ -320,8 +320,17 @@ class MazeDataset(BasePlaceCellDataset):
             self.valid_mask.size,
         )
 
-    def analyze_units(self, progress_bar: Any = None) -> None:
-        """Run 1D spatial analysis for all deconvolved units."""
+    def analyze_units(self, progress_bar: Any = None, n_workers: int = 1) -> None:
+        """Run 1D spatial analysis for all deconvolved units.
+
+        Parameters
+        ----------
+        progress_bar:
+            Progress bar wrapper, e.g. ``tqdm``.
+        n_workers:
+            Number of parallel worker processes.  ``1`` (default) runs
+            sequentially with no multiprocessing overhead.
+        """
         if self.event_place is None:
             raise RuntimeError("Call match_events() first.")
         if self.occupancy_time is None:
@@ -329,53 +338,82 @@ class MazeDataset(BasePlaceCellDataset):
 
         scfg = self.spatial_1d
         bcfg = self.cfg.behavior
-
-        if scfg.random_seed is not None:
-            np.random.seed(scfg.random_seed)
+        base_seed = scfg.random_seed
 
         # Use 1D arm speed (same criterion as occupancy), not 2D camera speed
         df_filtered = self.event_place[self.event_place["speed_1d"] >= bcfg.speed_threshold].copy()
 
         unique_units = sorted(df_filtered["unit_id"].unique())
         unique_units = [uid for uid in unique_units if uid in self.good_unit_ids]
-        logger.info("Analyzing %d units (1D)...", len(unique_units))
+        n_units = len(unique_units)
+        logger.info("Analyzing %d units (1D)...", n_units)
 
-        iterator = unique_units
-        if progress_bar is not None:
-            iterator = progress_bar(iterator)
+        common_kwargs: dict[str, Any] = dict(
+            df_filtered=df_filtered,
+            trajectory_df=self.trajectory_1d_filtered,
+            occupancy_time=self.occupancy_time,
+            valid_mask=self.valid_mask,
+            edges=self.edges_1d,
+            activity_sigma=scfg.activity_sigma,
+            n_shuffles=scfg.n_shuffles,
+            behavior_fps=bcfg.behavior_fps,
+            min_occupancy=scfg.min_occupancy,
+            occupancy_sigma=scfg.occupancy_sigma,
+            min_shift_seconds=scfg.min_shift_seconds,
+            si_weight_mode=scfg.si_weight_mode,
+            n_split_blocks=scfg.n_split_blocks,
+            block_shifts=scfg.block_shifts,
+            segment_bins=self.segment_bins,
+        )
+
+        results: dict[int, dict] = {}
+
+        if n_workers > 1:
+            from concurrent.futures import ProcessPoolExecutor, as_completed
+
+            with ProcessPoolExecutor(max_workers=n_workers) as executor:
+                futures = {
+                    executor.submit(
+                        compute_unit_analysis_1d,
+                        unit_id=uid,
+                        random_seed=(base_seed + uid if base_seed is not None else None),
+                        **common_kwargs,
+                    ): uid
+                    for uid in unique_units
+                }
+                iterator = as_completed(futures)
+                if progress_bar is not None:
+                    iterator = progress_bar(iterator, total=n_units)
+                for future in iterator:
+                    uid = futures[future]
+                    results[uid] = future.result()
+        else:
+            if base_seed is not None:
+                np.random.seed(base_seed)
+            iterator = unique_units
+            if progress_bar is not None:
+                iterator = progress_bar(iterator)
+            for uid in iterator:
+                results[uid] = compute_unit_analysis_1d(
+                    unit_id=uid,
+                    random_seed=base_seed,
+                    **common_kwargs,
+                )
 
         self.unit_results = {}
-        for unit_id in iterator:
-            result = compute_unit_analysis_1d(
-                unit_id=unit_id,
-                df_filtered=df_filtered,
-                trajectory_df=self.trajectory_1d_filtered,
-                occupancy_time=self.occupancy_time,
-                valid_mask=self.valid_mask,
-                edges=self.edges_1d,
-                activity_sigma=scfg.activity_sigma,
-                n_shuffles=scfg.n_shuffles,
-                random_seed=scfg.random_seed,
-                behavior_fps=bcfg.behavior_fps,
-                min_occupancy=scfg.min_occupancy,
-                occupancy_sigma=scfg.occupancy_sigma,
-                min_shift_seconds=scfg.min_shift_seconds,
-                si_weight_mode=scfg.si_weight_mode,
-                n_split_blocks=scfg.n_split_blocks,
-                block_shifts=scfg.block_shifts,
-                segment_bins=self.segment_bins,
-            )
+        for uid in unique_units:
+            result = results[uid]
 
             trace_data = None
             trace_times = None
             if self.traces is not None:
                 try:
-                    trace_data = self.traces.sel(unit_id=int(unit_id)).values
+                    trace_data = self.traces.sel(unit_id=int(uid)).values
                     trace_times = np.arange(len(trace_data)) / self.neural_fps
                 except (KeyError, IndexError):
                     pass
 
-            self.unit_results[unit_id] = UnitResult(
+            self.unit_results[uid] = UnitResult(
                 rate_map=result["rate_map"],
                 rate_map_raw=result["rate_map_raw"],
                 si=result["si"],
