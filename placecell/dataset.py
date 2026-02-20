@@ -583,7 +583,7 @@ class BasePlaceCellDataset(abc.ABC):
 
     # ── Bundle I/O ──────────────────────────────────────────────────────
 
-    def save_bundle(self, path: str | Path) -> Path:
+    def save_bundle(self, path: str | Path, *, save_figures: bool = True) -> Path:
         """Save all analysis results to a portable ``.pcellbundle`` directory.
 
         The bundle is self-contained: it stores config, behavior, neural,
@@ -668,8 +668,65 @@ class BasePlaceCellDataset(abc.ABC):
             ur_dir.mkdir(exist_ok=True)
             self._save_unit_results(ur_dir)
 
+        # Summary figures
+        if save_figures:
+            figures_dir = path / "figures"
+            figures_dir.mkdir(exist_ok=True)
+            saved = self._save_summary_figures(figures_dir)
+            if saved:
+                logger.info("Saved %d summary figures to %s", len(saved), figures_dir)
+
         logger.info("Bundle saved to %s", path)
         return path
+
+    def _save_summary_figures(self, figures_dir: Path) -> list[str]:
+        """Generate and save key summary figures as PDFs into *figures_dir*."""
+        try:
+            import matplotlib
+            import matplotlib.pyplot as _plt
+        except ImportError:
+            logger.warning("matplotlib not available — skipping figure export")
+            return []
+
+        from placecell.visualization import (
+            plot_diagnostics,
+            plot_footprints_filled,
+            plot_summary_scatter,
+        )
+
+        saved: list[str] = []
+        rc = {
+            "pdf.fonttype": 42,
+            "ps.fonttype": 42,
+            "font.family": "Arial",
+        }
+
+        with matplotlib.rc_context(rc):
+            if self.unit_results:
+                for name, fn in [
+                    ("diagnostics.pdf", lambda: plot_diagnostics(
+                        self.unit_results, p_value_threshold=self.p_value_threshold)),
+                    ("summary_scatter.pdf", lambda: plot_summary_scatter(
+                        self.unit_results, p_value_threshold=self.p_value_threshold)),
+                ]:
+                    try:
+                        fig = fn()
+                        fig.savefig(figures_dir / name, bbox_inches="tight")
+                        _plt.close(fig)
+                        saved.append(name)
+                    except Exception:
+                        logger.warning("Failed to save %s", name, exc_info=True)
+
+            if self.max_proj is not None and self.footprints is not None:
+                try:
+                    fig = plot_footprints_filled(self.max_proj, self.footprints)
+                    fig.savefig(figures_dir / "footprints.pdf", bbox_inches="tight")
+                    _plt.close(fig)
+                    saved.append("footprints.pdf")
+                except Exception:
+                    logger.warning("Failed to save footprints.pdf", exc_info=True)
+
+        return saved
 
     def _save_unit_results(self, ur_dir: Path) -> None:
         """Serialize unit_results into *ur_dir*."""
@@ -1023,3 +1080,90 @@ class ArenaDataset(BasePlaceCellDataset):
             )
 
         logger.info("Done. %d units analyzed.", len(self.unit_results))
+
+    def _save_summary_figures(self, figures_dir: Path) -> list[str]:
+        """Arena-specific figures on top of the base set."""
+        saved = super()._save_summary_figures(figures_dir)
+
+        try:
+            import matplotlib
+            import matplotlib.pyplot as _plt
+        except ImportError:
+            return saved
+
+        from placecell.visualization import (
+            plot_arena_calibration,
+            plot_coverage,
+            plot_occupancy_preview,
+            plot_preprocess_steps,
+        )
+
+        rc = {
+            "pdf.fonttype": 42,
+            "ps.fonttype": 42,
+            "font.family": "Arial",
+        }
+
+        with matplotlib.rc_context(rc):
+            if self.trajectory_filtered is not None and self.occupancy_time is not None:
+                try:
+                    fig = plot_occupancy_preview(
+                        self.trajectory_filtered, self.occupancy_time,
+                        self.valid_mask, self.x_edges, self.y_edges,
+                    )
+                    fig.savefig(figures_dir / "occupancy.pdf", bbox_inches="tight")
+                    _plt.close(fig)
+                    saved.append("occupancy.pdf")
+                except Exception:
+                    logger.warning("Failed to save occupancy.pdf", exc_info=True)
+
+            dcfg = self.data_cfg
+            if (
+                self.trajectory_raw is not None
+                and dcfg is not None
+                and dcfg.arena_bounds is not None
+            ):
+                try:
+                    fig = plot_arena_calibration(
+                        self.trajectory_raw,
+                        dcfg.arena_bounds,
+                        arena_size_mm=dcfg.arena_size_mm,
+                        mm_per_px=self.mm_per_px,
+                        video_frame=self.behavior_video_frame,
+                    )
+                    fig.savefig(figures_dir / "arena_calibration.pdf", bbox_inches="tight")
+                    _plt.close(fig)
+                    saved.append("arena_calibration.pdf")
+                except Exception:
+                    logger.warning("Failed to save arena_calibration.pdf", exc_info=True)
+
+            if (
+                hasattr(self, "_preprocess_steps")
+                and self._preprocess_steps
+                and dcfg is not None
+                and dcfg.arena_size_mm is not None
+            ):
+                try:
+                    fig = plot_preprocess_steps(self._preprocess_steps, dcfg.arena_size_mm)
+                    fig.savefig(figures_dir / "preprocess_steps.pdf", bbox_inches="tight")
+                    _plt.close(fig)
+                    saved.append("preprocess_steps.pdf")
+                except Exception:
+                    logger.warning("Failed to save preprocess_steps.pdf", exc_info=True)
+
+            place_cell_results = self.place_cells()
+            if place_cell_results:
+                try:
+                    coverage_map, _, _ = self.coverage()
+                    fig = plot_coverage(
+                        coverage_map,
+                        self.x_edges, self.y_edges, self.valid_mask,
+                        len(place_cell_results),
+                    )
+                    fig.savefig(figures_dir / "coverage.pdf", bbox_inches="tight")
+                    _plt.close(fig)
+                    saved.append("coverage.pdf")
+                except Exception:
+                    logger.warning("Failed to save coverage.pdf", exc_info=True)
+
+        return saved

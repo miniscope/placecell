@@ -19,6 +19,7 @@ quickstart
 :maxdepth: 1
 
 Pipeline details <pipeline>
+CLI Reference <cli>
 ```
 
 ## API Reference

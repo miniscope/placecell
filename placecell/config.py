@@ -1,7 +1,7 @@
 """Configuration models for pcell, loaded from YAML."""
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import yaml
 from mio.models import MiniscopeConfig
@@ -299,7 +299,7 @@ class BehaviorConfig(BaseModel):
     """Behavior / place-field configuration."""
 
     type: Literal["arena", "maze"] = Field(
-        "arena",
+        ...,
         description="Analysis type: 'arena' for 2D open-field, 'maze' for 1D tube analysis.",
     )
     behavior_fps: float = Field(
@@ -424,11 +424,12 @@ class DataPathsConfig(BaseModel):
         None,
         description="Path to behavior graph YAML with zone polylines and mm_per_pixel.",
     )
-    oasis: OasisConfig | None = Field(
+    config_override: dict[str, Any] | None = Field(
         None,
         description=(
-            "Optional OASIS parameters to override main config for this dataset. "
-            "If provided, these values override the main config's neural.oasis settings."
+            "Arbitrary overrides for the analysis config. "
+            "Keys mirror the AnalysisConfig structure and are deep-merged. "
+            "Example: {neural: {oasis: {penalty: 0.5}}, behavior: {speed_threshold: 30}}"
         ),
     )
 
@@ -444,13 +445,22 @@ class _PlacecellConfigMixin(ConfigYAMLMixin):
         return [Config().config_dir, CONFIG_DIR, MIO_CONFIG_DIR]
 
 
+def _deep_merge(base: dict, override: dict) -> None:
+    """Recursively merge *override* into *base* in place."""
+    for key, val in override.items():
+        if key in base and isinstance(base[key], dict) and isinstance(val, dict):
+            _deep_merge(base[key], val)
+        else:
+            base[key] = val
+
+
 class AnalysisConfig(MiniscopeConfig, _PlacecellConfigMixin):
     """Top-level application configuration."""
 
     model_config = ConfigDict(extra="ignore")
 
     neural: NeuralConfig
-    behavior: BehaviorConfig | None = None
+    behavior: BehaviorConfig
 
     def with_data_overrides(self, data_cfg: DataPathsConfig) -> "AnalysisConfig":
         """Create a new config with data-specific overrides applied.
@@ -458,14 +468,15 @@ class AnalysisConfig(MiniscopeConfig, _PlacecellConfigMixin):
         Parameters
         ----------
         data_cfg : DataPathsConfig
-            Data configuration that may contain override values.
+            Data configuration that may contain a ``config_override`` dict.
 
         Returns
         -------
         AnalysisConfig
-            New config with overrides applied. Original config is unchanged.
+            New config with overrides deep-merged. Original is unchanged.
         """
-        if data_cfg.oasis is not None:
-            new_neural = self.neural.model_copy(update={"oasis": data_cfg.oasis})
-            return self.model_copy(update={"neural": new_neural})
-        return self
+        if not data_cfg.config_override:
+            return self
+        base = self.model_dump()
+        _deep_merge(base, data_cfg.config_override)
+        return type(self)(**base)

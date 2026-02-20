@@ -20,8 +20,12 @@ dependencies = [
     "mio>=0.8.1",
     "pyarrow>=23.0.0",
     "rich>=13.0.0",
+    "click>=8.3.1",
     "ipympl[notebook]>=0.10.0",
 ]
+
+[project.scripts]
+placecell = "placecell.cli:cli"
 
 [project.optional-dependencies]
 notebook = [
@@ -48,6 +52,7 @@ docs = [
     "autodoc-pydantic>=2.0.1",
     "sphinxcontrib-mermaid>=2.0.0",
     "sphinx-design>=0.6.1",
+    "sphinx-click>=6.2.0",
 ]
 zones = [
     "opencv-python>=4.5.0",

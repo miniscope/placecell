@@ -360,10 +360,96 @@ class MazeDataset(BasePlaceCellDataset):
 
         logger.info("Done. %d units analyzed (1D).", len(self.unit_results))
 
-    def save_bundle(self, path: "str | Path") -> "Path":
+    def _save_summary_figures(self, figures_dir: "Path") -> list[str]:
+        """Maze-specific figures on top of the base set."""
+        saved = super()._save_summary_figures(figures_dir)
+
+        try:
+            import matplotlib
+            import matplotlib.pyplot as _plt
+        except ImportError:
+            return saved
+
+        from placecell.visualization import (
+            plot_graph_overlay,
+            plot_occupancy_preview_1d,
+            plot_position_and_traces_1d,
+            plot_shuffle_test_1d,
+        )
+
+        rc = {
+            "pdf.fonttype": 42,
+            "ps.fonttype": 42,
+            "font.family": "Arial",
+        }
+
+        with matplotlib.rc_context(rc):
+            if self.trajectory_1d_filtered is not None and self.occupancy_time is not None:
+                try:
+                    fig = plot_occupancy_preview_1d(
+                        self.trajectory_1d_filtered, self.occupancy_time,
+                        self.valid_mask, self.edges_1d,
+                        trajectory_1d=self.trajectory_1d,
+                        trajectory_1d_all=self.trajectory_1d_all,
+                        tube_boundaries=self.tube_boundaries,
+                        tube_labels=self.effective_tube_order,
+                    )
+                    fig.savefig(figures_dir / "occupancy.pdf", bbox_inches="tight")
+                    _plt.close(fig)
+                    saved.append("occupancy.pdf")
+                except Exception:
+                    logger.warning("Failed to save occupancy.pdf", exc_info=True)
+
+            if self.unit_results and self.edges_1d is not None:
+                try:
+                    fig = plot_shuffle_test_1d(
+                        self.unit_results, self.edges_1d,
+                        p_value_threshold=self.p_value_threshold,
+                        tube_boundaries=self.tube_boundaries,
+                        tube_labels=self.effective_tube_order,
+                    )
+                    fig.savefig(figures_dir / "population_rate_map.pdf", bbox_inches="tight")
+                    _plt.close(fig)
+                    saved.append("population_rate_map.pdf")
+                except Exception:
+                    logger.warning("Failed to save population_rate_map.pdf", exc_info=True)
+
+            place_cell_results = self.place_cells()
+            if place_cell_results and self.trajectory_1d is not None:
+                try:
+                    fig = plot_position_and_traces_1d(
+                        self.trajectory_1d, place_cell_results, self.edges_1d,
+                        behavior_fps=self.cfg.behavior.behavior_fps,
+                        speed_threshold=self.cfg.behavior.speed_threshold,
+                        trajectory_1d_filtered=self.trajectory_1d_filtered,
+                        tube_boundaries=self.tube_boundaries,
+                        tube_labels=self.effective_tube_order,
+                    )
+                    fig.savefig(figures_dir / "position_traces.pdf", bbox_inches="tight")
+                    _plt.close(fig)
+                    saved.append("position_traces.pdf")
+                except Exception:
+                    logger.warning("Failed to save position_traces.pdf", exc_info=True)
+
+            if self.graph_polylines is not None:
+                try:
+                    fig = plot_graph_overlay(
+                        self.graph_polylines, self.graph_mm_per_pixel,
+                        tube_order=self.maze_cfg.tube_order,
+                        video_frame=self.behavior_video_frame,
+                    )
+                    fig.savefig(figures_dir / "graph_overlay.pdf", bbox_inches="tight")
+                    _plt.close(fig)
+                    saved.append("graph_overlay.pdf")
+                except Exception:
+                    logger.warning("Failed to save graph_overlay.pdf", exc_info=True)
+
+        return saved
+
+    def save_bundle(self, path: "str | Path", *, save_figures: bool = True) -> "Path":
         """Save bundle, including 1D trajectory and maze metadata."""
 
-        result = super().save_bundle(path)
+        result = super().save_bundle(path, save_figures=save_figures)
 
         # 1D trajectories
         if self.trajectory_1d is not None:

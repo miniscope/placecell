@@ -300,90 +300,31 @@ def plot_diagnostics(
     unit_results: dict,
     p_value_threshold: float = 0.05,
 ) -> "Figure":
-    """Event count diagnostics: histogram, SI vs events, p-value vs events.
+    """Event count histogram across all units.
 
     Parameters
     ----------
     unit_results:
         Dictionary mapping unit_id to analysis results.
     p_value_threshold:
-        Threshold for significance test.
+        Threshold for significance test (used for logging only).
     """
     if plt is None:
         raise ImportError("matplotlib is required for plotting.")
 
     uids = list(unit_results.keys())
     n_events = [len(unit_results[u].unit_data) for u in uids]
-    si_vals = [unit_results[u].si for u in uids]
-    p_vals = [unit_results[u].p_val for u in uids]
 
-    fig, (ax_hist, ax_si, ax_pv) = plt.subplots(1, 3, figsize=(12, 3.5))
+    fig, ax = plt.subplots(figsize=(5, 3.5))
 
-    ax_hist.hist(n_events, bins=30, color="steelblue", edgecolor="black", alpha=0.7)
-    ax_hist.set_xlabel("Event count")
-    ax_hist.set_ylabel("Units")
-    ax_hist.axvline(
-        np.median(n_events),
-        color="red",
-        linestyle="--",
-        lw=1.5,
-        label=f"Median: {int(np.median(n_events))}",
-    )
-    ax_hist.legend(fontsize=8)
-
-    sig_mask = np.array([p < p_value_threshold for p in p_vals])
-    ns_mask = ~sig_mask
-    n_ev = np.array(n_events)
-    si = np.array(si_vals)
-    ax_si.scatter(
-        n_ev[ns_mask],
-        si[ns_mask],
-        c="gray",
-        s=20,
-        alpha=0.5,
-        edgecolors="black",
-        linewidths=0.3,
-        label=f"Not sig (p>={p_value_threshold})",
-    )
-    ax_si.scatter(
-        n_ev[sig_mask],
-        si[sig_mask],
-        c="green",
-        s=20,
-        alpha=0.6,
-        edgecolors="black",
-        linewidths=0.3,
-        label=f"Significant (p<{p_value_threshold})",
-    )
-    ax_si.set_xlabel("Event count")
-    ax_si.set_ylabel("Spatial Information (bits/spike)")
-    ax_si.set_xscale("log")
-    ax_si.legend(fontsize=7)
-
-    ax_pv.scatter(
-        n_events,
-        p_vals,
-        c="steelblue",
-        s=20,
-        alpha=0.6,
-        edgecolors="black",
-        linewidths=0.3,
-    )
-    ax_pv.axhline(
-        p_value_threshold,
-        color="red",
-        linestyle="--",
-        lw=1.5,
-        label=f"p={p_value_threshold}",
-    )
-    ax_pv.set_xlabel("Event count")
-    ax_pv.set_ylabel("P-value")
-    ax_pv.set_xscale("log")
-    ax_pv.legend(fontsize=8)
+    ax.hist(n_events, bins=30, color="steelblue", edgecolor="black", alpha=0.7)
+    ax.set_xlabel("Event count")
+    ax.set_ylabel("Units")
 
     fig.tight_layout()
 
-    n_sig = int(sig_mask.sum())
+    p_vals = [unit_results[u].p_val for u in uids]
+    n_sig = sum(p < p_value_threshold for p in p_vals)
     logger.info("Total units: %d", len(uids))
     logger.info(
         "Significant (p<%s): %d (%.1f%%)", p_value_threshold, n_sig, 100 * n_sig / len(uids)
