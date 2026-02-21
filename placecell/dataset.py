@@ -1034,13 +1034,16 @@ class ArenaDataset(BasePlaceCellDataset):
             self.valid_mask.size,
         )
 
-    def analyze_units(self, progress_bar: Any = None) -> None:
+    def analyze_units(self, progress_bar: Any = None, n_workers: int = 1) -> None:
         """Run 2D spatial analysis for all deconvolved units with events.
 
         Parameters
         ----------
         progress_bar:
             Progress bar wrapper, e.g. ``tqdm``.
+        n_workers:
+            Number of parallel worker processes.  ``1`` (default) runs
+            sequentially with no multiprocessing overhead.
         """
         if self.event_place is None:
             raise RuntimeError("Call match_events() first.")
@@ -1049,9 +1052,7 @@ class ArenaDataset(BasePlaceCellDataset):
 
         scfg = self.spatial
         bcfg = self.cfg.behavior
-
-        if scfg.random_seed is not None:
-            np.random.seed(scfg.random_seed)
+        base_seed = scfg.random_seed
 
         df_filtered = self.event_place[self.event_place["speed"] >= bcfg.speed_threshold].copy()
 
@@ -1060,47 +1061,74 @@ class ArenaDataset(BasePlaceCellDataset):
         n_units = len(unique_units)
         logger.info("Analyzing %d units...", n_units)
 
-        iterator = unique_units
-        if progress_bar is not None:
-            iterator = progress_bar(iterator)
+        common_kwargs: dict[str, Any] = dict(
+            df_filtered=df_filtered,
+            trajectory_df=self.trajectory_filtered,
+            occupancy_time=self.occupancy_time,
+            valid_mask=self.valid_mask,
+            x_edges=self.x_edges,
+            y_edges=self.y_edges,
+            activity_sigma=scfg.activity_sigma,
+            event_threshold_sigma=scfg.event_threshold_sigma,
+            n_shuffles=scfg.n_shuffles,
+            behavior_fps=bcfg.behavior_fps,
+            min_occupancy=scfg.min_occupancy,
+            occupancy_sigma=scfg.occupancy_sigma,
+            min_shift_seconds=scfg.min_shift_seconds,
+            si_weight_mode=scfg.si_weight_mode,
+            place_field_seed_percentile=scfg.place_field_seed_percentile,
+            n_split_blocks=scfg.n_split_blocks,
+            block_shifts=scfg.block_shifts,
+        )
+
+        results: dict[int, dict] = {}
+
+        if n_workers > 1:
+            from concurrent.futures import ProcessPoolExecutor, as_completed
+
+            with ProcessPoolExecutor(max_workers=n_workers) as executor:
+                futures = {
+                    executor.submit(
+                        compute_unit_analysis,
+                        unit_id=uid,
+                        random_seed=(base_seed + uid if base_seed is not None else None),
+                        **common_kwargs,
+                    ): uid
+                    for uid in unique_units
+                }
+                iterator = as_completed(futures)
+                if progress_bar is not None:
+                    iterator = progress_bar(iterator, total=n_units)
+                for future in iterator:
+                    uid = futures[future]
+                    results[uid] = future.result()
+        else:
+            if base_seed is not None:
+                np.random.seed(base_seed)
+            iterator = unique_units
+            if progress_bar is not None:
+                iterator = progress_bar(iterator)
+            for uid in iterator:
+                results[uid] = compute_unit_analysis(
+                    unit_id=uid,
+                    random_seed=base_seed,
+                    **common_kwargs,
+                )
 
         self.unit_results = {}
-        for unit_id in iterator:
-            result = compute_unit_analysis(
-                unit_id=unit_id,
-                df_filtered=df_filtered,
-                trajectory_df=self.trajectory_filtered,
-                occupancy_time=self.occupancy_time,
-                valid_mask=self.valid_mask,
-                x_edges=self.x_edges,
-                y_edges=self.y_edges,
-                activity_sigma=scfg.activity_sigma,
-                event_threshold_sigma=scfg.event_threshold_sigma,
-                n_shuffles=scfg.n_shuffles,
-                random_seed=scfg.random_seed,
-                behavior_fps=bcfg.behavior_fps,
-                min_occupancy=scfg.min_occupancy,
-                occupancy_sigma=scfg.occupancy_sigma,
-                min_shift_seconds=scfg.min_shift_seconds,
-                si_weight_mode=scfg.si_weight_mode,
-                place_field_seed_percentile=scfg.place_field_seed_percentile,
-                n_split_blocks=scfg.n_split_blocks,
-                block_shifts=scfg.block_shifts,
-            )
-
-            # Attach visualization data
-            vis_data_above = result["events_above_threshold"]
+        for uid in unique_units:
+            result = results[uid]
 
             trace_data = None
             trace_times = None
             if self.traces is not None:
                 try:
-                    trace_data = self.traces.sel(unit_id=int(unit_id)).values
+                    trace_data = self.traces.sel(unit_id=int(uid)).values
                     trace_times = np.arange(len(trace_data)) / self.neural_fps
                 except (KeyError, IndexError):
                     pass
 
-            self.unit_results[unit_id] = UnitResult(
+            self.unit_results[uid] = UnitResult(
                 rate_map=result["rate_map"],
                 rate_map_raw=result["rate_map_raw"],
                 si=result["si"],
@@ -1114,7 +1142,7 @@ class ArenaDataset(BasePlaceCellDataset):
                 shuffled_stability=result["shuffled_stability"],
                 rate_map_first=result["rate_map_first"],
                 rate_map_second=result["rate_map_second"],
-                vis_data_above=vis_data_above,
+                vis_data_above=result["events_above_threshold"],
                 unit_data=result["unit_data"],
                 trace_data=trace_data,
                 trace_times=trace_times,

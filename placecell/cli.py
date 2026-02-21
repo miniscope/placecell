@@ -32,22 +32,25 @@ def cli() -> None:
     help="Skip confirmation prompt and run full analysis.",
 )
 @click.option(
-    "--prep-only",
-    is_flag=True,
-    help="Stop after occupancy — save QC figures only, skip analyze_units.",
-)
-@click.option(
     "--show",
     is_flag=True,
     help="Open QC figures interactively before the confirmation prompt.",
+)
+@click.option(
+    "-w",
+    "--workers",
+    type=int,
+    default=1,
+    show_default=True,
+    help="Number of parallel worker processes for analyze_units.",
 )
 def analysis(
     config: str,
     data_path: str,
     output: str | None,
     yes: bool,
-    prep_only: bool,
     show: bool,
+    workers: int,
 ) -> None:
     """Run the place cell analysis pipeline."""
     from tqdm.auto import tqdm
@@ -76,15 +79,12 @@ def analysis(
     if show:
         _show_figures(bundle_path / "figures")
 
-    if prep_only:
-        return
-
     if not yes and not click.confirm("Proceed with analyze_units?"):
         click.echo("Stopped after prep.")
         return
 
     # Run the expensive analysis step
-    ds.analyze_units(progress_bar=tqdm)
+    ds.analyze_units(progress_bar=tqdm, n_workers=workers)
 
     # Save analysis results into the existing bundle
     ur_dir = bundle_path / "unit_results"
