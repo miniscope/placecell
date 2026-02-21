@@ -102,7 +102,7 @@ class SpatialMapConfig(BaseModel):
             "Set to 0 to allow any shift size."
         ),
     )
-    si_weight_mode: str = Field(
+    si_weight_mode: Literal["amplitude", "binary"] = Field(
         ...,
         description=(
             "Weight mode for spatial information calculation: "
@@ -129,11 +129,6 @@ class SpatialMapConfig(BaseModel):
             "shifted arrangements, etc. Values are circular with period 1.0."
         ),
     )
-    trace_time_window: float = Field(
-        600.0,
-        gt=0.0,
-        description="Time window in seconds for trace display in the interactive browser.",
-    )
 
 
 class SpatialMap2DConfig(SpatialMapConfig):
@@ -147,18 +142,19 @@ class SpatialMap2DConfig(SpatialMapConfig):
     )
     event_threshold_sigma: float = Field(
         0.0,
-        description="Sigma multiplier for event amplitude threshold in trajectory plot. "
+        description="Event amplitude threshold as number of standard deviations above the mean "
+        "(threshold = mean + sigma * SD). Only affects trajectory plot visualization. "
         "Can be negative to include lower-amplitude events.",
     )
     place_field_threshold: float = Field(
-        0.05,
+        0.35,
         gt=0.0,
         lt=1.0,
         description=(
             "Fraction of peak rate to define the place field boundary "
             "(red contour on rate maps and coverage analysis). "
             "Applied to the smoothed, normalized rate map. "
-            "E.g. 0.05 means bins >= 5%% of peak are inside the field."
+            "E.g. 0.35 means bins >= 35%% of peak are inside the field."
         ),
     )
     place_field_min_bins: int = Field(
@@ -186,6 +182,17 @@ class SpatialMap1DConfig(SpatialMapConfig):
         ...,
         gt=0.0,
         description="Bin width in mm. Total bins = round(total_length / bin_width_mm).",
+    )
+    split_by_direction: bool = Field(
+        True,
+        description="Split each arm into forward/reverse segments based on traversal direction. "
+        "Doubles total segments (e.g. 4 arms -> 8 directional segments).",
+    )
+    require_complete_traversal: bool = Field(
+        False,
+        description="If True, keep only traversals where the animal crosses "
+        "from one room to a different room. Partial entries (animal enters "
+        "an arm and returns to the same room) are discarded.",
     )
 
 
@@ -255,14 +262,6 @@ class BehaviorConfig(BaseModel):
         ...,
         description="Analysis type: 'arena' for 2D open-field, 'maze' for 1D arm analysis.",
     )
-    behavior_fps: float = Field(
-        ...,
-        gt=0.0,
-        description=(
-            "Behavior data sampling rate in frames per second. "
-            "Required for event-place matching."
-        ),
-    )
     speed_threshold: float = Field(
         25.0,
         description="Minimum running speed to keep events (mm/s).",
@@ -286,17 +285,6 @@ class BehaviorConfig(BaseModel):
     spatial_map_1d: SpatialMap1DConfig | None = Field(
         None,
         description="Spatial map settings for 1D analysis. Required when type='maze'.",
-    )
-    split_by_direction: bool = Field(
-        True,
-        description="Split each arm into forward/reverse segments based on traversal direction. "
-        "Doubles total segments (e.g. 4 arms -> 8 directional segments).",
-    )
-    require_complete_traversal: bool = Field(
-        False,
-        description="If True, keep only traversals where the animal crosses "
-        "from one room to a different room. Partial entries (animal enters "
-        "a arm and returns to the same room) are discarded.",
     )
 
     @model_validator(mode="after")
@@ -337,6 +325,14 @@ class DataConfig(BaseModel):
             data = yaml.safe_load(f)
         return cls(**data)
 
+    behavior_fps: float = Field(
+        ...,
+        gt=0.0,
+        description=(
+            "Behavior data sampling rate in frames per second. "
+            "Property of the recording setup, used for event-place matching."
+        ),
+    )
     neural_path: str = Field(
         ...,
         description="Directory containing neural data (C.zarr, max_proj.zarr, A.zarr).",

@@ -1013,7 +1013,7 @@ class ArenaDataset(BasePlaceCellDataset):
             event_index=self.event_index,
             neural_timestamp_path=self.neural_timestamp_path,
             behavior_with_speed=self.trajectory,
-            behavior_fps=bcfg.behavior_fps,
+            behavior_fps=self.data_cfg.behavior_fps,
             speed_threshold=bcfg.speed_threshold,
         )
         logger.info(
@@ -1032,7 +1032,7 @@ class ArenaDataset(BasePlaceCellDataset):
         self.occupancy_time, self.valid_mask, self.x_edges, self.y_edges = compute_occupancy_map(
             trajectory_df=self.trajectory_filtered,
             bins=scfg.bins,
-            behavior_fps=self.cfg.behavior.behavior_fps,
+            behavior_fps=self.data_cfg.behavior_fps,
             spatial_sigma=scfg.spatial_sigma,
             min_occupancy=scfg.min_occupancy,
         )
@@ -1077,16 +1077,8 @@ class ArenaDataset(BasePlaceCellDataset):
             valid_mask=self.valid_mask,
             x_edges=self.x_edges,
             y_edges=self.y_edges,
-            spatial_sigma=scfg.spatial_sigma,
-            event_threshold_sigma=scfg.event_threshold_sigma,
-            n_shuffles=scfg.n_shuffles,
-            behavior_fps=bcfg.behavior_fps,
-            min_occupancy=scfg.min_occupancy,
-            min_shift_seconds=scfg.min_shift_seconds,
-            si_weight_mode=scfg.si_weight_mode,
-            place_field_seed_percentile=scfg.place_field_seed_percentile,
-            n_split_blocks=scfg.n_split_blocks,
-            block_shifts=scfg.block_shifts,
+            scfg=scfg,
+            behavior_fps=self.data_cfg.behavior_fps,
         )
 
         results: dict[int, dict] = {}

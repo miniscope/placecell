@@ -4,6 +4,8 @@ import numpy as np
 import pandas as pd
 from scipy.ndimage import gaussian_filter, label
 
+from placecell.config import SpatialMap2DConfig
+
 
 def gaussian_filter_normalized(
     data: np.ndarray,
@@ -641,17 +643,9 @@ def compute_unit_analysis(
     valid_mask: np.ndarray,
     x_edges: np.ndarray,
     y_edges: np.ndarray,
-    spatial_sigma: float = 1.0,
-    event_threshold_sigma: float = 2.0,
-    n_shuffles: int = 100,
+    scfg: SpatialMap2DConfig,
+    behavior_fps: float,
     random_seed: int | None = None,
-    behavior_fps: float = 20.0,
-    min_occupancy: float = 0.1,
-    min_shift_seconds: float = 0.0,
-    si_weight_mode: str = "amplitude",
-    place_field_seed_percentile: float = 95.0,
-    n_split_blocks: int = 10,
-    block_shifts: list[float] | None = None,
 ) -> dict:
     """Compute rate map, spatial information, stability, and thresholded events for a unit.
 
@@ -669,31 +663,12 @@ def compute_unit_analysis(
         Valid occupancy mask.
     x_edges, y_edges:
         Spatial bin edges.
-    spatial_sigma:
-        Gaussian smoothing sigma (in bins) for occupancy and rate maps.
-    event_threshold_sigma:
-        Sigma multiplier for event amplitude threshold.
-    n_shuffles:
-        Number of shuffles for significance test.
+    scfg:
+        Spatial map configuration (smoothing, shuffle, stability parameters).
+    behavior_fps:
+        Behavior sampling rate.
     random_seed:
         Random seed for reproducibility.
-    behavior_fps:
-        Behavior sampling rate for stability computation.
-    min_occupancy:
-        Minimum occupancy time for stability computation.
-    min_shift_seconds:
-        Minimum circular shift in seconds for shuffle significance test.
-    si_weight_mode:
-        Weight mode for SI: ``"amplitude"`` or ``"binary"``.
-    place_field_seed_percentile:
-        Percentile of shuffled rate maps for seed detection (Guo et al.
-        2023).
-    n_split_blocks:
-        Number of temporal blocks for interleaved stability splitting.
-    block_shifts:
-        List of block boundary shifts as fractions of one block width.
-        Each produces an independent split; results are Fisher z-averaged.
-        Defaults to ``[0.0]`` (single split, no shift).
 
     Returns
     -------
@@ -708,7 +683,7 @@ def compute_unit_analysis(
 
     # Rate map (smoothed + normalized for display, raw for place field detection)
     rate_map = compute_rate_map(
-        unit_data, occupancy_time, valid_mask, x_edges, y_edges, spatial_sigma
+        unit_data, occupancy_time, valid_mask, x_edges, y_edges, scfg.spatial_sigma
     )
     rate_map_raw = compute_raw_rate_map(unit_data, occupancy_time, valid_mask, x_edges, y_edges)
 
@@ -730,17 +705,17 @@ def compute_unit_analysis(
         valid_mask,
         x_edges,
         y_edges,
-        n_shuffles,
+        scfg.n_shuffles,
         random_seed=random_seed,
-        min_shift_seconds=min_shift_seconds,
+        min_shift_seconds=scfg.min_shift_seconds,
         behavior_fps=behavior_fps,
-        si_weight_mode=si_weight_mode,
-        spatial_sigma=spatial_sigma,
+        si_weight_mode=scfg.si_weight_mode,
+        spatial_sigma=scfg.spatial_sigma,
     )
 
     # Event threshold for visualization
     if not unit_data.empty and len(unit_data) > 1:
-        vis_threshold = unit_data["s"].mean() + event_threshold_sigma * unit_data["s"].std()
+        vis_threshold = unit_data["s"].mean() + scfg.event_threshold_sigma * unit_data["s"].std()
         events_above = unit_data[unit_data["s"] > vis_threshold]
     else:
         vis_threshold = 0.0
@@ -754,18 +729,17 @@ def compute_unit_analysis(
         valid_mask,
         x_edges,
         y_edges,
-        spatial_sigma=spatial_sigma,
-        n_shuffles=n_shuffles,
-        min_shift_seconds=min_shift_seconds,
+        spatial_sigma=scfg.spatial_sigma,
+        n_shuffles=scfg.n_shuffles,
+        min_shift_seconds=scfg.min_shift_seconds,
         behavior_fps=behavior_fps,
-        si_weight_mode=si_weight_mode,
+        si_weight_mode=scfg.si_weight_mode,
         random_seed=random_seed,
-        percentile=place_field_seed_percentile,
+        percentile=scfg.place_field_seed_percentile,
     )
 
     # Stability test — run for each block shift and Fisher z-average
-    if block_shifts is None:
-        block_shifts = [0.0]
+    block_shifts = scfg.block_shifts or [0.0]
 
     z_scores = []
     p_vals = []
@@ -780,15 +754,15 @@ def compute_unit_analysis(
             valid_mask,
             x_edges,
             y_edges,
-            spatial_sigma=spatial_sigma,
+            spatial_sigma=scfg.spatial_sigma,
             behavior_fps=behavior_fps,
-            min_occupancy=min_occupancy,
-            n_split_blocks=n_split_blocks,
+            min_occupancy=scfg.min_occupancy,
+            n_split_blocks=scfg.n_split_blocks,
             block_shift=shift,
-            n_shuffles=n_shuffles,
+            n_shuffles=scfg.n_shuffles,
             random_seed=random_seed,
-            min_shift_seconds=min_shift_seconds,
-            si_weight_mode=si_weight_mode,
+            min_shift_seconds=scfg.min_shift_seconds,
+            si_weight_mode=scfg.si_weight_mode,
         )
         if np.isfinite(z_i):
             z_scores.append(z_i)

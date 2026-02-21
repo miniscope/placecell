@@ -12,7 +12,6 @@ neural:
 behavior:
   id: behavior
   type: arena
-  behavior_fps: 30.0
   speed_threshold: 50.0
   speed_window_frames: 5
   spatial_map_2d:

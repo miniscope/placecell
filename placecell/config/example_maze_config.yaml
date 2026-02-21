@@ -15,12 +15,9 @@ neural:
 behavior:
   id: behavior
   type: maze
-  behavior_fps: 20.0
   speed_threshold: 25 # mm/s (when behavior_graph provides physical units)
   speed_window_frames: 5
   jump_threshold_mm: 100
-  split_by_direction: true
-  require_complete_traversal: true # set true to keep only room-to-room traversals
   spatial_map_1d:
     bin_width_mm: 10
     min_occupancy: 0.025
@@ -32,4 +29,5 @@ behavior:
     si_weight_mode: amplitude
     n_split_blocks: 10
     block_shifts: [0]
-    trace_time_window: 600
+    split_by_direction: true
+    require_complete_traversal: true  # keep only room-to-room traversals

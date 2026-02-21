@@ -22,6 +22,7 @@ from placecell.maze import (
     filter_arm_by_speed,
     filter_complete_traversals,
     load_graph_polylines,
+    remove_position_jumps_1d,
     serialize_arm_position,
 )
 
@@ -124,6 +125,7 @@ class MazeDataset(BasePlaceCellDataset):
             raise RuntimeError("arm_order must be set in data config for maze analysis.")
 
         bcfg = self.cfg.behavior
+        scfg = self.spatial_1d
 
         # Load behavior graph for physical arm lengths (optional)
         if self.behavior_graph_path is not None and self.behavior_graph_path.exists():
@@ -144,8 +146,19 @@ class MazeDataset(BasePlaceCellDataset):
             arm_lengths=self.arm_lengths,
         )
 
+        # Jump removal on 1D position (symmetric with arena pipeline)
+        self.trajectory_1d, n_jumps = remove_position_jumps_1d(
+            self.trajectory_1d, threshold_mm=bcfg.jump_threshold_mm
+        )
+        if n_jumps > 0:
+            logger.info(
+                "1D jump removal: %d frames interpolated (threshold %.0f mm)",
+                n_jumps,
+                bcfg.jump_threshold_mm,
+            )
+
         # Optionally split by traversal direction (doubles segments)
-        if bcfg.split_by_direction:
+        if scfg.split_by_direction:
             self.trajectory_1d, self.effective_arm_order = assign_traversal_direction(
                 self.trajectory_1d,
                 arm_order=dcfg.arm_order,
@@ -159,7 +172,7 @@ class MazeDataset(BasePlaceCellDataset):
         # Optionally filter to complete traversals only (room-to-room)
         # Keep pre-filter copy for visualization
         self.trajectory_1d_all = self.trajectory_1d.copy()
-        if bcfg.require_complete_traversal:
+        if scfg.require_complete_traversal:
             self.trajectory_1d = filter_complete_traversals(
                 self.trajectory_1d,
                 full_trajectory=self.trajectory,
@@ -203,7 +216,7 @@ class MazeDataset(BasePlaceCellDataset):
             len(self.trajectory_1d),
             len(self.trajectory_1d_filtered),
             n_segments,
-            " (direction split)" if bcfg.split_by_direction else "",
+            " (direction split)" if scfg.split_by_direction else "",
             self.pos_range[0],
             self.pos_range[1],
         )
@@ -219,13 +232,11 @@ class MazeDataset(BasePlaceCellDataset):
         if self.trajectory is None:
             raise RuntimeError("Call load() first.")
 
-        bcfg = self.cfg.behavior
-
         self.event_place = build_event_place_dataframe(
             event_index=self.event_index,
             neural_timestamp_path=self.neural_timestamp_path,
             behavior_with_speed=self.trajectory,
-            behavior_fps=bcfg.behavior_fps,
+            behavior_fps=self.data_cfg.behavior_fps,
             speed_threshold=0.0,  # no 2D speed filter; use speed_1d later
         )
 
@@ -269,7 +280,7 @@ class MazeDataset(BasePlaceCellDataset):
             trajectory_df=self.trajectory_1d_filtered,
             n_bins=n_bins,
             pos_range=self.pos_range,
-            behavior_fps=self.cfg.behavior.behavior_fps,
+            behavior_fps=self.data_cfg.behavior_fps,
             spatial_sigma=scfg.spatial_sigma,
             min_occupancy=scfg.min_occupancy,
             segment_bins=self.segment_bins,
@@ -321,14 +332,8 @@ class MazeDataset(BasePlaceCellDataset):
             occupancy_time=self.occupancy_time,
             valid_mask=self.valid_mask,
             edges=self.edges_1d,
-            spatial_sigma=scfg.spatial_sigma,
-            n_shuffles=scfg.n_shuffles,
-            behavior_fps=bcfg.behavior_fps,
-            min_occupancy=scfg.min_occupancy,
-            min_shift_seconds=scfg.min_shift_seconds,
-            si_weight_mode=scfg.si_weight_mode,
-            n_split_blocks=scfg.n_split_blocks,
-            block_shifts=scfg.block_shifts,
+            scfg=scfg,
+            behavior_fps=self.data_cfg.behavior_fps,
             segment_bins=self.segment_bins,
         )
 
@@ -465,7 +470,7 @@ class MazeDataset(BasePlaceCellDataset):
                         self.trajectory_1d,
                         place_cell_results,
                         self.edges_1d,
-                        behavior_fps=self.cfg.behavior.behavior_fps,
+                        behavior_fps=self.data_cfg.behavior_fps,
                         speed_threshold=self.cfg.behavior.speed_threshold,
                         trajectory_1d_filtered=self.trajectory_1d_filtered,
                         arm_boundaries=self.arm_boundaries,

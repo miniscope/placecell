@@ -4,6 +4,8 @@ import numpy as np
 import pandas as pd
 from scipy.ndimage import gaussian_filter1d
 
+from placecell.config import SpatialMap1DConfig
+
 
 def gaussian_filter_normalized_1d(
     data: np.ndarray,
@@ -423,18 +425,14 @@ def compute_stability_score_1d(
             )
             rm1 = np.zeros_like(occ_first)
             rm1[valid_first] = ew1.astype(float)[valid_first] / occ_first[valid_first]
-            rm1 = gaussian_filter_normalized_1d(
-                rm1, sigma=spatial_sigma, segment_bins=segment_bins
-            )
+            rm1 = gaussian_filter_normalized_1d(rm1, sigma=spatial_sigma, segment_bins=segment_bins)
 
             ew2, _ = np.histogram(
                 traj_pos[traj_second_mask], bins=edges, weights=shifted[traj_second_mask]
             )
             rm2 = np.zeros_like(occ_second)
             rm2[valid_second] = ew2.astype(float)[valid_second] / occ_second[valid_second]
-            rm2 = gaussian_filter_normalized_1d(
-                rm2, sigma=spatial_sigma, segment_bins=segment_bins
-            )
+            rm2 = gaussian_filter_normalized_1d(rm2, sigma=spatial_sigma, segment_bins=segment_bins)
 
             bv = valid_first & valid_second
             if not np.any(bv):
@@ -462,15 +460,9 @@ def compute_unit_analysis_1d(
     occupancy_time: np.ndarray,
     valid_mask: np.ndarray,
     edges: np.ndarray,
-    spatial_sigma: float = 1.0,
-    n_shuffles: int = 100,
+    scfg: SpatialMap1DConfig,
+    behavior_fps: float,
     random_seed: int | None = None,
-    behavior_fps: float = 20.0,
-    min_occupancy: float = 0.1,
-    min_shift_seconds: float = 0.0,
-    si_weight_mode: str = "amplitude",
-    n_split_blocks: int = 10,
-    block_shifts: list[float] | None = None,
     pos_column: str = "pos_1d",
     segment_bins: list[int] | None = None,
 ) -> dict:
@@ -487,7 +479,7 @@ def compute_unit_analysis_1d(
         occupancy_time,
         valid_mask,
         edges,
-        spatial_sigma,
+        scfg.spatial_sigma,
         pos_column,
         segment_bins=segment_bins,
     )
@@ -509,12 +501,12 @@ def compute_unit_analysis_1d(
         occupancy_time,
         valid_mask,
         edges,
-        n_shuffles,
+        scfg.n_shuffles,
         random_seed=random_seed,
-        min_shift_seconds=min_shift_seconds,
+        min_shift_seconds=scfg.min_shift_seconds,
         behavior_fps=behavior_fps,
-        si_weight_mode=si_weight_mode,
-        spatial_sigma=spatial_sigma,
+        si_weight_mode=scfg.si_weight_mode,
+        spatial_sigma=scfg.spatial_sigma,
         pos_column=pos_column,
         segment_bins=segment_bins,
     )
@@ -523,8 +515,7 @@ def compute_unit_analysis_1d(
     events_above = unit_data
     vis_threshold = 0.0
 
-    if block_shifts is None:
-        block_shifts = [0.0]
+    block_shifts = scfg.block_shifts or [0.0]
 
     z_scores = []
     p_vals = []
@@ -538,15 +529,15 @@ def compute_unit_analysis_1d(
             occupancy_time,
             valid_mask,
             edges,
-            spatial_sigma=spatial_sigma,
+            spatial_sigma=scfg.spatial_sigma,
             behavior_fps=behavior_fps,
-            min_occupancy=min_occupancy,
-            n_split_blocks=n_split_blocks,
+            min_occupancy=scfg.min_occupancy,
+            n_split_blocks=scfg.n_split_blocks,
             block_shift=shift,
-            n_shuffles=n_shuffles,
+            n_shuffles=scfg.n_shuffles,
             random_seed=random_seed,
-            min_shift_seconds=min_shift_seconds,
-            si_weight_mode=si_weight_mode,
+            min_shift_seconds=scfg.min_shift_seconds,
+            si_weight_mode=scfg.si_weight_mode,
             pos_column=pos_column,
             segment_bins=segment_bins,
         )

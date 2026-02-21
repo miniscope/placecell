@@ -14,6 +14,7 @@ from placecell.analysis import (
     compute_unit_analysis,
     gaussian_filter_normalized,
 )
+from placecell.config import SpatialMap2DConfig
 from placecell.behavior import (
     build_event_place_dataframe,
     compute_behavior_speed,
@@ -211,6 +212,16 @@ def test_compute_unit_analysis(assets_dir: Path) -> None:
         (df_filtered["y"] >= y_edges[0]) & (df_filtered["y"] <= y_edges[-1])
     ]
 
+    scfg = SpatialMap2DConfig(
+        bins=20,
+        min_occupancy=0.1,
+        spatial_sigma=1.0,
+        n_shuffles=100,
+        si_weight_mode="amplitude",
+        event_threshold_sigma=2.0,
+        min_shift_seconds=0.0,
+    )
+
     result = compute_unit_analysis(
         unit_id=unit_id,
         df_filtered=df_filtered,
@@ -219,9 +230,8 @@ def test_compute_unit_analysis(assets_dir: Path) -> None:
         valid_mask=ref["valid_mask"],
         x_edges=x_edges,
         y_edges=y_edges,
-        spatial_sigma=1.0,
-        event_threshold_sigma=2.0,
-        n_shuffles=100,
+        scfg=scfg,
+        behavior_fps=20.0,
         random_seed=42,
     )
 

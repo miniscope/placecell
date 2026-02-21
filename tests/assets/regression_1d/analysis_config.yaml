@@ -13,11 +13,9 @@ neural:
   trace_name: C_lp
 behavior:
   type: maze
-  behavior_fps: 20.0
   speed_threshold: 25.0
   speed_window_frames: 5
   jump_threshold_mm: 100.0
-  split_by_direction: true
   spatial_map_2d: null
   spatial_map_1d:
     bin_width_mm: 10.0
@@ -31,4 +29,4 @@ behavior:
     n_split_blocks: 10
     block_shifts:
     - 0.0
-    trace_time_window: 600.0
+    split_by_direction: true
