@@ -24,8 +24,7 @@ behavior:
   spatial_map_1d:
     bin_width_mm: 10
     min_occupancy: 0.025
-    occupancy_sigma: 2
-    activity_sigma: 2
+    spatial_sigma: 2
     n_shuffles: 1000
     random_seed: 42
     p_value_threshold: 0.05

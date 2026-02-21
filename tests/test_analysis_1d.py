@@ -59,7 +59,7 @@ class TestComputeOccupancy1D:
         df = pd.DataFrame({"pos_1d": rng.uniform(0, 4, n_frames)})
         fps = 20.0
         occ, valid, edges = compute_occupancy_map_1d(
-            df, n_bins=40, pos_range=(0, 4), behavior_fps=fps, occupancy_sigma=0, min_occupancy=0
+            df, n_bins=40, pos_range=(0, 4), behavior_fps=fps, spatial_sigma=0, min_occupancy=0
         )
         expected_time = n_frames / fps
         np.testing.assert_allclose(occ.sum(), expected_time, rtol=1e-10)
@@ -67,7 +67,7 @@ class TestComputeOccupancy1D:
     def test_shape(self):
         df = pd.DataFrame({"pos_1d": np.linspace(0, 4, 100)})
         occ, valid, edges = compute_occupancy_map_1d(
-            df, n_bins=20, pos_range=(0, 4), behavior_fps=20.0, occupancy_sigma=0, min_occupancy=0
+            df, n_bins=20, pos_range=(0, 4), behavior_fps=20.0, spatial_sigma=0, min_occupancy=0
         )
         assert occ.shape == (20,)
         assert valid.shape == (20,)
@@ -76,7 +76,7 @@ class TestComputeOccupancy1D:
     def test_min_occupancy_filters(self):
         df = pd.DataFrame({"pos_1d": np.full(100, 1.5)})  # All in one bin
         occ, valid, edges = compute_occupancy_map_1d(
-            df, n_bins=40, pos_range=(0, 4), behavior_fps=20.0, occupancy_sigma=0, min_occupancy=1.0
+            df, n_bins=40, pos_range=(0, 4), behavior_fps=20.0, spatial_sigma=0, min_occupancy=1.0
         )
         # Only 1 bin should have data (5 seconds), rest should be invalid
         assert valid.sum() <= 5  # At most a few bins near the peak
@@ -89,7 +89,7 @@ class TestComputeRateMap1D:
         valid = np.ones(n_bins, dtype=bool)
         edges = np.linspace(0, 4, n_bins + 1)
         events = pd.DataFrame({"pos_1d": [1.0, 2.0, 3.0], "s": [1.0, 1.0, 1.0]})
-        rm = compute_rate_map_1d(events, occ, valid, edges, activity_sigma=0)
+        rm = compute_rate_map_1d(events, occ, valid, edges, spatial_sigma=0)
         assert rm.shape == (n_bins,)
 
     def test_empty_events_returns_nan(self):
@@ -111,7 +111,7 @@ class TestSpatialInformation1D:
             "pos_1d": rng.uniform(0, 4, n_frames),
         })
         occ, valid, edges = compute_occupancy_map_1d(
-            traj, n_bins=40, pos_range=(0, 4), behavior_fps=20.0, occupancy_sigma=0, min_occupancy=0
+            traj, n_bins=40, pos_range=(0, 4), behavior_fps=20.0, spatial_sigma=0, min_occupancy=0
         )
         # Events all at one location
         events_conc = pd.DataFrame({

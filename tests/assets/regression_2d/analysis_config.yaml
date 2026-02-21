@@ -24,8 +24,7 @@ behavior:
     id: spatial_map
     bins: 50
     min_occupancy: 0.025
-    occupancy_sigma: 3
-    activity_sigma: 3
+    spatial_sigma: 3
     n_shuffles: 100
     random_seed: 42
     event_threshold_sigma: 0

@@ -23,8 +23,7 @@ behavior:
     id: spatial_map
     bins: 50
     min_occupancy: 0.025 # Minimum occupancy (in seconds) to include a bin in spatial map
-    occupancy_sigma: 3  # Gaussian smoothing (in bins) for occupancy map (0 = no smoothing)
-    activity_sigma: 3  # Gaussian smoothing (in bins) for spatial activity map
+    spatial_sigma: 3  # Gaussian smoothing (in bins) for occupancy and rate maps
     n_shuffles: 1000
     random_seed: 1
     event_threshold_sigma: 0  # Sigma multiplier for event amplitude threshold in trajectory visualization

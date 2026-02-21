@@ -20,8 +20,7 @@ behavior:
   spatial_map_2d:
     bins: 50
     min_occupancy: 0.025
-    occupancy_sigma: 3.0
-    activity_sigma: 3.0
+    spatial_sigma: 3.0
     n_shuffles: 100
     random_seed: 42
     event_threshold_sigma: 0.0

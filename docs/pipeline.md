@@ -130,14 +130,14 @@ Saves a copy of the raw trajectory in `trajectory_raw`, then applies corrections
 ### `ds.compute_occupancy()`
 
 - Compute 2D occupancy histogram from `trajectory_filtered`
-- Smooth with `occupancy_sigma`, mask bins below `min_occupancy`
+- Smooth with `spatial_sigma`, mask bins below `min_occupancy`
 - Output: `occupancy_time`, `valid_mask`, bin edges
 
 ### `ds.analyze_units()` — per unit
 
 Four independent computations from the same inputs (events, filtered trajectory, occupancy):
 
-- **Rate map**: event weights / occupancy time, smoothed with `activity_sigma` (for display)
+- **Rate map**: event weights / occupancy time, smoothed with `spatial_sigma` (for display)
 - **Spatial information + shuffle test**: Skaggs SI with circular-shift shuffle → SI p-value
 - **Shuffled rate percentile**: per-bin percentile of shuffled rate maps → used for place field seed detection
 - **Split-half stability + shuffle test**: correlation between first/second half rate maps with circular-shift shuffle → stability p-value
@@ -159,8 +159,7 @@ Four independent computations from the same inputs (events, filtered trajectory,
 - `speed_threshold`: minimum speed to include data (mm/s)
 - `min_occupancy`: minimum time per bin to be valid (seconds)
 - `bins`: spatial resolution (number of bins per axis)
-- `occupancy_sigma`: Gaussian smoothing sigma for occupancy map (in bins)
-- `activity_sigma`: Gaussian smoothing sigma for rate map (in bins)
+- `spatial_sigma`: Gaussian smoothing sigma for occupancy and rate maps (in bins)
 - `n_shuffles`: number of circular-shift shuffle iterations
 - `min_shift_seconds`: minimum circular shift for shuffle test (seconds)
 - `p_value_threshold`: p-value threshold for both SI and stability significance
@@ -214,8 +213,7 @@ behavior:
     id: spatial_map_2d
     bins: 50
     min_occupancy: 0.025  # Minimum occupancy (in seconds) to include a bin
-    occupancy_sigma: 3  # Gaussian smoothing (in bins) for occupancy map
-    activity_sigma: 3  # Gaussian smoothing (in bins) for rate map
+    spatial_sigma: 3  # Gaussian smoothing (in bins) for occupancy and rate maps
     n_shuffles: 1000
     random_seed: 1
     event_threshold_sigma: 0  # Sigma multiplier for event amplitude threshold

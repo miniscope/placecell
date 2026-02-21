@@ -53,7 +53,7 @@ def compute_occupancy_map_1d(
     n_bins: int,
     pos_range: tuple[float, float],
     behavior_fps: float,
-    occupancy_sigma: float = 1.0,
+    spatial_sigma: float = 1.0,
     min_occupancy: float = 0.1,
     pos_column: str = "pos_1d",
     segment_bins: list[int] | None = None,
@@ -70,7 +70,7 @@ def compute_occupancy_map_1d(
         (min, max) of the 1D position axis.
     behavior_fps:
         Behavior sampling rate.
-    occupancy_sigma:
+    spatial_sigma:
         Gaussian smoothing sigma in bins.
     min_occupancy:
         Minimum occupancy in seconds.
@@ -90,9 +90,9 @@ def compute_occupancy_map_1d(
     counts, _ = np.histogram(trajectory_df[pos_column], bins=edges)
     occupancy_time = counts.astype(float) * time_per_frame
 
-    if occupancy_sigma > 0:
+    if spatial_sigma > 0:
         occupancy_time = gaussian_filter_normalized_1d(
-            occupancy_time, sigma=occupancy_sigma, segment_bins=segment_bins
+            occupancy_time, sigma=spatial_sigma, segment_bins=segment_bins
         )
 
     valid_mask = occupancy_time >= min_occupancy
@@ -105,7 +105,7 @@ def compute_rate_map_1d(
     occupancy_time: np.ndarray,
     valid_mask: np.ndarray,
     edges: np.ndarray,
-    activity_sigma: float = 1.0,
+    spatial_sigma: float = 1.0,
     pos_column: str = "pos_1d",
     segment_bins: list[int] | None = None,
 ) -> np.ndarray:
@@ -128,7 +128,7 @@ def compute_rate_map_1d(
     rate_map = np.zeros_like(occupancy_time)
     rate_map[valid_mask] = event_weights[valid_mask] / occupancy_time[valid_mask]
     rate_map_smooth = gaussian_filter_normalized_1d(
-        rate_map, sigma=activity_sigma, segment_bins=segment_bins
+        rate_map, sigma=spatial_sigma, segment_bins=segment_bins
     )
 
     valid_rate_values = rate_map_smooth[valid_mask]
@@ -171,7 +171,7 @@ def compute_spatial_information_1d(
     min_shift_seconds: float = 0.0,
     behavior_fps: float = 20.0,
     si_weight_mode: str = "amplitude",
-    activity_sigma: float = 0.0,
+    spatial_sigma: float = 0.0,
     pos_column: str = "pos_1d",
     segment_bins: list[int] | None = None,
 ) -> tuple[float, float, np.ndarray]:
@@ -200,9 +200,9 @@ def compute_spatial_information_1d(
     rate_map = np.zeros_like(occupancy_time)
     rate_map[valid_mask] = event_weights[valid_mask] / occupancy_time[valid_mask]
 
-    if activity_sigma > 0:
+    if spatial_sigma > 0:
         rate_map = gaussian_filter_normalized_1d(
-            rate_map, sigma=activity_sigma, segment_bins=segment_bins
+            rate_map, sigma=spatial_sigma, segment_bins=segment_bins
         )
         rate_map[~valid_mask] = 0.0
 
@@ -251,9 +251,9 @@ def compute_spatial_information_1d(
         rate_shuf = np.zeros_like(occupancy_time)
         rate_shuf[valid_mask] = event_w_shuf[valid_mask] / occupancy_time[valid_mask]
 
-        if activity_sigma > 0:
+        if spatial_sigma > 0:
             rate_shuf = gaussian_filter_normalized_1d(
-                rate_shuf, sigma=activity_sigma, segment_bins=segment_bins
+                rate_shuf, sigma=spatial_sigma, segment_bins=segment_bins
             )
             rate_shuf[~valid_mask] = 0.0
 
@@ -277,10 +277,9 @@ def compute_stability_score_1d(
     occupancy_time: np.ndarray,
     valid_mask: np.ndarray,
     edges: np.ndarray,
-    activity_sigma: float = 1.0,
+    spatial_sigma: float = 1.0,
     behavior_fps: float = 20.0,
     min_occupancy: float = 0.1,
-    occupancy_sigma: float = 0.0,
     n_split_blocks: int = 10,
     block_shift: float = 0.0,
     n_shuffles: int = 0,
@@ -342,7 +341,7 @@ def compute_stability_score_1d(
         counts, _ = np.histogram(traj_half[pos_column], bins=edges)
         occ = counts.astype(float) * time_per_frame
         occ_smooth = gaussian_filter_normalized_1d(
-            occ, sigma=occupancy_sigma, segment_bins=segment_bins
+            occ, sigma=spatial_sigma, segment_bins=segment_bins
         )
         mask = occ_smooth >= min_occupancy
         return occ_smooth, mask
@@ -364,7 +363,7 @@ def compute_stability_score_1d(
         rate_map = np.zeros_like(occ)
         rate_map[mask] = event_weights[mask] / occ[mask]
         rate_map_smooth = gaussian_filter_normalized_1d(
-            rate_map, sigma=activity_sigma, segment_bins=segment_bins
+            rate_map, sigma=spatial_sigma, segment_bins=segment_bins
         )
         rate_map_smooth[~mask] = np.nan
         return rate_map_smooth
@@ -425,7 +424,7 @@ def compute_stability_score_1d(
             rm1 = np.zeros_like(occ_first)
             rm1[valid_first] = ew1.astype(float)[valid_first] / occ_first[valid_first]
             rm1 = gaussian_filter_normalized_1d(
-                rm1, sigma=activity_sigma, segment_bins=segment_bins
+                rm1, sigma=spatial_sigma, segment_bins=segment_bins
             )
 
             ew2, _ = np.histogram(
@@ -434,7 +433,7 @@ def compute_stability_score_1d(
             rm2 = np.zeros_like(occ_second)
             rm2[valid_second] = ew2.astype(float)[valid_second] / occ_second[valid_second]
             rm2 = gaussian_filter_normalized_1d(
-                rm2, sigma=activity_sigma, segment_bins=segment_bins
+                rm2, sigma=spatial_sigma, segment_bins=segment_bins
             )
 
             bv = valid_first & valid_second
@@ -463,12 +462,11 @@ def compute_unit_analysis_1d(
     occupancy_time: np.ndarray,
     valid_mask: np.ndarray,
     edges: np.ndarray,
-    activity_sigma: float = 1.0,
+    spatial_sigma: float = 1.0,
     n_shuffles: int = 100,
     random_seed: int | None = None,
     behavior_fps: float = 20.0,
     min_occupancy: float = 0.1,
-    occupancy_sigma: float = 0.0,
     min_shift_seconds: float = 0.0,
     si_weight_mode: str = "amplitude",
     n_split_blocks: int = 10,
@@ -489,7 +487,7 @@ def compute_unit_analysis_1d(
         occupancy_time,
         valid_mask,
         edges,
-        activity_sigma,
+        spatial_sigma,
         pos_column,
         segment_bins=segment_bins,
     )
@@ -516,7 +514,7 @@ def compute_unit_analysis_1d(
         min_shift_seconds=min_shift_seconds,
         behavior_fps=behavior_fps,
         si_weight_mode=si_weight_mode,
-        activity_sigma=activity_sigma,
+        spatial_sigma=spatial_sigma,
         pos_column=pos_column,
         segment_bins=segment_bins,
     )
@@ -540,10 +538,9 @@ def compute_unit_analysis_1d(
             occupancy_time,
             valid_mask,
             edges,
-            activity_sigma=activity_sigma,
+            spatial_sigma=spatial_sigma,
             behavior_fps=behavior_fps,
             min_occupancy=min_occupancy,
-            occupancy_sigma=occupancy_sigma,
             n_split_blocks=n_split_blocks,
             block_shift=shift,
             n_shuffles=n_shuffles,

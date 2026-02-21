@@ -1033,7 +1033,7 @@ class ArenaDataset(BasePlaceCellDataset):
             trajectory_df=self.trajectory_filtered,
             bins=scfg.bins,
             behavior_fps=self.cfg.behavior.behavior_fps,
-            occupancy_sigma=scfg.occupancy_sigma,
+            spatial_sigma=scfg.spatial_sigma,
             min_occupancy=scfg.min_occupancy,
         )
         logger.info(
@@ -1077,12 +1077,11 @@ class ArenaDataset(BasePlaceCellDataset):
             valid_mask=self.valid_mask,
             x_edges=self.x_edges,
             y_edges=self.y_edges,
-            activity_sigma=scfg.activity_sigma,
+            spatial_sigma=scfg.spatial_sigma,
             event_threshold_sigma=scfg.event_threshold_sigma,
             n_shuffles=scfg.n_shuffles,
             behavior_fps=bcfg.behavior_fps,
             min_occupancy=scfg.min_occupancy,
-            occupancy_sigma=scfg.occupancy_sigma,
             min_shift_seconds=scfg.min_shift_seconds,
             si_weight_mode=scfg.si_weight_mode,
             place_field_seed_percentile=scfg.place_field_seed_percentile,

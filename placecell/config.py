@@ -68,15 +68,10 @@ class SpatialMapConfig(BaseModel):
         ge=0.0,
         description="Minimum occupancy time (seconds) for a bin to be included.",
     )
-    occupancy_sigma: float = Field(
+    spatial_sigma: float = Field(
         ...,
         ge=0.0,
-        description="Gaussian smoothing sigma (in bins) for the occupancy map.",
-    )
-    activity_sigma: float = Field(
-        ...,
-        ge=0.0,
-        description="Gaussian smoothing sigma (in bins) for the rate map.",
+        description="Gaussian smoothing sigma (in bins) for occupancy and rate maps.",
     )
     n_shuffles: int = Field(
         ...,
@@ -170,16 +165,15 @@ class SpatialMap2DConfig(SpatialMapConfig):
         5,
         ge=1,
         description=(
-            "Minimum number of contiguous bins for a connected component "
-            "to count as a place field (Guo et al. 2023). Smaller "
-            "disconnected regions are discarded. Set to 1 to disable."
+            "Minimum number of contiguous bins for a connected componentto count as a place field. "
+            "Smaller disconnected regions are discarded. Set to 1 to disable."
         ),
     )
     place_field_seed_percentile: float = Field(
         95.0,
         description=(
-            "Percentile of shuffled rate maps for place field seed detection "
-            "(Guo et al. 2023). Bins exceeding this percentile form seeds; "
+            "Percentile of shuffled rate maps for place field seed detection. "
+            "Bins exceeding this percentile form seeds; "
             "seeds extend to contiguous bins above place_field_threshold."
         ),
     )
@@ -270,7 +264,7 @@ class BehaviorConfig(BaseModel):
         ),
     )
     speed_threshold: float = Field(
-        50.0,
+        25.0,
         description="Minimum running speed to keep events (mm/s).",
     )
     speed_window_frames: int = Field(

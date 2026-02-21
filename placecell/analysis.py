@@ -43,7 +43,7 @@ def compute_occupancy_map(
     trajectory_df: pd.DataFrame,
     bins: int,
     behavior_fps: float,
-    occupancy_sigma: float = 1.0,
+    spatial_sigma: float = 1.0,
     min_occupancy: float = 0.1,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Compute occupancy map from speed-filtered trajectory.
@@ -56,7 +56,7 @@ def compute_occupancy_map(
         Number of spatial bins.
     behavior_fps:
         Behavior sampling rate.
-    occupancy_sigma:
+    spatial_sigma:
         Gaussian smoothing sigma for occupancy map.
     min_occupancy:
         Minimum occupancy time in seconds.
@@ -75,8 +75,8 @@ def compute_occupancy_map(
     )
     occupancy_time = occupancy_counts * time_per_frame
 
-    if occupancy_sigma > 0:
-        occupancy_time = gaussian_filter_normalized(occupancy_time, sigma=occupancy_sigma)
+    if spatial_sigma > 0:
+        occupancy_time = gaussian_filter_normalized(occupancy_time, sigma=spatial_sigma)
 
     valid_mask = occupancy_time >= min_occupancy
 
@@ -89,7 +89,7 @@ def compute_rate_map(
     valid_mask: np.ndarray,
     x_edges: np.ndarray,
     y_edges: np.ndarray,
-    activity_sigma: float = 1.0,
+    spatial_sigma: float = 1.0,
 ) -> np.ndarray:
     """Compute smoothed and normalized rate map for a unit.
 
@@ -103,7 +103,7 @@ def compute_rate_map(
         Valid occupancy mask.
     x_edges, y_edges:
         Spatial bin edges.
-    activity_sigma:
+    spatial_sigma:
         Gaussian smoothing sigma for rate map.
 
     Returns
@@ -123,7 +123,7 @@ def compute_rate_map(
     )
     rate_map = np.zeros_like(occupancy_time)
     rate_map[valid_mask] = event_weights[valid_mask] / occupancy_time[valid_mask]
-    rate_map_smooth = gaussian_filter_normalized(rate_map, sigma=activity_sigma)
+    rate_map_smooth = gaussian_filter_normalized(rate_map, sigma=spatial_sigma)
 
     # Normalize to 0-1 range
     valid_rate_values = rate_map_smooth[valid_mask]
@@ -147,7 +147,7 @@ def compute_spatial_information(
     min_shift_seconds: float = 0.0,
     behavior_fps: float = 20.0,
     si_weight_mode: str = "amplitude",
-    activity_sigma: float = 0.0,
+    spatial_sigma: float = 0.0,
 ) -> tuple[float, float, np.ndarray]:
     """Compute spatial information and significance via shuffling.
 
@@ -177,7 +177,7 @@ def compute_spatial_information(
         ``"amplitude"`` weights events by their ``s`` value;
         ``"binary"`` counts each event as 1 regardless of amplitude,
         which is more robust to bursty firing patterns.
-    activity_sigma:
+    spatial_sigma:
         Gaussian smoothing sigma (in bins) applied to rate maps before
         SI calculation. Matches the smoothing used for rate map display
         and stability tests. Default 0.0 (no smoothing).
@@ -205,8 +205,8 @@ def compute_spatial_information(
     rate_map[valid_mask] = event_weights[valid_mask] / occupancy_time[valid_mask]
 
     # Apply Gaussian smoothing to match stability test and literature convention
-    if activity_sigma > 0:
-        rate_map = gaussian_filter_normalized(rate_map, sigma=activity_sigma)
+    if spatial_sigma > 0:
+        rate_map = gaussian_filter_normalized(rate_map, sigma=spatial_sigma)
         rate_map[~valid_mask] = 0.0
 
     total_time = np.sum(occupancy_time[valid_mask])
@@ -258,8 +258,8 @@ def compute_spatial_information(
         rate_shuf[valid_mask] = event_w_shuf[valid_mask] / occupancy_time[valid_mask]
 
         # Apply same smoothing to shuffled rate maps
-        if activity_sigma > 0:
-            rate_shuf = gaussian_filter_normalized(rate_shuf, sigma=activity_sigma)
+        if spatial_sigma > 0:
+            rate_shuf = gaussian_filter_normalized(rate_shuf, sigma=spatial_sigma)
             rate_shuf[~valid_mask] = 0.0
 
         valid_s = (rate_shuf > 0) & valid_mask
@@ -283,7 +283,7 @@ def compute_shuffled_rate_percentile(
     valid_mask: np.ndarray,
     x_edges: np.ndarray,
     y_edges: np.ndarray,
-    activity_sigma: float = 1.0,
+    spatial_sigma: float = 1.0,
     n_shuffles: int = 100,
     min_shift_seconds: float = 0.0,
     behavior_fps: float = 20.0,
@@ -311,7 +311,7 @@ def compute_shuffled_rate_percentile(
         Valid occupancy mask.
     x_edges, y_edges:
         Spatial bin edges.
-    activity_sigma:
+    spatial_sigma:
         Gaussian smoothing sigma for rate maps.
     n_shuffles:
         Number of shuffle iterations.
@@ -370,7 +370,7 @@ def compute_shuffled_rate_percentile(
         )
         rate_shuf = np.zeros_like(occupancy_time)
         rate_shuf[valid_mask] = event_w_shuf[valid_mask] / occupancy_time[valid_mask]
-        rate_shuf_smooth = gaussian_filter_normalized(rate_shuf, sigma=activity_sigma)
+        rate_shuf_smooth = gaussian_filter_normalized(rate_shuf, sigma=spatial_sigma)
 
         # Normalize 0-1 (same as actual rate map)
         peak = np.nanmax(rate_shuf_smooth[valid_mask]) if np.any(valid_mask) else 0
@@ -390,10 +390,9 @@ def compute_stability_score(
     valid_mask: np.ndarray,
     x_edges: np.ndarray,
     y_edges: np.ndarray,
-    activity_sigma: float = 1.0,
+    spatial_sigma: float = 1.0,
     behavior_fps: float = 20.0,
     min_occupancy: float = 0.1,
-    occupancy_sigma: float = 0.0,
     n_split_blocks: int = 10,
     block_shift: float = 0.0,
     n_shuffles: int = 0,
@@ -423,14 +422,12 @@ def compute_stability_score(
         Valid occupancy mask (full session).
     x_edges, y_edges:
         Spatial bin edges.
-    activity_sigma:
-        Gaussian smoothing sigma for rate maps.
+    spatial_sigma:
+        Gaussian smoothing sigma (in bins) for occupancy and rate maps.
     behavior_fps:
         Behavior sampling rate.
     min_occupancy:
         Minimum occupancy time in seconds for a bin to be valid.
-    occupancy_sigma:
-        Gaussian smoothing sigma for occupancy maps (default 0.0 = no smoothing).
     n_split_blocks:
         Number of temporal blocks for interleaved splitting.
     block_shift:
@@ -507,7 +504,7 @@ def compute_stability_score(
             return occ, mask
         counts, _, _ = np.histogram2d(traj_half["x"], traj_half["y"], bins=[x_edges, y_edges])
         occ = counts * time_per_frame
-        occ_smooth = gaussian_filter_normalized(occ, sigma=occupancy_sigma)
+        occ_smooth = gaussian_filter_normalized(occ, sigma=spatial_sigma)
         mask = occ_smooth >= min_occupancy
         return occ_smooth, mask
 
@@ -534,7 +531,7 @@ def compute_stability_score(
         rate_map[mask] = event_weights[mask] / occ[mask]
 
         # Smooth the rate map (zeros in invalid bins won't propagate NaN)
-        rate_map_smooth = gaussian_filter_normalized(rate_map, sigma=activity_sigma)
+        rate_map_smooth = gaussian_filter_normalized(rate_map, sigma=spatial_sigma)
 
         # Set invalid bins to NaN after smoothing
         rate_map_smooth[~mask] = np.nan
@@ -605,7 +602,7 @@ def compute_stability_score(
             )
             rm1 = np.zeros_like(occ_first)
             rm1[valid_first] = ew1[valid_first] / occ_first[valid_first]
-            rm1 = gaussian_filter_normalized(rm1, sigma=activity_sigma)
+            rm1 = gaussian_filter_normalized(rm1, sigma=spatial_sigma)
 
             ew2, _, _ = np.histogram2d(
                 traj_x[traj_second_mask],
@@ -615,7 +612,7 @@ def compute_stability_score(
             )
             rm2 = np.zeros_like(occ_second)
             rm2[valid_second] = ew2[valid_second] / occ_second[valid_second]
-            rm2 = gaussian_filter_normalized(rm2, sigma=activity_sigma)
+            rm2 = gaussian_filter_normalized(rm2, sigma=spatial_sigma)
 
             bv = valid_first & valid_second
             if not np.any(bv):
@@ -644,13 +641,12 @@ def compute_unit_analysis(
     valid_mask: np.ndarray,
     x_edges: np.ndarray,
     y_edges: np.ndarray,
-    activity_sigma: float = 1.0,
+    spatial_sigma: float = 1.0,
     event_threshold_sigma: float = 2.0,
     n_shuffles: int = 100,
     random_seed: int | None = None,
     behavior_fps: float = 20.0,
     min_occupancy: float = 0.1,
-    occupancy_sigma: float = 0.0,
     min_shift_seconds: float = 0.0,
     si_weight_mode: str = "amplitude",
     place_field_seed_percentile: float = 95.0,
@@ -673,8 +669,8 @@ def compute_unit_analysis(
         Valid occupancy mask.
     x_edges, y_edges:
         Spatial bin edges.
-    activity_sigma:
-        Gaussian smoothing sigma for rate map.
+    spatial_sigma:
+        Gaussian smoothing sigma (in bins) for occupancy and rate maps.
     event_threshold_sigma:
         Sigma multiplier for event amplitude threshold.
     n_shuffles:
@@ -685,8 +681,6 @@ def compute_unit_analysis(
         Behavior sampling rate for stability computation.
     min_occupancy:
         Minimum occupancy time for stability computation.
-    occupancy_sigma:
-        Gaussian smoothing sigma for occupancy maps in stability computation.
     min_shift_seconds:
         Minimum circular shift in seconds for shuffle significance test.
     si_weight_mode:
@@ -714,7 +708,7 @@ def compute_unit_analysis(
 
     # Rate map (smoothed + normalized for display, raw for place field detection)
     rate_map = compute_rate_map(
-        unit_data, occupancy_time, valid_mask, x_edges, y_edges, activity_sigma
+        unit_data, occupancy_time, valid_mask, x_edges, y_edges, spatial_sigma
     )
     rate_map_raw = compute_raw_rate_map(unit_data, occupancy_time, valid_mask, x_edges, y_edges)
 
@@ -741,7 +735,7 @@ def compute_unit_analysis(
         min_shift_seconds=min_shift_seconds,
         behavior_fps=behavior_fps,
         si_weight_mode=si_weight_mode,
-        activity_sigma=activity_sigma,
+        spatial_sigma=spatial_sigma,
     )
 
     # Event threshold for visualization
@@ -760,7 +754,7 @@ def compute_unit_analysis(
         valid_mask,
         x_edges,
         y_edges,
-        activity_sigma=activity_sigma,
+        spatial_sigma=spatial_sigma,
         n_shuffles=n_shuffles,
         min_shift_seconds=min_shift_seconds,
         behavior_fps=behavior_fps,
@@ -786,10 +780,9 @@ def compute_unit_analysis(
             valid_mask,
             x_edges,
             y_edges,
-            activity_sigma=activity_sigma,
+            spatial_sigma=spatial_sigma,
             behavior_fps=behavior_fps,
             min_occupancy=min_occupancy,
-            occupancy_sigma=occupancy_sigma,
             n_split_blocks=n_split_blocks,
             block_shift=shift,
             n_shuffles=n_shuffles,
