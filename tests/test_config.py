@@ -32,6 +32,7 @@ def test_data_paths_config_loads(assets_dir: Path) -> None:
 id: test_data_paths
 mio_model: placecell.config.DataConfig
 mio_version: 0.8.1
+behavior_fps: 20.0
 neural_path: neural_data
 neural_timestamp: neural_data/neural_timestamp.csv
 behavior_position: behavior/behavior_position.csv

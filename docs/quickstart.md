@@ -65,8 +65,7 @@ behavior:
     id: spatial_map_2d
     bins: 50
     min_occupancy: 0.05
-    occupancy_sigma: 3
-    activity_sigma: 3
+    spatial_sigma: 3
     n_shuffles: 500
     p_value_threshold: 0.05
 ```
