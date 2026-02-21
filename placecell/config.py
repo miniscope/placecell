@@ -16,7 +16,10 @@ CONFIG_DIR = Path(__file__).parent / "config"
 
 
 class OasisConfig(BaseModel):
-    """OASIS deconvolution parameters."""
+    """OASIS deconvolution parameters.
+    `g, penalty, s_min` are directly passed to the oasisAR2 deconvolution function.
+    `baseline` is applied before deconvolution.
+    """
 
     g: tuple[float, float] = Field(
         ...,
@@ -52,15 +55,14 @@ class NeuralConfig(BaseModel):
     )
 
 
-class SpatialMap2DConfig(BaseModel):
-    """Spatial map visualization configuration for 2D arena analysis."""
+class SpatialMapConfig(BaseModel):
+    """Base spatial map configuration shared by all analysis approaches.
 
-    bins: int = Field(
-        ...,
-        ge=5,
-        le=200,
-        description="Number of spatial bins.",
-    )
+    Defines the common analysis contract: occupancy filtering, smoothing,
+    shuffle-based significance testing, and stability splitting.
+    Subclasses add approach-specific binning and place field parameters.
+    """
+
     min_occupancy: float = Field(
         ...,
         ge=0.0,
@@ -69,36 +71,30 @@ class SpatialMap2DConfig(BaseModel):
     occupancy_sigma: float = Field(
         ...,
         ge=0.0,
-        description="Gaussian smoothing sigma (in bins) for the occupancy map. "
-        "Smoothing reduces noise from undersampled bins. Use 0 for no smoothing.",
+        description="Gaussian smoothing sigma (in bins) for the occupancy map.",
     )
     activity_sigma: float = Field(
         ...,
         ge=0.0,
-        description="Gaussian smoothing sigma (in bins) for the spatial activity map. "
-        "Use 0 for no smoothing.",
+        description="Gaussian smoothing sigma (in bins) for the rate map.",
     )
     n_shuffles: int = Field(
         ...,
         ge=1,
         le=10000,
-        description="Number of shuffles for spatial information significance test.",
+        description="Number of circular-shift shuffles for significance testing.",
     )
     random_seed: int | None = Field(
         None,
         description="Random seed for reproducible shuffling. If None, results vary between runs.",
-    )
-    event_threshold_sigma: float = Field(
-        0.0,
-        description="Sigma multiplier for event amplitude threshold in trajectory plot. "
-        "Can be negative to include lower-amplitude events.",
     )
     p_value_threshold: float = Field(
         0.05,
         ge=0.0,
         le=1.0,
         description=(
-            "P-value threshold for significance test pass/fail. "
+            "P-value threshold for shuffle-based significance tests "
+            "(spatial information and stability). "
             "Units with p-value < threshold pass."
         ),
     )
@@ -108,17 +104,56 @@ class SpatialMap2DConfig(BaseModel):
         description=(
             "Minimum circular shift in seconds for shuffle significance test. "
             "Ensures shuffled data breaks the temporal-spatial association. "
-            "Set to 0 to allow any shift size (original behavior)."
+            "Set to 0 to allow any shift size."
         ),
     )
     si_weight_mode: str = Field(
-        "binary",
+        ...,
         description=(
             "Weight mode for spatial information calculation: "
             "'amplitude' uses event amplitudes (s values), "
-            "'binary' uses event counts (1 per event, ignoring amplitude). "
-            "Binary mode is more robust to bursty firing patterns."
+            "'binary' uses event counts (1 per event, ignoring amplitude)."
         ),
+    )
+    n_split_blocks: int = Field(
+        10,
+        ge=2,
+        le=100,
+        description=(
+            "Number of temporal blocks for interleaved stability splitting. "
+            "The session is divided into this many equal-duration blocks, "
+            "and odd/even blocks are assigned to each half."
+        ),
+    )
+    block_shifts: list[float] = Field(
+        [0.0],
+        description=(
+            "List of block boundary shifts as fractions of one block width. "
+            "Each value produces an independent split; results are Fisher "
+            "z-averaged. Use [0] for a single split, [0, 0.5] for two "
+            "shifted arrangements, etc. Values are circular with period 1.0."
+        ),
+    )
+    trace_time_window: float = Field(
+        600.0,
+        gt=0.0,
+        description="Time window in seconds for trace display in the interactive browser.",
+    )
+
+
+class SpatialMap2DConfig(SpatialMapConfig):
+    """Spatial map configuration for 2D arena analysis."""
+
+    bins: int = Field(
+        ...,
+        ge=5,
+        le=200,
+        description="Number of spatial bins per axis.",
+    )
+    event_threshold_sigma: float = Field(
+        0.0,
+        description="Sigma multiplier for event amplitude threshold in trajectory plot. "
+        "Can be negative to include lower-amplitude events.",
     )
     place_field_threshold: float = Field(
         0.05,
@@ -148,94 +183,15 @@ class SpatialMap2DConfig(BaseModel):
             "seeds extend to contiguous bins above place_field_threshold."
         ),
     )
-    n_split_blocks: int = Field(
-        10,
-        ge=2,
-        le=100,
-        description=(
-            "Number of temporal blocks for interleaved stability splitting. "
-            "The session is divided into this many equal-duration blocks, "
-            "and odd/even blocks are assigned to each half."
-        ),
-    )
-    block_shifts: list[float] = Field(
-        [0.0],
-        description=(
-            "List of block boundary shifts as fractions of one block width. "
-            "Each value produces an independent split; results are Fisher "
-            "z-averaged. Use [0] for a single split, [0, 0.5] for two "
-            "shifted arrangements, etc. Values are circular with period 1.0."
-        ),
-    )
-    trace_time_window: float = Field(
-        600.0,
-        gt=0.0,
-        description="Time window in seconds for trace display in the interactive browser.",
-    )
 
 
-class SpatialMap1DConfig(BaseModel):
-    """Spatial map settings for 1D arm analysis."""
+class SpatialMap1DConfig(SpatialMapConfig):
+    """Spatial map configuration for 1D arm analysis."""
 
     bin_width_mm: float = Field(
-        10.0,
+        ...,
         gt=0.0,
         description="Bin width in mm. Total bins = round(total_length / bin_width_mm).",
-    )
-    min_occupancy: float = Field(
-        0.025,
-        ge=0.0,
-        description="Minimum occupancy time (seconds) for a bin to be included.",
-    )
-    occupancy_sigma: float = Field(
-        2.0,
-        ge=0.0,
-        description="Gaussian smoothing sigma (in bins) for the 1D occupancy histogram.",
-    )
-    activity_sigma: float = Field(
-        2.0,
-        ge=0.0,
-        description="Gaussian smoothing sigma (in bins) for the 1D rate map.",
-    )
-    n_shuffles: int = Field(
-        1000,
-        ge=1,
-        le=10000,
-        description="Number of shuffles for significance test.",
-    )
-    random_seed: int | None = Field(
-        None,
-        description="Random seed for reproducible shuffling.",
-    )
-    p_value_threshold: float = Field(
-        0.05,
-        ge=0.0,
-        le=1.0,
-        description="P-value threshold for significance test.",
-    )
-    min_shift_seconds: float = Field(
-        20.0,
-        ge=0.0,
-        description="Minimum circular shift in seconds for shuffle test.",
-    )
-    si_weight_mode: str = Field(
-        "amplitude",
-        description="Weight mode for spatial information: 'amplitude' or 'binary'.",
-    )
-    n_split_blocks: int = Field(
-        10,
-        ge=2,
-        le=100,
-        description="Number of temporal blocks for stability splitting.",
-    )
-    block_shifts: list[float] = Field(
-        [0.0],
-        description="Block boundary shifts as fractions of one block width.",
-    )
-    trace_time_window: float = Field(
-        600.0,
-        gt=0.0,
-        description="Time window in seconds for trace display.",
     )
 
 

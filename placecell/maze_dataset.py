@@ -14,7 +14,6 @@ from placecell.analysis_1d import (
 from placecell.behavior import build_event_place_dataframe
 from placecell.config import SpatialMap1DConfig
 from placecell.dataset import BasePlaceCellDataset, UnitResult
-from placecell.io import load_visualization_data
 from placecell.logging import init_logger
 from placecell.maze import (
     assign_traversal_direction,
@@ -25,7 +24,6 @@ from placecell.maze import (
     load_graph_polylines,
     serialize_arm_position,
 )
-from placecell.neural import load_calcium_traces
 
 logger = init_logger(__name__)
 
@@ -64,22 +62,15 @@ class MazeDataset(BasePlaceCellDataset):
     def load(self) -> None:
         """Load neural traces, behavior from zone_tracking CSV, and vis assets.
 
-        Unlike the parent, this does NOT load the raw behavior_position CSV.
+        Unlike ArenaDataset, this does NOT load the raw behavior_position CSV.
         The maze pipeline only needs the zone_tracking CSV (which already
         contains x, y, zone, arm_position) plus behavior timestamps.
         """
-        ncfg = self.cfg.neural
+        self._load_neural_and_viz()
+
         dcfg = self.data_cfg
         if dcfg is None or dcfg.bodypart is None:
             raise RuntimeError("bodypart must be set in data config")
-
-        # Neural traces
-        self.traces = load_calcium_traces(self.neural_path, trace_name=ncfg.trace_name)
-        logger.info(
-            "Loaded traces: %d units, %d frames",
-            self.traces.sizes["unit_id"],
-            self.traces.sizes["frame"],
-        )
 
         # Behavior: load from zone_tracking CSV (not behavior_position)
         zone_csv = self.zone_tracking_path
@@ -118,30 +109,6 @@ class MazeDataset(BasePlaceCellDataset):
             }
         )
         logger.info("Loaded trajectory from zone_tracking: %d frames", len(self.trajectory))
-
-        # Visualization assets (max projection, footprints)
-        self.traces, self.max_proj, self.footprints = load_visualization_data(
-            neural_path=self.neural_path,
-            trace_name=ncfg.trace_name,
-        )
-
-        # Behavior video frame (single frame for overlay)
-        if self.behavior_video_path is not None and self.behavior_video_path.exists():
-            try:
-                import cv2
-
-                cap = cv2.VideoCapture(str(self.behavior_video_path))
-                ret, frame = cap.read()
-                cap.release()
-                if ret:
-                    self.behavior_video_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    logger.info(
-                        "Loaded behavior video frame from %s", self.behavior_video_path.name
-                    )
-                else:
-                    logger.warning("Could not read frame from %s", self.behavior_video_path)
-            except ImportError:
-                logger.warning("cv2 not installed — skipping behavior video frame")
 
     def preprocess_behavior(self) -> None:
         """Serialize to 1D, compute speed, and filter.
@@ -563,8 +530,7 @@ class MazeDataset(BasePlaceCellDataset):
         """
         path = Path(path)
 
-        # Use the parent loader to get a base dataset, then upgrade
-        base = BasePlaceCellDataset.load_bundle.__func__(cls, path)
+        base = cls._load_bundle_data(path)
 
         # Restore 1D trajectories
         t1d_path = path / "trajectory_1d.parquet"

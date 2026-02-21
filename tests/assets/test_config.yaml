@@ -25,3 +25,4 @@ behavior:
     random_seed: null
     event_threshold_sigma: 2.0
     p_value_threshold: 0.05
+    si_weight_mode: binary
