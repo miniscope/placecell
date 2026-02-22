@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from placecell.logging import init_logger
+from placecell.log import init_logger
 
 logger = init_logger(__name__)
 

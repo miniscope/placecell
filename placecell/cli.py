@@ -4,7 +4,7 @@ from pathlib import Path
 
 import click
 
-from placecell.logging import init_logger
+from placecell.log import init_logger
 
 logger = init_logger(__name__)
 
@@ -55,7 +55,7 @@ def analysis(
     """Run the place cell analysis pipeline."""
     from tqdm.auto import tqdm
 
-    from placecell.dataset import BasePlaceCellDataset
+    from placecell.dataset.base import BasePlaceCellDataset
 
     data_p = Path(data_path)
     if output is None:

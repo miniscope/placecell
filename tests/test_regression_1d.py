@@ -11,8 +11,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from placecell.dataset import BasePlaceCellDataset
-from placecell.maze_dataset import MazeDataset
+from placecell.dataset.base import BasePlaceCellDataset
+from placecell.dataset.maze import MazeDataset
 
 REGRESSION_DIR = Path(__file__).parent / "assets" / "regression_1d"
 

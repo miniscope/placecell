@@ -8,7 +8,7 @@ from mio.models import MiniscopeConfig
 from mio.models.mixins import ConfigYAMLMixin
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from placecell.logging import init_logger
+from placecell.log import init_logger
 
 logger = init_logger(__name__)
 

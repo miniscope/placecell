@@ -11,7 +11,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from placecell.dataset import ArenaDataset, BasePlaceCellDataset
+from placecell.dataset.arena import ArenaDataset
+from placecell.dataset.base import BasePlaceCellDataset
 
 
 REGRESSION_DIR = Path(__file__).parent / "assets" / "regression_2d"

@@ -143,7 +143,7 @@ def main() -> None:  # noqa: D103
         yaml.dump(data_paths_dict, f, default_flow_style=False)
 
     # ── Run the full pipeline and save reference bundle ─────────────
-    from placecell.dataset import BasePlaceCellDataset
+    from placecell.dataset.base import BasePlaceCellDataset
 
     ds = BasePlaceCellDataset.from_yaml(
         OUT_DIR / "analysis_config.yaml",

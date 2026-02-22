@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from placecell.logging import init_logger
+from placecell.log import init_logger
 
 try:
     import matplotlib.pyplot as plt

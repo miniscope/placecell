@@ -7,15 +7,15 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from placecell.analysis_1d import (
+from placecell.analysis.spatial_1d import (
     compute_occupancy_map_1d,
     compute_unit_analysis_1d,
 )
 from placecell.behavior import build_event_place_dataframe
 from placecell.config import SpatialMap1DConfig
-from placecell.dataset import BasePlaceCellDataset, UnitResult
-from placecell.logging import init_logger
-from placecell.maze import (
+from placecell.dataset.base import BasePlaceCellDataset, UnitResult
+from placecell.log import init_logger
+from placecell.maze_helper import (
     assign_traversal_direction,
     compute_arm_lengths,
     compute_speed_1d,

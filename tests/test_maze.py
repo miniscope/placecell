@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from placecell.maze import (
+from placecell.maze_helper import (
     assign_traversal_direction,
     compute_speed_1d,
     compute_arm_lengths,

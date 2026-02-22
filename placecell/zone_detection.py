@@ -14,7 +14,7 @@ from placecell.geometry import (
     load_zone_config,
     position_along_polyline,
 )
-from placecell.logging import init_logger
+from placecell.log import init_logger
 
 logger = init_logger(__name__)
 

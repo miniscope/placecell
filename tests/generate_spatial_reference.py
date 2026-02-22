@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 
-from placecell.analysis import (
+from placecell.analysis.spatial_2d import (
     gaussian_filter_normalized,
     compute_occupancy_map,
     compute_rate_map,

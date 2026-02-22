@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from placecell.analysis import (
+from placecell.analysis.spatial_2d import (
     compute_occupancy_map,
     compute_rate_map,
     compute_spatial_information,

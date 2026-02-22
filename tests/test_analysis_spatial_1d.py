@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from placecell.analysis_1d import (
+from placecell.analysis.spatial_1d import (
     compute_occupancy_map_1d,
     compute_rate_map_1d,
     compute_raw_rate_map_1d,

@@ -10,10 +10,10 @@ import numpy as np
 import pandas as pd
 from matplotlib.lines import Line2D
 
-from placecell.analysis import compute_place_field_mask
+from placecell.analysis.spatial_2d import compute_place_field_mask
 
 if TYPE_CHECKING:
-    from placecell.dataset import ArenaDataset
+    from placecell.dataset.arena import ArenaDataset
 
 
 def create_deconv_browser(
