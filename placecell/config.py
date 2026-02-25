@@ -492,7 +492,7 @@ def _validate_override_keys(
 class AnalysisConfig(BaseModel):
     """Top-level analysis configuration."""
 
-    model_config = ConfigDict(extra="forbid") # Maybe overkill but keeping for now.
+    model_config = ConfigDict(extra="forbid")  # Maybe overkill but keeping for now.
 
     neural: NeuralConfig
     behavior: BehaviorConfig

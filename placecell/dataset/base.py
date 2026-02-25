@@ -13,8 +13,8 @@ import xarray as xr
 
 from placecell.config import (
     AnalysisConfig,
-    BaseSpatialMapConfig,
     BaseDataConfig,
+    BaseSpatialMapConfig,
     MazeDataConfig,
 )
 from placecell.loaders import load_visualization_data
