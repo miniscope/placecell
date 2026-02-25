@@ -33,13 +33,13 @@ OUT_DIR = Path(__file__).parent / "assets" / "regression_1d"
 
 
 def main() -> None:  # noqa: D103
-    from placecell.config import AnalysisConfig, DataConfig
+    from placecell.config import AnalysisConfig, BaseDataConfig
 
     # Load source configs
-    cfg = AnalysisConfig.from_id(SOURCE_CONFIG_ID)
+    cfg = AnalysisConfig.from_yaml(SOURCE_CONFIG_ID)
     data_path = Path(SOURCE_DATA_PATH)
     data_dir = data_path.parent
-    data_cfg = DataConfig.from_yaml(data_path)
+    data_cfg = BaseDataConfig.from_yaml(data_path)
 
     # ── Prepare output directory ────────────────────────────────────
     if OUT_DIR.exists():
@@ -143,7 +143,7 @@ def main() -> None:  # noqa: D103
         yaml.dump(data_paths_dict, f, default_flow_style=False)
 
     # ── Run the full pipeline and save reference bundle ─────────────
-    from placecell.dataset import BasePlaceCellDataset
+    from placecell.dataset.base import BasePlaceCellDataset
 
     ds = BasePlaceCellDataset.from_yaml(
         OUT_DIR / "analysis_config.yaml",

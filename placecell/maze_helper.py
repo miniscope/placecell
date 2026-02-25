@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from placecell.logging import init_logger
+from placecell.log import init_logger
 
 logger = init_logger(__name__)
 
@@ -134,6 +134,45 @@ def serialize_arm_position(
         arm_lengths is not None,
     )
     return df
+
+
+def remove_position_jumps_1d(
+    trajectory: pd.DataFrame,
+    threshold_mm: float,
+) -> tuple[pd.DataFrame, int]:
+    """Replace implausible position jumps with linear interpolation.
+
+    Symmetric with the 2D ``remove_position_jumps``: detects frame-to-frame
+    jumps in ``pos_1d`` that exceed *threshold_mm* within the same arm.
+    Cross-arm transitions are excluded (they are natural large jumps).
+
+    Parameters
+    ----------
+    trajectory:
+        Arm-only DataFrame with ``pos_1d``, ``arm_index``, and ``frame_index``.
+    threshold_mm:
+        Maximum plausible frame-to-frame displacement in the pos_1d axis.
+
+    Returns
+    -------
+    tuple of (DataFrame with jumps interpolated, number of frames fixed).
+    """
+    df = trajectory.sort_values("frame_index").copy()
+    pos = df["pos_1d"].values.astype(float)
+    arm = df["arm_index"].values
+
+    dist = np.abs(np.diff(pos))
+    same_arm = arm[1:] == arm[:-1]
+
+    bad = np.zeros(len(pos), dtype=bool)
+    bad[1:] = (dist > threshold_mm) & same_arm
+
+    n_bad = int(bad.sum())
+    if n_bad > 0:
+        pos[bad] = np.nan
+        df["pos_1d"] = pd.Series(pos, index=df.index).interpolate(limit_direction="both").values
+
+    return df, n_bad
 
 
 def assign_traversal_direction(

@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-from placecell.logging import init_logger
+from placecell.log import init_logger
 
 logger = init_logger(__name__)
 

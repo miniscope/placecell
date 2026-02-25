@@ -1,27 +1,19 @@
-id: test_config
-mio_model: pcell.config.AnalysisConfig
-mio_version: 0.8.1
 neural:
-  id: neural
   fps: 20.0
   oasis:
-    id: oasis
     g: [1.6, -0.63]
     baseline: p10
   trace_name: C
 behavior:
-  id: behavior
   type: arena
-  behavior_fps: 30.0
   speed_threshold: 50.0
   speed_window_frames: 5
   spatial_map_2d:
-    id: spatial_map
     bins: 30
     min_occupancy: 0.1
-    occupancy_sigma: 3
-    activity_sigma: 1.0
+    spatial_sigma: 3
     n_shuffles: 100
     random_seed: null
     event_threshold_sigma: 2.0
     p_value_threshold: 0.05
+    si_weight_mode: binary

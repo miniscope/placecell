@@ -10,10 +10,10 @@ import numpy as np
 import pandas as pd
 from matplotlib.lines import Line2D
 
-from placecell.analysis import compute_place_field_mask
+from placecell.analysis.spatial_2d import compute_place_field_mask
 
 if TYPE_CHECKING:
-    from placecell.dataset import ArenaDataset
+    from placecell.dataset.arena import ArenaDataset
 
 
 def create_deconv_browser(
@@ -567,7 +567,6 @@ def browse_units(
         neural_fps=ds.neural_fps,
         speed_threshold=ds.cfg.behavior.speed_threshold,
         p_value_threshold=scfg.p_value_threshold,
-        trace_time_window=scfg.trace_time_window,
         place_field_threshold=place_field_threshold or scfg.place_field_threshold,
         place_field_min_bins=scfg.place_field_min_bins,
         speed_unit="mm/s" if ds.mm_per_px else "px/s",
@@ -1192,7 +1191,6 @@ def browse_units_1d(
         neural_fps=ds.neural_fps,
         speed_threshold=ds.cfg.behavior.speed_threshold,
         p_value_threshold=scfg.p_value_threshold,
-        trace_time_window=scfg.trace_time_window,
         arm_boundaries=ds.arm_boundaries,
         arm_labels=ds.effective_arm_order,
         speed_unit="mm/s" if ds.arm_lengths is not None else "pos/s",

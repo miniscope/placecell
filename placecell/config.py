@@ -4,11 +4,9 @@ from pathlib import Path
 from typing import Any, Literal, Union, get_args, get_origin
 
 import yaml
-from mio.models import MiniscopeConfig
-from mio.models.mixins import ConfigYAMLMixin
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from placecell.logging import init_logger
+from placecell.log import init_logger
 
 logger = init_logger(__name__)
 
@@ -16,7 +14,10 @@ CONFIG_DIR = Path(__file__).parent / "config"
 
 
 class OasisConfig(BaseModel):
-    """OASIS deconvolution parameters."""
+    """OASIS deconvolution parameters.
+    `g, penalty, s_min` are directly passed to the oasisAR2 deconvolution function.
+    `baseline` is applied before deconvolution.
+    """
 
     g: tuple[float, float] = Field(
         ...,
@@ -52,53 +53,41 @@ class NeuralConfig(BaseModel):
     )
 
 
-class SpatialMap2DConfig(BaseModel):
-    """Spatial map visualization configuration for 2D arena analysis."""
+class BaseSpatialMapConfig(BaseModel):
+    """Base spatial map configuration shared by all analysis approaches.
 
-    bins: int = Field(
-        ...,
-        ge=5,
-        le=200,
-        description="Number of spatial bins.",
-    )
+    Defines the common analysis contract: occupancy filtering, smoothing,
+    shuffle-based significance testing, and stability splitting.
+    Subclasses add approach-specific binning and place field parameters.
+    """
+
     min_occupancy: float = Field(
         ...,
         ge=0.0,
         description="Minimum occupancy time (seconds) for a bin to be included.",
     )
-    occupancy_sigma: float = Field(
+    spatial_sigma: float = Field(
         ...,
         ge=0.0,
-        description="Gaussian smoothing sigma (in bins) for the occupancy map. "
-        "Smoothing reduces noise from undersampled bins. Use 0 for no smoothing.",
-    )
-    activity_sigma: float = Field(
-        ...,
-        ge=0.0,
-        description="Gaussian smoothing sigma (in bins) for the spatial activity map. "
-        "Use 0 for no smoothing.",
+        description="Gaussian smoothing sigma (in bins) for occupancy and rate maps.",
     )
     n_shuffles: int = Field(
         ...,
         ge=1,
         le=10000,
-        description="Number of shuffles for spatial information significance test.",
+        description="Number of circular-shift shuffles for significance testing.",
     )
     random_seed: int | None = Field(
         None,
         description="Random seed for reproducible shuffling. If None, results vary between runs.",
-    )
-    event_threshold_sigma: float = Field(
-        0.0,
-        description="Sigma multiplier for event amplitude threshold in trajectory plot. "
-        "Can be negative to include lower-amplitude events.",
     )
     p_value_threshold: float = Field(
         0.05,
         ge=0.0,
         le=1.0,
         description=(
-            "P-value threshold for significance test pass/fail. "
+            "P-value threshold for shuffle-based significance tests "
+            "(spatial information and stability). "
             "Units with p-value < threshold pass."
         ),
     )
@@ -108,44 +97,15 @@ class SpatialMap2DConfig(BaseModel):
         description=(
             "Minimum circular shift in seconds for shuffle significance test. "
             "Ensures shuffled data breaks the temporal-spatial association. "
-            "Set to 0 to allow any shift size (original behavior)."
+            "Set to 0 to allow any shift size."
         ),
     )
-    si_weight_mode: str = Field(
-        "binary",
+    si_weight_mode: Literal["amplitude", "binary"] = Field(
+        ...,
         description=(
             "Weight mode for spatial information calculation: "
             "'amplitude' uses event amplitudes (s values), "
-            "'binary' uses event counts (1 per event, ignoring amplitude). "
-            "Binary mode is more robust to bursty firing patterns."
-        ),
-    )
-    place_field_threshold: float = Field(
-        0.05,
-        gt=0.0,
-        lt=1.0,
-        description=(
-            "Fraction of peak rate to define the place field boundary "
-            "(red contour on rate maps and coverage analysis). "
-            "Applied to the smoothed, normalized rate map. "
-            "E.g. 0.05 means bins >= 5%% of peak are inside the field."
-        ),
-    )
-    place_field_min_bins: int = Field(
-        5,
-        ge=1,
-        description=(
-            "Minimum number of contiguous bins for a connected component "
-            "to count as a place field (Guo et al. 2023). Smaller "
-            "disconnected regions are discarded. Set to 1 to disable."
-        ),
-    )
-    place_field_seed_percentile: float = Field(
-        95.0,
-        description=(
-            "Percentile of shuffled rate maps for place field seed detection "
-            "(Guo et al. 2023). Bins exceeding this percentile form seeds; "
-            "seeds extend to contiguous bins above place_field_threshold."
+            "'binary' uses event counts (1 per event, ignoring amplitude)."
         ),
     )
     n_split_blocks: int = Field(
@@ -167,75 +127,70 @@ class SpatialMap2DConfig(BaseModel):
             "shifted arrangements, etc. Values are circular with period 1.0."
         ),
     )
-    trace_time_window: float = Field(
-        600.0,
+
+
+class SpatialMap2DConfig(BaseSpatialMapConfig):
+    """Spatial map configuration for 2D arena analysis."""
+
+    bins: int = Field(
+        ...,
+        ge=5,
+        le=200,
+        description="Number of spatial bins per axis.",
+    )
+    event_threshold_sigma: float = Field(
+        0.0,
+        description="Event amplitude threshold as number of standard deviations above the mean "
+        "(threshold = mean + sigma * SD). Only affects trajectory plot visualization. "
+        "Can be negative to include lower-amplitude events.",
+    )
+    place_field_threshold: float = Field(
+        0.35,
         gt=0.0,
-        description="Time window in seconds for trace display in the interactive browser.",
+        lt=1.0,
+        description=(
+            "Fraction of peak rate to define the place field boundary "
+            "(red contour on rate maps and coverage analysis). "
+            "Applied to the smoothed, normalized rate map. "
+            "E.g. 0.35 means bins >= 35%% of peak are inside the field."
+        ),
+    )
+    place_field_min_bins: int = Field(
+        5,
+        ge=1,
+        description=(
+            "Minimum number of contiguous bins for a connected componentto count as a place field. "
+            "Smaller disconnected regions are discarded. Set to 1 to disable."
+        ),
+    )
+    place_field_seed_percentile: float = Field(
+        95.0,
+        description=(
+            "Percentile of shuffled rate maps for place field seed detection. "
+            "Bins exceeding this percentile form seeds; "
+            "seeds extend to contiguous bins above place_field_threshold."
+        ),
     )
 
 
-class SpatialMap1DConfig(BaseModel):
-    """Spatial map settings for 1D arm analysis."""
+class SpatialMap1DConfig(BaseSpatialMapConfig):
+    """Spatial map configuration for 1D arm analysis."""
 
     bin_width_mm: float = Field(
-        10.0,
+        ...,
         gt=0.0,
         description="Bin width in mm. Total bins = round(total_length / bin_width_mm).",
     )
-    min_occupancy: float = Field(
-        0.025,
-        ge=0.0,
-        description="Minimum occupancy time (seconds) for a bin to be included.",
+    split_by_direction: bool = Field(
+        True,
+        description="Split each arm into forward/reverse segments based on traversal direction. "
+        "Doubles total segments (e.g. 4 arms -> 8 directional segments).",
     )
-    occupancy_sigma: float = Field(
-        2.0,
-        ge=0.0,
-        description="Gaussian smoothing sigma (in bins) for the 1D occupancy histogram.",
-    )
-    activity_sigma: float = Field(
-        2.0,
-        ge=0.0,
-        description="Gaussian smoothing sigma (in bins) for the 1D rate map.",
-    )
-    n_shuffles: int = Field(
-        1000,
-        ge=1,
-        le=10000,
-        description="Number of shuffles for significance test.",
-    )
-    random_seed: int | None = Field(
-        None,
-        description="Random seed for reproducible shuffling.",
-    )
-    p_value_threshold: float = Field(
-        0.05,
-        ge=0.0,
-        le=1.0,
-        description="P-value threshold for significance test.",
-    )
-    min_shift_seconds: float = Field(
-        20.0,
-        ge=0.0,
-        description="Minimum circular shift in seconds for shuffle test.",
-    )
-    si_weight_mode: str = Field(
-        "amplitude",
-        description="Weight mode for spatial information: 'amplitude' or 'binary'.",
-    )
-    n_split_blocks: int = Field(
-        10,
-        ge=2,
-        le=100,
-        description="Number of temporal blocks for stability splitting.",
-    )
-    block_shifts: list[float] = Field(
-        [0.0],
-        description="Block boundary shifts as fractions of one block width.",
-    )
-    trace_time_window: float = Field(
-        600.0,
-        gt=0.0,
-        description="Time window in seconds for trace display.",
+    require_complete_traversal: bool = Field(
+        False,
+        description="If True, keep only traversals where the animal crosses "
+        "from one room to a different room. Partial entries (animal enters "
+        "an arm and returns to the same room) are discarded.",
     )
 
 
@@ -305,16 +260,8 @@ class BehaviorConfig(BaseModel):
         ...,
         description="Analysis type: 'arena' for 2D open-field, 'maze' for 1D arm analysis.",
     )
-    behavior_fps: float = Field(
-        ...,
-        gt=0.0,
-        description=(
-            "Behavior data sampling rate in frames per second. "
-            "Required for event-place matching."
-        ),
-    )
     speed_threshold: float = Field(
-        50.0,
+        25.0,
         description="Minimum running speed to keep events (mm/s).",
     )
     speed_window_frames: int = Field(
@@ -337,17 +284,6 @@ class BehaviorConfig(BaseModel):
         None,
         description="Spatial map settings for 1D analysis. Required when type='maze'.",
     )
-    split_by_direction: bool = Field(
-        True,
-        description="Split each arm into forward/reverse segments based on traversal direction. "
-        "Doubles total segments (e.g. 4 arms -> 8 directional segments).",
-    )
-    require_complete_traversal: bool = Field(
-        False,
-        description="If True, keep only traversals where the animal crosses "
-        "from one room to a different room. Partial entries (animal enters "
-        "a arm and returns to the same room) are discarded.",
-    )
 
     @model_validator(mode="after")
     def _validate_type_fields(self) -> "BehaviorConfig":
@@ -359,34 +295,47 @@ class BehaviorConfig(BaseModel):
         return self
 
 
-_MIO_METADATA_KEYS = frozenset({"id", "mio_model", "mio_version"})
-
-
-class DataConfig(BaseModel):
-    """Per-session data configuration (file paths, calibration, overrides)."""
+class BaseDataConfig(BaseModel):
+    """Per-session data configuration — shared fields for all analysis types."""
 
     @model_validator(mode="before")
     @classmethod
     def _warn_unknown_keys(cls, data: Any) -> Any:
         """Warn on unrecognised keys (catches typos like ``config_ovrride``)."""
         if isinstance(data, dict):
-            known = set(cls.model_fields) | _MIO_METADATA_KEYS
+            known = set(cls.model_fields)
             for key in data:
                 if key not in known:
                     logger.warning(
-                        "DataConfig: unknown key '%s' (valid: %s)",
+                        "BaseDataConfig: unknown key '%s' (valid: %s)",
                         key,
                         ", ".join(sorted(cls.model_fields)),
                     )
         return data
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> "DataConfig":
-        """Load from a YAML file."""
+    def from_yaml(cls, path: str | Path) -> "ArenaDataConfig | MazeDataConfig":
+        """Load from a YAML file, dispatching to the correct subclass via ``type``."""
         with open(path) as f:
             data = yaml.safe_load(f)
-        return cls(**data)
+        t = data.get("type")
+        if t == "maze":
+            return MazeDataConfig(**data)
+        elif t == "arena":
+            return ArenaDataConfig(**data)
+        else:
+            raise ValueError(
+                f"BaseDataConfig requires 'type: arena' or 'type: maze' in YAML, got: {t!r}"
+            )
 
+    behavior_fps: float = Field(
+        ...,
+        gt=0.0,
+        description=(
+            "Behavior data sampling rate in frames per second. "
+            "Property of the recording setup, used for event-place matching."
+        ),
+    )
     neural_path: str = Field(
         ...,
         description="Directory containing neural data (C.zarr, max_proj.zarr, A.zarr).",
@@ -407,6 +356,32 @@ class DataConfig(BaseModel):
         None,
         description="Path to behavior video file (e.g. .mp4). Used for arena bounds verification.",
     )
+    bodypart: str | None = Field(
+        None,
+        description="Body part name to use for position tracking (e.g. 'LED').",
+    )
+    x_col: str = Field(
+        "x",
+        description="Coordinate column name for the x-axis in the behavior CSV.",
+    )
+    y_col: str = Field(
+        "y",
+        description="Coordinate column name for the y-axis in the behavior CSV.",
+    )
+    config_override: dict[str, Any] | None = Field(
+        None,
+        description=(
+            "Arbitrary overrides for the analysis config. "
+            "Keys mirror the AnalysisConfig structure and are deep-merged. "
+            "Example: {neural: {oasis: {penalty: 0.5}}, behavior: {speed_threshold: 30}}"
+        ),
+    )
+
+
+class ArenaDataConfig(BaseDataConfig):
+    """Per-session data configuration for 2D open-field (arena) analysis."""
+
+    type: Literal["arena"] = "arena"
     arena_bounds: tuple[float, float, float, float] | None = Field(
         None,
         description=(
@@ -433,6 +408,12 @@ class DataConfig(BaseModel):
         description="Height of tracked point (e.g. LED) above arena floor in mm. "
         "Required when arena_bounds is set.",
     )
+
+
+class MazeDataConfig(BaseDataConfig):
+    """Per-session data configuration for 1D maze (arm) analysis."""
+
+    type: Literal["maze"] = "maze"
     behavior_graph: str | None = Field(
         None,
         description="Path to behavior graph YAML with zone polylines.",
@@ -441,18 +422,6 @@ class DataConfig(BaseModel):
         None,
         gt=0.0,
         description="Scale factor (mm per pixel) for converting graph coordinates to mm.",
-    )
-    bodypart: str | None = Field(
-        None,
-        description="Body part name to use for position tracking (e.g. 'LED').",
-    )
-    x_col: str = Field(
-        "x",
-        description="Coordinate column name for the x-axis in the behavior CSV.",
-    )
-    y_col: str = Field(
-        "y",
-        description="Coordinate column name for the y-axis in the behavior CSV.",
     )
     arm_order: list[str] | None = Field(
         None,
@@ -484,25 +453,6 @@ class DataConfig(BaseModel):
         description="Zone detection algorithm parameters. "
         "Required for the detect-zones CLI command.",
     )
-    config_override: dict[str, Any] | None = Field(
-        None,
-        description=(
-            "Arbitrary overrides for the analysis config. "
-            "Keys mirror the AnalysisConfig structure and are deep-merged. "
-            "Example: {neural: {oasis: {penalty: 0.5}}, behavior: {speed_threshold: 30}}"
-        ),
-    )
-
-
-class _PlacecellConfigMixin(ConfigYAMLMixin):
-    """Override config sources to include placecell bundled configs."""
-
-    @classmethod
-    def config_sources(cls) -> list[Path]:
-        from mio import CONFIG_DIR as MIO_CONFIG_DIR
-        from mio import Config
-
-        return [Config().config_dir, CONFIG_DIR, MIO_CONFIG_DIR]
 
 
 def _deep_merge(base: dict, override: dict) -> None:
@@ -539,20 +489,27 @@ def _validate_override_keys(
                 _validate_override_keys(ann, val, f"{path}{key}.")
 
 
-class AnalysisConfig(MiniscopeConfig, _PlacecellConfigMixin):
-    """Top-level application configuration."""
+class AnalysisConfig(BaseModel):
+    """Top-level analysis configuration."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")  # Maybe overkill but keeping for now.
 
     neural: NeuralConfig
     behavior: BehaviorConfig
 
-    def with_data_overrides(self, data_cfg: DataConfig) -> "AnalysisConfig":
+    @classmethod
+    def from_yaml(cls, path: str | Path) -> "AnalysisConfig":
+        """Load from a YAML file."""
+        with open(path) as f:
+            data = yaml.safe_load(f)
+        return cls(**data)
+
+    def with_data_overrides(self, data_cfg: BaseDataConfig) -> "AnalysisConfig":
         """Create a new config with data-specific overrides applied.
 
         Parameters
         ----------
-        data_cfg : DataConfig
+        data_cfg : BaseDataConfig
             Data configuration that may contain a ``config_override`` dict.
 
         Returns

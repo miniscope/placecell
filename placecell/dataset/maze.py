@@ -7,25 +7,24 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from placecell.analysis_1d import (
+from placecell.analysis.spatial_1d import (
     compute_occupancy_map_1d,
     compute_unit_analysis_1d,
 )
 from placecell.behavior import build_event_place_dataframe
 from placecell.config import SpatialMap1DConfig
-from placecell.dataset import BasePlaceCellDataset, UnitResult
-from placecell.io import load_visualization_data
-from placecell.logging import init_logger
-from placecell.maze import (
+from placecell.dataset.base import BasePlaceCellDataset, UnitResult
+from placecell.log import init_logger
+from placecell.maze_helper import (
     assign_traversal_direction,
     compute_arm_lengths,
     compute_speed_1d,
     filter_arm_by_speed,
     filter_complete_traversals,
     load_graph_polylines,
+    remove_position_jumps_1d,
     serialize_arm_position,
 )
-from placecell.neural import load_calcium_traces
 
 logger = init_logger(__name__)
 
@@ -64,22 +63,15 @@ class MazeDataset(BasePlaceCellDataset):
     def load(self) -> None:
         """Load neural traces, behavior from zone_tracking CSV, and vis assets.
 
-        Unlike the parent, this does NOT load the raw behavior_position CSV.
+        Unlike ArenaDataset, this does NOT load the raw behavior_position CSV.
         The maze pipeline only needs the zone_tracking CSV (which already
         contains x, y, zone, arm_position) plus behavior timestamps.
         """
-        ncfg = self.cfg.neural
+        self._load_neural_and_viz()
+
         dcfg = self.data_cfg
         if dcfg is None or dcfg.bodypart is None:
             raise RuntimeError("bodypart must be set in data config")
-
-        # Neural traces
-        self.traces = load_calcium_traces(self.neural_path, trace_name=ncfg.trace_name)
-        logger.info(
-            "Loaded traces: %d units, %d frames",
-            self.traces.sizes["unit_id"],
-            self.traces.sizes["frame"],
-        )
 
         # Behavior: load from zone_tracking CSV (not behavior_position)
         zone_csv = self.zone_tracking_path
@@ -119,30 +111,6 @@ class MazeDataset(BasePlaceCellDataset):
         )
         logger.info("Loaded trajectory from zone_tracking: %d frames", len(self.trajectory))
 
-        # Visualization assets (max projection, footprints)
-        self.traces, self.max_proj, self.footprints = load_visualization_data(
-            neural_path=self.neural_path,
-            trace_name=ncfg.trace_name,
-        )
-
-        # Behavior video frame (single frame for overlay)
-        if self.behavior_video_path is not None and self.behavior_video_path.exists():
-            try:
-                import cv2
-
-                cap = cv2.VideoCapture(str(self.behavior_video_path))
-                ret, frame = cap.read()
-                cap.release()
-                if ret:
-                    self.behavior_video_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    logger.info(
-                        "Loaded behavior video frame from %s", self.behavior_video_path.name
-                    )
-                else:
-                    logger.warning("Could not read frame from %s", self.behavior_video_path)
-            except ImportError:
-                logger.warning("cv2 not installed — skipping behavior video frame")
-
     def preprocess_behavior(self) -> None:
         """Serialize to 1D, compute speed, and filter.
 
@@ -157,6 +125,7 @@ class MazeDataset(BasePlaceCellDataset):
             raise RuntimeError("arm_order must be set in data config for maze analysis.")
 
         bcfg = self.cfg.behavior
+        scfg = self.spatial_1d
 
         # Load behavior graph for physical arm lengths (optional)
         if self.behavior_graph_path is not None and self.behavior_graph_path.exists():
@@ -177,8 +146,19 @@ class MazeDataset(BasePlaceCellDataset):
             arm_lengths=self.arm_lengths,
         )
 
+        # Jump removal on 1D position (symmetric with arena pipeline)
+        self.trajectory_1d, n_jumps = remove_position_jumps_1d(
+            self.trajectory_1d, threshold_mm=bcfg.jump_threshold_mm
+        )
+        if n_jumps > 0:
+            logger.info(
+                "1D jump removal: %d frames interpolated (threshold %.0f mm)",
+                n_jumps,
+                bcfg.jump_threshold_mm,
+            )
+
         # Optionally split by traversal direction (doubles segments)
-        if bcfg.split_by_direction:
+        if scfg.split_by_direction:
             self.trajectory_1d, self.effective_arm_order = assign_traversal_direction(
                 self.trajectory_1d,
                 arm_order=dcfg.arm_order,
@@ -192,7 +172,7 @@ class MazeDataset(BasePlaceCellDataset):
         # Optionally filter to complete traversals only (room-to-room)
         # Keep pre-filter copy for visualization
         self.trajectory_1d_all = self.trajectory_1d.copy()
-        if bcfg.require_complete_traversal:
+        if scfg.require_complete_traversal:
             self.trajectory_1d = filter_complete_traversals(
                 self.trajectory_1d,
                 full_trajectory=self.trajectory,
@@ -236,7 +216,7 @@ class MazeDataset(BasePlaceCellDataset):
             len(self.trajectory_1d),
             len(self.trajectory_1d_filtered),
             n_segments,
-            " (direction split)" if bcfg.split_by_direction else "",
+            " (direction split)" if scfg.split_by_direction else "",
             self.pos_range[0],
             self.pos_range[1],
         )
@@ -252,13 +232,11 @@ class MazeDataset(BasePlaceCellDataset):
         if self.trajectory is None:
             raise RuntimeError("Call load() first.")
 
-        bcfg = self.cfg.behavior
-
         self.event_place = build_event_place_dataframe(
             event_index=self.event_index,
             neural_timestamp_path=self.neural_timestamp_path,
             behavior_with_speed=self.trajectory,
-            behavior_fps=bcfg.behavior_fps,
+            behavior_fps=self.data_cfg.behavior_fps,
             speed_threshold=0.0,  # no 2D speed filter; use speed_1d later
         )
 
@@ -302,8 +280,8 @@ class MazeDataset(BasePlaceCellDataset):
             trajectory_df=self.trajectory_1d_filtered,
             n_bins=n_bins,
             pos_range=self.pos_range,
-            behavior_fps=self.cfg.behavior.behavior_fps,
-            occupancy_sigma=scfg.occupancy_sigma,
+            behavior_fps=self.data_cfg.behavior_fps,
+            spatial_sigma=scfg.spatial_sigma,
             min_occupancy=scfg.min_occupancy,
             segment_bins=self.segment_bins,
         )
@@ -354,15 +332,8 @@ class MazeDataset(BasePlaceCellDataset):
             occupancy_time=self.occupancy_time,
             valid_mask=self.valid_mask,
             edges=self.edges_1d,
-            activity_sigma=scfg.activity_sigma,
-            n_shuffles=scfg.n_shuffles,
-            behavior_fps=bcfg.behavior_fps,
-            min_occupancy=scfg.min_occupancy,
-            occupancy_sigma=scfg.occupancy_sigma,
-            min_shift_seconds=scfg.min_shift_seconds,
-            si_weight_mode=scfg.si_weight_mode,
-            n_split_blocks=scfg.n_split_blocks,
-            block_shifts=scfg.block_shifts,
+            scfg=scfg,
+            behavior_fps=self.data_cfg.behavior_fps,
             segment_bins=self.segment_bins,
         )
 
@@ -499,7 +470,7 @@ class MazeDataset(BasePlaceCellDataset):
                         self.trajectory_1d,
                         place_cell_results,
                         self.edges_1d,
-                        behavior_fps=self.cfg.behavior.behavior_fps,
+                        behavior_fps=self.data_cfg.behavior_fps,
                         speed_threshold=self.cfg.behavior.speed_threshold,
                         trajectory_1d_filtered=self.trajectory_1d_filtered,
                         arm_boundaries=self.arm_boundaries,
@@ -563,8 +534,7 @@ class MazeDataset(BasePlaceCellDataset):
         """
         path = Path(path)
 
-        # Use the parent loader to get a base dataset, then upgrade
-        base = BasePlaceCellDataset.load_bundle.__func__(cls, path)
+        base = cls._load_bundle_data(path)
 
         # Restore 1D trajectories
         t1d_path = path / "trajectory_1d.parquet"

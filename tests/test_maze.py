@@ -4,11 +4,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from placecell.maze import (
+from placecell.maze_helper import (
     assign_traversal_direction,
     compute_speed_1d,
     compute_arm_lengths,
     filter_arm_by_speed,
+    remove_position_jumps_1d,
     serialize_arm_position,
 )
 
@@ -225,6 +226,42 @@ class TestFilterArmBySpeed:
         result = filter_arm_by_speed(traj_1d, speed_threshold=0.0)
         assert "beh_frame_index" in result.columns
         assert "frame_index" not in result.columns
+
+
+class TestRemovePositionJumps1D:
+    def test_interpolates_within_arm(self):
+        """Jumps within the same arm should be detected and interpolated."""
+        df = pd.DataFrame({
+            "frame_index": [0, 1, 2, 3, 4],
+            "pos_1d": [10.0, 20.0, 500.0, 30.0, 40.0],  # frame 2 is a jump
+            "arm_index": [0, 0, 0, 0, 0],
+        })
+        result, n_fixed = remove_position_jumps_1d(df, threshold_mm=100.0)
+        assert n_fixed == 2  # frames 2 and 3 both arrive via jumps
+        # Both NaN'd, interpolated linearly between 20.0 (frame 1) and 40.0 (frame 4)
+        assert result["pos_1d"].iloc[2] == pytest.approx(26.67, abs=0.1)
+        assert result["pos_1d"].iloc[3] == pytest.approx(33.33, abs=0.1)
+
+    def test_ignores_cross_arm_jumps(self):
+        """Jumps across arm boundaries should NOT be flagged."""
+        df = pd.DataFrame({
+            "frame_index": [0, 1, 2, 3],
+            "pos_1d": [10.0, 12.0, 500.0, 502.0],  # big cross-arm jump at frame 2
+            "arm_index": [0, 0, 1, 1],  # arm change at frame 2
+        })
+        result, n_fixed = remove_position_jumps_1d(df, threshold_mm=100.0)
+        assert n_fixed == 0
+
+    def test_no_jumps_returns_copy(self):
+        """When no jumps exist, return unchanged copy."""
+        df = pd.DataFrame({
+            "frame_index": [0, 1, 2],
+            "pos_1d": [10.0, 15.0, 20.0],
+            "arm_index": [0, 0, 0],
+        })
+        result, n_fixed = remove_position_jumps_1d(df, threshold_mm=100.0)
+        assert n_fixed == 0
+        np.testing.assert_array_equal(result["pos_1d"].values, [10.0, 15.0, 20.0])
 
 
 class TestComputeArmLengths:

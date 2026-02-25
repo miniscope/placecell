@@ -8,10 +8,10 @@ except ImportError:
 from placecell.dataset import (
     ArenaDataset,
     BasePlaceCellDataset,
+    MazeDataset,
     UnitResult,
     unique_bundle_path,
 )
-from placecell.maze_dataset import MazeDataset
 
 __all__ = [
     "ArenaDataset",

@@ -7,13 +7,14 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from placecell.analysis import (
+from placecell.analysis.spatial_2d import (
     compute_occupancy_map,
     compute_rate_map,
     compute_spatial_information,
     compute_unit_analysis,
     gaussian_filter_normalized,
 )
+from placecell.config import SpatialMap2DConfig
 from placecell.behavior import (
     build_event_place_dataframe,
     compute_behavior_speed,
@@ -109,7 +110,7 @@ def test_compute_occupancy_map(assets_dir: Path) -> None:
     trajectory = trajectory.dropna()
 
     occupancy, valid_mask, x_edges, y_edges = compute_occupancy_map(
-        trajectory, bins=20, behavior_fps=20.0, occupancy_sigma=1.0, min_occupancy=0.1
+        trajectory, bins=20, behavior_fps=20.0, spatial_sigma=1.0, min_occupancy=0.1
     )
 
     np.testing.assert_allclose(occupancy, ref["occupancy"], rtol=1e-10)
@@ -135,7 +136,7 @@ def test_compute_rate_map(assets_dir: Path) -> None:
     ]
 
     rate_map = compute_rate_map(
-        unit_events, ref["occupancy"], ref["valid_mask"], x_edges, y_edges, activity_sigma=1.0
+        unit_events, ref["occupancy"], ref["valid_mask"], x_edges, y_edges, spatial_sigma=1.0
     )
 
     # Use nan-aware comparison
@@ -170,7 +171,7 @@ def test_compute_spatial_information(assets_dir: Path) -> None:
     si, p_val, shuffled = compute_spatial_information(
         unit_events, trajectory, ref["occupancy"], ref["valid_mask"],
         ref["x_edges"], ref["y_edges"], n_shuffles=100, random_seed=42,
-        activity_sigma=1.0,
+        spatial_sigma=1.0,
     )
 
     assert si == pytest.approx(float(ref["spatial_info"]), rel=1e-10)
@@ -211,6 +212,16 @@ def test_compute_unit_analysis(assets_dir: Path) -> None:
         (df_filtered["y"] >= y_edges[0]) & (df_filtered["y"] <= y_edges[-1])
     ]
 
+    scfg = SpatialMap2DConfig(
+        bins=20,
+        min_occupancy=0.1,
+        spatial_sigma=1.0,
+        n_shuffles=100,
+        si_weight_mode="amplitude",
+        event_threshold_sigma=2.0,
+        min_shift_seconds=0.0,
+    )
+
     result = compute_unit_analysis(
         unit_id=unit_id,
         df_filtered=df_filtered,
@@ -219,9 +230,8 @@ def test_compute_unit_analysis(assets_dir: Path) -> None:
         valid_mask=ref["valid_mask"],
         x_edges=x_edges,
         y_edges=y_edges,
-        activity_sigma=1.0,
-        event_threshold_sigma=2.0,
-        n_shuffles=100,
+        scfg=scfg,
+        behavior_fps=20.0,
         random_seed=42,
     )
 

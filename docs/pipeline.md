@@ -4,73 +4,25 @@ This document explains how the spatial neural activity analysis pipeline works.
 
 ## Overview
 
-:::{dropdown} Pipeline Flowchart
-```mermaid
-flowchart TD
-    subgraph Input
-        subgraph Neural
-            A[("traces (.zarr)")]
-            B[("timestamp (.csv)")]
-        end
-        subgraph Behavior
-            C[("position (.csv)")]
-            D[("timestamp (.csv)")]
-        end
-    end
+Both `ArenaDataset` (2D) and `MazeDataset` (1D) implement the same abstract pipeline defined by `BasePlaceCellDataset`. Each step depends on the previous one.
 
-    subgraph load ["ds.load()"]
-        A --> traces[Calcium Traces]
-        C --> load_beh("Load Positions<br/>• Compute Speed")
-        D --> load_beh
-        load_beh --> traj["Trajectory"]
-    end
-
-    subgraph preprocess ["ds.preprocess_behavior()"]
-        traj --> PP("• Jump Removal<br/>• Perspective Correction<br/>• Boundary Clipping<br/>• Recompute Speed (mm/s)")
-        PP --> SF(Speed Filter)
-        SF --> traj_filt[Filtered Trajectory]
-    end
-
-    subgraph deconv ["ds.deconvolve()"]
-        traces --> OASIS(OASIS AR2 Deconvolution)
-        OASIS --> S_list[Event Trains]
-        OASIS --> event_idx[(event_index)]
-    end
-
-    subgraph match ["ds.match_events()"]
-        event_idx --> EM("• Timestamp Matching<br/>• Speed Filter")
-        B --> EM
-        traj --> EM
-        EM --> event_place[(event_place)]
-    end
-
-    subgraph occupancy ["ds.compute_occupancy()"]
-        traj_filt --> OCC(Occupancy Map)
-    end
-
-    event_place --> unit_input["• Events<br/>• Occupancy<br/>• Filtered Trajectory"]
-    OCC --> unit_input
-    traj_filt --> unit_input
-
-    subgraph analyze ["ds.analyze_units() — per unit"]
-        unit_input --> RM(Rate Map)
-        unit_input --> SI("Spatial Information<br/>+ Shuffle Test")
-        SI --> pval[SI p-value]
-        unit_input --> RATE_SHUF("Shuffled Rate<br/>Percentile")
-        RATE_SHUF --> PF("Place Field Detection")
-        unit_input --> STAB("Split-Half Stability<br/>+ Shuffle Test")
-        STAB --> stab_p[Stability p-value]
-    end
-
-    subgraph results [Results]
-        pval --> PC{"Place Cell<br/>Classification"}
-        stab_p --> PC
-        PF --> COV(Coverage Analysis)
-        PC --> browse(Interactive Browser)
-        COV --> browse
-    end
 ```
-:::
+from_yaml(config, data_path)    # Parse configs, auto-select subclass based on behavior.type
+  │
+load()                          # Load neural traces + behavior positions + visualization assets
+  │
+preprocess_behavior()           # Approach-specific corrections + speed filter
+  │
+deconvolve()                    # OASIS AR(2) deconvolution → event_index
+  │
+match_events()                  # Neural events → behavior positions → event_place
+  │
+compute_occupancy()             # Spatial occupancy map (2D histogram or 1D bins)
+  │
+analyze_units()                 # Per-unit: rate map, SI + shuffle, stability + shuffle, place fields
+  │
+save_bundle()                   # .pcellbundle directory with config, arrays, parquets, figures
+```
 
 ## Data Files
 
@@ -130,14 +82,14 @@ Saves a copy of the raw trajectory in `trajectory_raw`, then applies corrections
 ### `ds.compute_occupancy()`
 
 - Compute 2D occupancy histogram from `trajectory_filtered`
-- Smooth with `occupancy_sigma`, mask bins below `min_occupancy`
+- Smooth with `spatial_sigma`, mask bins below `min_occupancy`
 - Output: `occupancy_time`, `valid_mask`, bin edges
 
 ### `ds.analyze_units()` — per unit
 
 Four independent computations from the same inputs (events, filtered trajectory, occupancy):
 
-- **Rate map**: event weights / occupancy time, smoothed with `activity_sigma` (for display)
+- **Rate map**: event weights / occupancy time, smoothed with `spatial_sigma` (for display)
 - **Spatial information + shuffle test**: Skaggs SI with circular-shift shuffle → SI p-value
 - **Shuffled rate percentile**: per-bin percentile of shuffled rate maps → used for place field seed detection
 - **Split-half stability + shuffle test**: correlation between first/second half rate maps with circular-shift shuffle → stability p-value
@@ -159,8 +111,7 @@ Four independent computations from the same inputs (events, filtered trajectory,
 - `speed_threshold`: minimum speed to include data (mm/s)
 - `min_occupancy`: minimum time per bin to be valid (seconds)
 - `bins`: spatial resolution (number of bins per axis)
-- `occupancy_sigma`: Gaussian smoothing sigma for occupancy map (in bins)
-- `activity_sigma`: Gaussian smoothing sigma for rate map (in bins)
+- `spatial_sigma`: Gaussian smoothing sigma for occupancy and rate maps (in bins)
 - `n_shuffles`: number of circular-shift shuffle iterations
 - `min_shift_seconds`: minimum circular shift for shuffle test (seconds)
 - `p_value_threshold`: p-value threshold for both SI and stability significance
@@ -175,9 +126,9 @@ Four independent computations from the same inputs (events, filtered trajectory,
 
 :::{dropdown} data_paths.yaml
 ```yaml
-id: data_paths
-mio_model: placecell.config.DataConfig
-mio_version: 0.8.1
+type: arena  # 'arena' for 2D open-field, 'maze' for 1D arm analysis
+behavior_fps: 20.0  # Behavior camera sampling rate (Hz)
+bodypart: LED  # DLC bodypart name for position tracking
 neural_path: path/to/neural
 neural_timestamp: path/to/neural_timestamp.csv
 behavior_position: path/to/behavior_position.csv
@@ -189,14 +140,9 @@ behavior_timestamp: path/to/behavior_timestamp.csv
 
 :::{dropdown} pcell_config.yaml
 ```yaml
-id: pcell_config
-mio_model: pcell.config.AnalysisConfig
-mio_version: 0.8.1
 neural:
-  id: neural
   fps: 20.0
   oasis:
-    id: oasis
     g: [1.60, -0.63]  # AR(2) coefficients (required, usually overridden by data config)
     baseline: p10
     penalty: 0.8  # Sparsity penalty (higher = fewer events). Default 0.
@@ -204,27 +150,22 @@ neural:
   trace_name: C_lp
 
 behavior:
-  id: behavior
-  behavior_fps: 20.0
+  type: arena
   speed_threshold: 10.0  # mm/s
   speed_window_frames: 5
-  bodypart: LED
   jump_threshold_mm: 100  # Max plausible frame-to-frame displacement (mm)
   spatial_map_2d:
-    id: spatial_map_2d
     bins: 50
     min_occupancy: 0.025  # Minimum occupancy (in seconds) to include a bin
-    occupancy_sigma: 3  # Gaussian smoothing (in bins) for occupancy map
-    activity_sigma: 3  # Gaussian smoothing (in bins) for rate map
+    spatial_sigma: 3  # Gaussian smoothing (in bins) for occupancy and rate maps
     n_shuffles: 1000
     random_seed: 1
-    event_threshold_sigma: 0  # Sigma multiplier for event amplitude threshold
+    event_threshold_sigma: 0  # Event threshold in SDs above mean (for trajectory plot only)
     p_value_threshold: 0.05  # P-value threshold for SI and stability
     min_shift_seconds: 20  # Minimum circular shift (seconds) for shuffle test
     si_weight_mode: amplitude  # 'amplitude' or 'binary'
     place_field_threshold: 0.35  # Fraction of peak rate for place field boundary
     place_field_min_bins: 5  # Minimum contiguous bins for a place field
     place_field_seed_percentile: 95  # Percentile of shuffled rates for seed detection
-    trace_time_window: 600  # Time window (seconds) for trace display
 ```
 :::

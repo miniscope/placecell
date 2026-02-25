@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 
-from placecell.analysis import (
+from placecell.analysis.spatial_2d import (
     gaussian_filter_normalized,
     compute_occupancy_map,
     compute_rate_map,
@@ -30,7 +30,7 @@ trajectory = pd.DataFrame({
 trajectory = trajectory.dropna()  # Use full trajectory
 
 occupancy, valid_mask, x_edges, y_edges = compute_occupancy_map(
-    trajectory, bins=20, behavior_fps=20.0, occupancy_sigma=1.0, min_occupancy=0.1
+    trajectory, bins=20, behavior_fps=20.0, spatial_sigma=1.0, min_occupancy=0.1
 )
 
 # 3. Get unit events for all tests (consistent filtering)
@@ -56,13 +56,13 @@ print(f"Unit {unit_id} has {len(unit_events)} events after filtering")
 
 # 4. compute_rate_map - using consistently filtered events
 rate_map = compute_rate_map(
-    unit_events, occupancy, valid_mask, x_edges, y_edges, activity_sigma=1.0
+    unit_events, occupancy, valid_mask, x_edges, y_edges, spatial_sigma=1.0
 )
 
 # 5. compute_spatial_information - using same events (smoothed, matching literature)
 si, p_val, shuffled_sis = compute_spatial_information(
     unit_events, trajectory_si, occupancy, valid_mask, x_edges, y_edges,
-    n_shuffles=100, random_seed=42, activity_sigma=1.0
+    n_shuffles=100, random_seed=42, spatial_sigma=1.0
 )
 
 # 6. vis_threshold for compute_unit_analysis test

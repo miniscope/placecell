@@ -1,3 +1,5 @@
+type: maze
+behavior_fps: 20.0
 behavior_graph: behavior_graph.yaml
 mm_per_pixel: 1.0
 behavior_position: behavior_position.csv
