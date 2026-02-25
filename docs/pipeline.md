@@ -126,9 +126,7 @@ Four independent computations from the same inputs (events, filtered trajectory,
 
 :::{dropdown} data_paths.yaml
 ```yaml
-id: data_paths
-mio_model: placecell.config.DataConfig
-mio_version: 0.8.1
+type: arena  # 'arena' for 2D open-field, 'maze' for 1D arm analysis
 behavior_fps: 20.0  # Behavior camera sampling rate (Hz)
 bodypart: LED  # DLC bodypart name for position tracking
 neural_path: path/to/neural
@@ -142,14 +140,9 @@ behavior_timestamp: path/to/behavior_timestamp.csv
 
 :::{dropdown} pcell_config.yaml
 ```yaml
-id: pcell_config
-mio_model: pcell.config.AnalysisConfig
-mio_version: 0.8.1
 neural:
-  id: neural
   fps: 20.0
   oasis:
-    id: oasis
     g: [1.60, -0.63]  # AR(2) coefficients (required, usually overridden by data config)
     baseline: p10
     penalty: 0.8  # Sparsity penalty (higher = fewer events). Default 0.
@@ -157,13 +150,11 @@ neural:
   trace_name: C_lp
 
 behavior:
-  id: behavior
   type: arena
   speed_threshold: 10.0  # mm/s
   speed_window_frames: 5
   jump_threshold_mm: 100  # Max plausible frame-to-frame displacement (mm)
   spatial_map_2d:
-    id: spatial_map_2d
     bins: 50
     min_occupancy: 0.025  # Minimum occupancy (in seconds) to include a bin
     spatial_sigma: 3  # Gaussian smoothing (in bins) for occupancy and rate maps

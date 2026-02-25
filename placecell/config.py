@@ -4,8 +4,6 @@ from pathlib import Path
 from typing import Any, Literal, Union, get_args, get_origin
 
 import yaml
-from mio.models import MiniscopeConfig
-from mio.models.mixins import ConfigYAMLMixin
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from placecell.log import init_logger
@@ -55,7 +53,7 @@ class NeuralConfig(BaseModel):
     )
 
 
-class SpatialMapConfig(BaseModel):
+class BaseSpatialMapConfig(BaseModel):
     """Base spatial map configuration shared by all analysis approaches.
 
     Defines the common analysis contract: occupancy filtering, smoothing,
@@ -131,7 +129,7 @@ class SpatialMapConfig(BaseModel):
     )
 
 
-class SpatialMap2DConfig(SpatialMapConfig):
+class SpatialMap2DConfig(BaseSpatialMapConfig):
     """Spatial map configuration for 2D arena analysis."""
 
     bins: int = Field(
@@ -175,7 +173,7 @@ class SpatialMap2DConfig(SpatialMapConfig):
     )
 
 
-class SpatialMap1DConfig(SpatialMapConfig):
+class SpatialMap1DConfig(BaseSpatialMapConfig):
     """Spatial map configuration for 1D arm analysis."""
 
     bin_width_mm: float = Field(
@@ -297,33 +295,38 @@ class BehaviorConfig(BaseModel):
         return self
 
 
-_MIO_METADATA_KEYS = frozenset({"id", "mio_model", "mio_version"})
-
-
-class DataConfig(BaseModel):
-    """Per-session data configuration (file paths, calibration, overrides)."""
+class BaseDataConfig(BaseModel):
+    """Per-session data configuration — shared fields for all analysis types."""
 
     @model_validator(mode="before")
     @classmethod
     def _warn_unknown_keys(cls, data: Any) -> Any:
         """Warn on unrecognised keys (catches typos like ``config_ovrride``)."""
         if isinstance(data, dict):
-            known = set(cls.model_fields) | _MIO_METADATA_KEYS
+            known = set(cls.model_fields)
             for key in data:
                 if key not in known:
                     logger.warning(
-                        "DataConfig: unknown key '%s' (valid: %s)",
+                        "BaseDataConfig: unknown key '%s' (valid: %s)",
                         key,
                         ", ".join(sorted(cls.model_fields)),
                     )
         return data
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> "DataConfig":
-        """Load from a YAML file."""
+    def from_yaml(cls, path: str | Path) -> "ArenaDataConfig | MazeDataConfig":
+        """Load from a YAML file, dispatching to the correct subclass via ``type``."""
         with open(path) as f:
             data = yaml.safe_load(f)
-        return cls(**data)
+        t = data.get("type")
+        if t == "maze":
+            return MazeDataConfig(**data)
+        elif t == "arena":
+            return ArenaDataConfig(**data)
+        else:
+            raise ValueError(
+                f"BaseDataConfig requires 'type: arena' or 'type: maze' in YAML, got: {t!r}"
+            )
 
     behavior_fps: float = Field(
         ...,
@@ -353,6 +356,32 @@ class DataConfig(BaseModel):
         None,
         description="Path to behavior video file (e.g. .mp4). Used for arena bounds verification.",
     )
+    bodypart: str | None = Field(
+        None,
+        description="Body part name to use for position tracking (e.g. 'LED').",
+    )
+    x_col: str = Field(
+        "x",
+        description="Coordinate column name for the x-axis in the behavior CSV.",
+    )
+    y_col: str = Field(
+        "y",
+        description="Coordinate column name for the y-axis in the behavior CSV.",
+    )
+    config_override: dict[str, Any] | None = Field(
+        None,
+        description=(
+            "Arbitrary overrides for the analysis config. "
+            "Keys mirror the AnalysisConfig structure and are deep-merged. "
+            "Example: {neural: {oasis: {penalty: 0.5}}, behavior: {speed_threshold: 30}}"
+        ),
+    )
+
+
+class ArenaDataConfig(BaseDataConfig):
+    """Per-session data configuration for 2D open-field (arena) analysis."""
+
+    type: Literal["arena"] = "arena"
     arena_bounds: tuple[float, float, float, float] | None = Field(
         None,
         description=(
@@ -379,6 +408,12 @@ class DataConfig(BaseModel):
         description="Height of tracked point (e.g. LED) above arena floor in mm. "
         "Required when arena_bounds is set.",
     )
+
+
+class MazeDataConfig(BaseDataConfig):
+    """Per-session data configuration for 1D maze (arm) analysis."""
+
+    type: Literal["maze"] = "maze"
     behavior_graph: str | None = Field(
         None,
         description="Path to behavior graph YAML with zone polylines.",
@@ -387,18 +422,6 @@ class DataConfig(BaseModel):
         None,
         gt=0.0,
         description="Scale factor (mm per pixel) for converting graph coordinates to mm.",
-    )
-    bodypart: str | None = Field(
-        None,
-        description="Body part name to use for position tracking (e.g. 'LED').",
-    )
-    x_col: str = Field(
-        "x",
-        description="Coordinate column name for the x-axis in the behavior CSV.",
-    )
-    y_col: str = Field(
-        "y",
-        description="Coordinate column name for the y-axis in the behavior CSV.",
     )
     arm_order: list[str] | None = Field(
         None,
@@ -430,25 +453,6 @@ class DataConfig(BaseModel):
         description="Zone detection algorithm parameters. "
         "Required for the detect-zones CLI command.",
     )
-    config_override: dict[str, Any] | None = Field(
-        None,
-        description=(
-            "Arbitrary overrides for the analysis config. "
-            "Keys mirror the AnalysisConfig structure and are deep-merged. "
-            "Example: {neural: {oasis: {penalty: 0.5}}, behavior: {speed_threshold: 30}}"
-        ),
-    )
-
-
-class _PlacecellConfigMixin(ConfigYAMLMixin):
-    """Override config sources to include placecell bundled configs."""
-
-    @classmethod
-    def config_sources(cls) -> list[Path]:
-        from mio import CONFIG_DIR as MIO_CONFIG_DIR
-        from mio import Config
-
-        return [Config().config_dir, CONFIG_DIR, MIO_CONFIG_DIR]
 
 
 def _deep_merge(base: dict, override: dict) -> None:
@@ -485,20 +489,27 @@ def _validate_override_keys(
                 _validate_override_keys(ann, val, f"{path}{key}.")
 
 
-class AnalysisConfig(MiniscopeConfig, _PlacecellConfigMixin):
-    """Top-level application configuration."""
+class AnalysisConfig(BaseModel):
+    """Top-level analysis configuration."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid") # Maybe overkill but keeping for now.
 
     neural: NeuralConfig
     behavior: BehaviorConfig
 
-    def with_data_overrides(self, data_cfg: DataConfig) -> "AnalysisConfig":
+    @classmethod
+    def from_yaml(cls, path: str | Path) -> "AnalysisConfig":
+        """Load from a YAML file."""
+        with open(path) as f:
+            data = yaml.safe_load(f)
+        return cls(**data)
+
+    def with_data_overrides(self, data_cfg: BaseDataConfig) -> "AnalysisConfig":
         """Create a new config with data-specific overrides applied.
 
         Parameters
         ----------
-        data_cfg : DataConfig
+        data_cfg : BaseDataConfig
             Data configuration that may contain a ``config_override`` dict.
 
         Returns

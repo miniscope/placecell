@@ -111,11 +111,13 @@ def analysis(
 @click.option("--arms", type=int, required=True, help="Number of arms.")
 def define_zones_cmd(data_path: str, rooms: int, arms: int) -> None:
     """Interactive zone definition tool (requires OpenCV)."""
-    from placecell.config import DataConfig
+    from placecell.config import BaseDataConfig, MazeDataConfig
     from placecell.define_zones import define_zones
 
     data_p = Path(data_path)
-    data_cfg = DataConfig.from_yaml(data_p)
+    data_cfg = BaseDataConfig.from_yaml(data_p)
+    if not isinstance(data_cfg, MazeDataConfig):
+        raise click.UsageError("define-zones requires a maze-type data config (type: maze)")
     data_dir = data_p.parent
 
     if not data_cfg.behavior_video:
@@ -167,11 +169,13 @@ def detect_zones_cmd(data_path: str, output: str | None, interpolate: int | None
     """Run zone detection on tracking CSV using the zone graph."""
     from tqdm.auto import tqdm
 
-    from placecell.config import DataConfig, ZoneDetectionConfig
+    from placecell.config import BaseDataConfig, MazeDataConfig, ZoneDetectionConfig
     from placecell.zone_detection import backup_file, detect_zones_from_csv
 
     data_p = Path(data_path)
-    data_cfg = DataConfig.from_yaml(data_p)
+    data_cfg = BaseDataConfig.from_yaml(data_p)
+    if not isinstance(data_cfg, MazeDataConfig):
+        raise click.UsageError("detect-zones requires a maze-type data config (type: maze)")
     data_dir = data_p.parent
 
     if not data_cfg.behavior_graph:

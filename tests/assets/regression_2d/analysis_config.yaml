@@ -1,11 +1,6 @@
-id: regression_test_config
-mio_model: pcell.config.AnalysisConfig
-mio_version: 0.8.1
 neural:
-  id: neural
   fps: 20.0
   oasis:
-    id: oasis
     g:
     - 1.3805576774138437
     - -0.4111122905071874
@@ -14,13 +9,11 @@ neural:
     s_min: 0
   trace_name: C_lp
 behavior:
-  id: behavior
   type: arena
   speed_threshold: 25.0
   speed_window_frames: 5
   jump_threshold_mm: 100
   spatial_map_2d:
-    id: spatial_map
     bins: 50
     min_occupancy: 0.025
     spatial_sigma: 3

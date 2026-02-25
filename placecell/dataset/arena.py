@@ -20,7 +20,7 @@ from placecell.behavior import (
     recompute_speed,
     remove_position_jumps,
 )
-from placecell.config import SpatialMapConfig
+from placecell.config import BaseSpatialMapConfig
 from placecell.dataset.base import BasePlaceCellDataset, UnitResult
 from placecell.loaders import load_behavior_data
 from placecell.log import init_logger
@@ -36,7 +36,7 @@ class ArenaDataset(BasePlaceCellDataset):
     """
 
     @property
-    def spatial(self) -> "SpatialMapConfig":
+    def spatial(self) -> "BaseSpatialMapConfig":
         """Shortcut to 2D spatial map config."""
         return self.cfg.behavior.spatial_map_2d
 

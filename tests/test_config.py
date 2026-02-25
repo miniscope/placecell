@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from placecell.config import AnalysisConfig, DataConfig, OasisConfig
+from placecell.config import AnalysisConfig, ArenaDataConfig, BaseDataConfig, OasisConfig
 
 
 def test_config_loads(example_config_path: Path) -> None:
@@ -24,14 +24,12 @@ def test_oasis_config_g_required() -> None:
 
 
 def test_data_paths_config_loads(assets_dir: Path) -> None:
-    """DataConfig should load from YAML."""
+    """BaseDataConfig should load from YAML."""
     # Create a temporary data paths config
     import tempfile
 
     config_content = """
-id: test_data_paths
-mio_model: placecell.config.DataConfig
-mio_version: 0.8.1
+type: arena
 behavior_fps: 20.0
 neural_path: neural_data
 neural_timestamp: neural_data/neural_timestamp.csv
@@ -43,7 +41,8 @@ behavior_timestamp: behavior/behavior_timestamp.csv
         temp_path = Path(f.name)
 
     try:
-        cfg = DataConfig.from_yaml(temp_path)
+        cfg = BaseDataConfig.from_yaml(temp_path)
+        assert isinstance(cfg, ArenaDataConfig)
         assert cfg.neural_path == "neural_data"
         assert cfg.neural_timestamp == "neural_data/neural_timestamp.csv"
         assert cfg.behavior_position == "behavior/behavior_position.csv"

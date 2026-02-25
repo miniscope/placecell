@@ -1,6 +1,3 @@
-id: pcell_maze_config
-mio_model: pcell.config.AnalysisConfig
-mio_version: 0.8.1
 neural:
   fps: 20.0
   oasis:

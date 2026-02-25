@@ -13,8 +13,9 @@ import xarray as xr
 
 from placecell.config import (
     AnalysisConfig,
-    DataConfig,
-    SpatialMapConfig,
+    BaseSpatialMapConfig,
+    BaseDataConfig,
+    MazeDataConfig,
 )
 from placecell.loaders import load_visualization_data
 from placecell.log import init_logger
@@ -153,7 +154,7 @@ class BasePlaceCellDataset(abc.ABC):
         behavior_video_path: Path | None = None,
         behavior_graph_path: Path | None = None,
         zone_tracking_path: Path | None = None,
-        data_cfg: DataConfig | None = None,
+        data_cfg: BaseDataConfig | None = None,
     ) -> None:
         self.cfg = cfg
         self.neural_path = neural_path
@@ -200,20 +201,15 @@ class BasePlaceCellDataset(abc.ABC):
         Parameters
         ----------
         config:
-            Analysis config — either a file path or a config id
-            (resolved via ``AnalysisConfig.from_id``).
+            Path to the analysis config YAML file.
         data_path:
             Path to the per-session data paths YAML file.
         """
-        config_p = Path(config)
-        if config_p.exists():
-            cfg = AnalysisConfig.from_yaml(config_p)
-        else:
-            cfg = AnalysisConfig.from_id(str(config))
+        cfg = AnalysisConfig.from_yaml(Path(config))
 
         data_path = Path(data_path)
         data_dir = data_path.parent
-        data_cfg = DataConfig.from_yaml(data_path)
+        data_cfg = BaseDataConfig.from_yaml(data_path)
         cfg = cfg.with_data_overrides(data_cfg)
 
         # Auto-select subclass based on behavior type
@@ -237,10 +233,14 @@ class BasePlaceCellDataset(abc.ABC):
                 data_dir / data_cfg.behavior_video if data_cfg.behavior_video else None
             ),
             behavior_graph_path=(
-                data_dir / data_cfg.behavior_graph if data_cfg.behavior_graph else None
+                data_dir / data_cfg.behavior_graph
+                if isinstance(data_cfg, MazeDataConfig) and data_cfg.behavior_graph
+                else None
             ),
             zone_tracking_path=(
-                data_dir / data_cfg.zone_tracking if data_cfg.zone_tracking else None
+                data_dir / data_cfg.zone_tracking
+                if isinstance(data_cfg, MazeDataConfig) and data_cfg.zone_tracking
+                else None
             ),
             data_cfg=data_cfg,
         )
@@ -252,7 +252,7 @@ class BasePlaceCellDataset(abc.ABC):
         ...
 
     @property
-    def _spatial_cfg(self) -> "SpatialMapConfig | None":
+    def _spatial_cfg(self) -> "BaseSpatialMapConfig | None":
         """Return whichever spatial map config is set."""
         bcfg = self.cfg.behavior
         return bcfg.spatial_map_2d or bcfg.spatial_map_1d

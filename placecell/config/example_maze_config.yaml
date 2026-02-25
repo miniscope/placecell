@@ -1,11 +1,6 @@
-id: pcell_maze_config
-mio_model: pcell.config.AnalysisConfig
-mio_version: 0.8.1
 neural:
-  id: neural
   fps: 20.0
   oasis:
-    id: oasis
     g: [1.60, -0.63]
     baseline: p10
     penalty: 0.8
@@ -13,7 +8,6 @@ neural:
   trace_name: C_lp
 
 behavior:
-  id: behavior
   type: maze
   speed_threshold: 25 # mm/s (when behavior_graph provides physical units)
   speed_window_frames: 5

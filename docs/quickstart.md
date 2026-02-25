@@ -26,9 +26,7 @@ Create `data_paths.yaml` with paths relative to this file:
 
 :::{dropdown} data_paths.yaml
 ```yaml
-id: your_data
-mio_model: placecell.config.DataConfig
-mio_version: 0.8.1
+type: arena  # 'arena' for 2D open-field, 'maze' for 1D arm analysis
 # Directory containing zarr files (C.zarr, A.zarr, max_proj.zarr)
 neural_path: path/to/minian_output
 neural_timestamp: path/to/neural_timestamp.csv
@@ -43,26 +41,18 @@ Create `config.yaml` with analysis parameters:
 
 :::{dropdown} config.yaml
 ```yaml
-id: your_config
-mio_model: placecell.config.AnalysisConfig
-mio_version: 0.8.1
 neural:
-  id: neural
   fps: 20.0
   trace_name: C
   oasis:
-    id: oasis
     g: [1.60, -0.63]
     baseline: p10
     penalty: 0
 behavior:
-  id: behavior
-  behavior_fps: 20.0
-  bodypart: LED
+  type: arena
   speed_threshold: 10.0
   speed_window_frames: 5
   spatial_map_2d:
-    id: spatial_map_2d
     bins: 50
     min_occupancy: 0.05
     spatial_sigma: 3
