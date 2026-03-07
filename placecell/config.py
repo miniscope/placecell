@@ -270,9 +270,7 @@ class BaseDataConfig(BaseModel):
         elif t == "arena":
             return ArenaDataConfig(**data)
         else:
-            raise ValueError(
-                f"DataConfig requires 'type: arena' or 'type: maze', got: {t!r}"
-            )
+            raise ValueError(f"DataConfig requires 'type: arena' or 'type: maze', got: {t!r}")
 
     behavior_fps: float = Field(..., gt=0.0, description="Behavior camera fps.")
     neural_path: str = Field(..., description="Directory containing neural zarr files.")
