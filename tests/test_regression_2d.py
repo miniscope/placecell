@@ -5,6 +5,7 @@ compares every output against a saved reference bundle.  The reference
 was generated once from a real dataset (requires ProcData drive).
 """
 
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -170,4 +171,32 @@ def test_rate_maps(
             atol=1e-10,
             equal_nan=True,
             err_msg=f"unit {uid} rate_map",
+        )
+
+
+# ── Save/load round-trip ────────────────────────────────────────────
+
+
+def test_save_load_bundle_roundtrip(
+    pipeline_result: ArenaDataset,
+) -> None:
+    """save_bundle → load_bundle must round-trip without error and preserve results."""
+    with tempfile.TemporaryDirectory() as tmp:
+        bundle_path = pipeline_result.save_bundle(
+            Path(tmp) / "test", save_figures=False
+        )
+        reloaded = BasePlaceCellDataset.load_bundle(bundle_path)
+
+    assert isinstance(reloaded, ArenaDataset)
+    assert reloaded.summary() == pipeline_result.summary()
+    assert sorted(reloaded.unit_results.keys()) == sorted(
+        pipeline_result.unit_results.keys()
+    )
+    for uid in pipeline_result.unit_results:
+        np.testing.assert_allclose(
+            reloaded.unit_results[uid].rate_map,
+            pipeline_result.unit_results[uid].rate_map,
+            rtol=1e-5,
+            equal_nan=True,
+            err_msg=f"unit {uid} rate_map round-trip",
         )
