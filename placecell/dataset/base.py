@@ -10,6 +10,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import xarray as xr
+import yaml
 
 from placecell.config import (
     AnalysisConfig,
@@ -452,6 +453,16 @@ class BasePlaceCellDataset(abc.ABC):
         # Config
         self.cfg.to_yaml(path / "config.yaml")
 
+        # Data config
+        if self.data_cfg is not None:
+            with open(path / "data_config.yaml", "w") as f:
+                yaml.dump(
+                    self.data_cfg.model_dump(mode="json"),
+                    f,
+                    default_flow_style=False,
+                    sort_keys=False,
+                )
+
         # Spatial arrays
         spatial_kw: dict[str, np.ndarray] = {}
         if self.occupancy_time is not None:
@@ -647,7 +658,11 @@ class BasePlaceCellDataset(abc.ABC):
 
         # Config
         cfg = AnalysisConfig.from_yaml(path / "config.yaml")
-        ds = cls(cfg)
+        data_cfg = None
+        data_cfg_path = path / "data_config.yaml"
+        if data_cfg_path.exists():
+            data_cfg = BaseDataConfig.from_yaml(data_cfg_path)
+        ds = cls(cfg, data_cfg=data_cfg)
 
         # Spatial arrays
         spatial_path = path / "spatial.npz"
