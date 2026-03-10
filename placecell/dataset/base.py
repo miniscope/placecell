@@ -449,8 +449,17 @@ class BasePlaceCellDataset(abc.ABC):
         }
         (path / "metadata.json").write_text(json.dumps(meta, indent=2))
 
-        # Config
-        self.cfg.to_yaml(path / "config.yaml")
+        # Config — propagate behavior_fps from data_cfg so bundles are self-contained
+        cfg_to_save = self.cfg
+        if self.data_cfg is not None and hasattr(self.data_cfg, "behavior_fps"):
+            cfg_to_save = self.cfg.model_copy(
+                update={
+                    "behavior": self.cfg.behavior.model_copy(
+                        update={"behavior_fps": self.data_cfg.behavior_fps}
+                    )
+                }
+            )
+        cfg_to_save.to_yaml(path / "config.yaml")
 
         # Spatial arrays
         spatial_kw: dict[str, np.ndarray] = {}
