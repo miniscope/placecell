@@ -260,6 +260,11 @@ class BehaviorConfig(BaseModel):
         ...,
         description="Analysis type: 'arena' for 2D open-field, 'maze' for 1D arm analysis.",
     )
+    behavior_fps: float = Field(
+        20.0,
+        gt=0.0,
+        description="Behavior camera sampling rate in frames per second.",
+    )
     speed_threshold: float = Field(
         25.0,
         description="Minimum running speed to keep events (mm/s).",
@@ -500,9 +505,22 @@ class AnalysisConfig(BaseModel):
     @classmethod
     def from_yaml(cls, path: str | Path) -> "AnalysisConfig":
         """Load from a YAML file."""
+        loader = yaml.SafeLoader
+        # Old bundles were saved with !!python/tuple tags; handle them safely.
+        loader.add_constructor(
+            "tag:yaml.org,2002:python/tuple",
+            lambda l, n: tuple(l.construct_sequence(n)),
+        )
         with open(path) as f:
-            data = yaml.safe_load(f)
+            data = yaml.load(f, Loader=loader)
         return cls(**data)
+
+    def to_yaml(self, path: str | Path) -> None:
+        """Save to a YAML file."""
+        import json
+        data = json.loads(self.model_dump_json())
+        with open(path, "w") as f:
+            yaml.dump(data, f, default_flow_style=False)
 
     def with_data_overrides(self, data_cfg: BaseDataConfig) -> "AnalysisConfig":
         """Create a new config with data-specific overrides applied.
