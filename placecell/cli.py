@@ -19,12 +19,13 @@ def cli() -> None:
 @click.option(
     "-d",
     "--data",
-    "data_path",
+    "data_paths",
     required=True,
+    multiple=True,
     type=click.Path(exists=True),
-    help="Per-session data paths YAML file.",
+    help="Per-session data YAML file(s). Repeat for batch mode.",
 )
-@click.option("-o", "--output", default=None, help="Output bundle path.")
+@click.option("-o", "--output", default=None, help="Output bundle path or directory.")
 @click.option(
     "-y",
     "--yes",
@@ -58,6 +59,37 @@ def cli() -> None:
 )
 def analysis(
     config: str,
+    data_paths: tuple[str, ...],
+    output: str | None,
+    yes: bool,
+    show: bool,
+    workers: int,
+    subset_units: int | None,
+    subset_frames: int | None,
+) -> None:
+    """Run the place cell analysis pipeline.
+
+    Single dataset: placecell analysis -c config.yaml -d data.yaml
+    Batch mode:     placecell analysis -c config.yaml -d a.yaml -d b.yaml -y
+    """
+    for i, data_path in enumerate(data_paths):
+        if len(data_paths) > 1:
+            click.echo(f"\n[{i + 1}/{len(data_paths)}] {Path(data_path).stem}")
+        _run_one(
+            config=config,
+            data_path=data_path,
+            output=output,
+            yes=yes,
+            show=show,
+            workers=workers,
+            subset_units=subset_units,
+            subset_frames=subset_frames,
+        )
+
+
+def _run_one(
+    *,
+    config: str,
     data_path: str,
     output: str | None,
     yes: bool,
@@ -66,7 +98,7 @@ def analysis(
     subset_units: int | None,
     subset_frames: int | None,
 ) -> None:
-    """Run the place cell analysis pipeline."""
+    """Run the pipeline for a single dataset."""
     from tqdm.auto import tqdm
 
     from placecell.dataset.base import BasePlaceCellDataset
@@ -75,7 +107,9 @@ def analysis(
     if output is None:
         bundle_dir = Path.cwd() / "output"
         bundle_dir.mkdir(parents=True, exist_ok=True)
-        output = str(bundle_dir / f"{data_p.stem}.pcellbundle")
+        out = str(bundle_dir / f"{data_p.stem}.pcellbundle")
+    else:
+        out = output
 
     ds = BasePlaceCellDataset.from_yaml(config, data_path)
 
@@ -87,8 +121,7 @@ def analysis(
     ds.match_events()
     ds.compute_occupancy()
 
-    # Save partial bundle with QC figures
-    bundle_path = ds.save_bundle(output)
+    bundle_path = ds.save_bundle(out)
     click.echo(f"QC bundle saved to {bundle_path}")
     click.echo(f"Check figures at {bundle_path / 'figures'}")
 
@@ -99,15 +132,12 @@ def analysis(
         click.echo("Stopped after prep.")
         return
 
-    # Run the expensive analysis step
     ds.analyze_units(progress_bar=tqdm, n_workers=workers)
 
-    # Save analysis results into the existing bundle
     ur_dir = bundle_path / "unit_results"
     ur_dir.mkdir(exist_ok=True)
     ds._save_unit_results(ur_dir)
 
-    # Re-generate figures (now includes diagnostics + summary_scatter)
     figures_dir = bundle_path / "figures"
     ds._save_summary_figures(figures_dir)
 

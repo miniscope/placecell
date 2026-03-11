@@ -62,7 +62,7 @@ all = [
 ]
 
 [tool.pdm.scripts]
-test = "pytest"
+test = "pytest tests/ --nbmake notebook/view_results_arena.ipynb notebook/view_results_maze.ipynb"
 lint.composite = [
     "ruff check",
     "black placecell --diff"
