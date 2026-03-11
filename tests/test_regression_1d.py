@@ -43,9 +43,6 @@ def reference() -> MazeDataset:
     return ds
 
 
-# ── Summary ──────────────────────────────────────────────────────────
-
-
 @pytest.mark.timeout(120)
 def test_summary_counts(
     pipeline_result: MazeDataset,
@@ -53,9 +50,6 @@ def test_summary_counts(
 ) -> None:
     """Pipeline summary counts must match the reference."""
     assert pipeline_result.summary() == reference.summary()
-
-
-# ── Deconvolution ────────────────────────────────────────────────────
 
 
 def test_good_unit_ids(
@@ -82,9 +76,6 @@ def test_event_index_shape(
     assert got == ref
 
 
-# ── Event–place matching ─────────────────────────────────────────────
-
-
 def test_event_place_shape(
     pipeline_result: MazeDataset,
     reference: MazeDataset,
@@ -102,9 +93,6 @@ def test_event_place_has_pos_1d(
     """Matched events must have pos_1d column from 1D matching."""
     assert "pos_1d" in pipeline_result.event_place.columns
     assert pipeline_result.event_place["pos_1d"].notna().all()
-
-
-# ── 1D trajectory ────────────────────────────────────────────────────
 
 
 def test_trajectory_1d_shape(
@@ -157,9 +145,6 @@ def test_pos_range(
     )
 
 
-# ── Occupancy ────────────────────────────────────────────────────────
-
-
 def test_occupancy_map(
     pipeline_result: MazeDataset,
     reference: MazeDataset,
@@ -193,9 +178,6 @@ def test_edges_1d(
         reference.edges_1d,
         rtol=1e-5,
     )
-
-
-# ── Per-unit analysis results ────────────────────────────────────────
 
 
 def test_unit_result_ids(
@@ -247,9 +229,6 @@ def test_rate_maps(
             equal_nan=True,
             err_msg=f"unit {uid} rate_map",
         )
-
-
-# ── Save/load round-trip ────────────────────────────────────────────
 
 
 def test_save_load_bundle_roundtrip(

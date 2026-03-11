@@ -43,6 +43,7 @@ tests = [
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",
     "pytest-timeout>=2.3.1",
+    "nbmake>=1.5.5",
 ]
 docs = [
     "sphinx>=7.0.0",
@@ -139,6 +140,9 @@ line-length = 100
 [tool.pytest.ini_options]
 filterwarnings = [
     "ignore:Could not find cvxpy:UserWarning",
+]
+markers = [
+    "notebook: end-to-end notebook execution tests (requires nbmake)",
 ]
 
 [tool.coverage.run]
