@@ -210,9 +210,7 @@ def plot_summary_scatter(
     ax2.set_aspect("equal")
 
     # Panel 4: Amplitude rate (bars, left axis) + event count rate (line, right axis)
-    event_count_rates = np.array(
-        [unit_results[uid].event_count_rate for uid in unit_ids]
-    )
+    event_count_rates = np.array([unit_results[uid].event_count_rate for uid in unit_ids])
     has_rates = np.any(overall_rates > 0)
     if has_rates:
         sort_idx = np.argsort(overall_rates)[::-1]
