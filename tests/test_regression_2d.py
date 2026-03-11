@@ -1,8 +1,11 @@
 """Full-pipeline regression test for the 2D arena analysis.
 
 Runs the complete ArenaDataset pipeline on a small data subset and
-compares every output against a saved reference bundle.  The reference
-was generated once from a real dataset (requires ProcData drive).
+compares every output against a saved reference bundle.
+
+To regenerate the reference bundle with low ``n_shuffles`` in the config::
+
+    placecell analysis -c config.yaml -d data.yaml -o tests/assets/regression_2d/reference -y --subset-units 10 --subset-frames 10000
 """
 
 import tempfile
@@ -41,8 +44,6 @@ def reference() -> ArenaDataset:
     return BasePlaceCellDataset.load_bundle(REGRESSION_DIR / "reference.pcellbundle")
 
 
-# ── Summary ──────────────────────────────────────────────────────────
-
 
 @pytest.mark.timeout(120)
 def test_summary_counts(
@@ -52,8 +53,6 @@ def test_summary_counts(
     """Pipeline summary counts must match the reference."""
     assert pipeline_result.summary() == reference.summary()
 
-
-# ── Deconvolution ────────────────────────────────────────────────────
 
 
 def test_good_unit_ids(
@@ -80,8 +79,6 @@ def test_event_index_shape(
     assert got == ref
 
 
-# ── Event–place matching ─────────────────────────────────────────────
-
 
 def test_event_place_shape(
     pipeline_result: ArenaDataset,
@@ -93,8 +90,6 @@ def test_event_place_shape(
     ref = (reference.event_place["s"] > threshold).sum()
     assert got == ref
 
-
-# ── Occupancy ────────────────────────────────────────────────────────
 
 
 def test_occupancy_map(
@@ -119,8 +114,6 @@ def test_valid_mask(
         reference.valid_mask,
     )
 
-
-# ── Per-unit analysis results ────────────────────────────────────────
 
 
 def test_unit_result_ids(
@@ -173,8 +166,6 @@ def test_rate_maps(
             err_msg=f"unit {uid} rate_map",
         )
 
-
-# ── Save/load round-trip ────────────────────────────────────────────
 
 
 def test_save_load_bundle_roundtrip(

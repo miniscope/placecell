@@ -316,6 +316,29 @@ class BasePlaceCellDataset(abc.ABC):
         """Load neural traces, behavior data, and visualization assets."""
         ...
 
+    def subset(self, n_units: int | None = None, n_frames: int | None = None) -> None:
+        """Trim loaded data to the first *n_units* units and *n_frames* frames.
+
+        Must be called after :meth:`load` and before :meth:`preprocess_behavior`.
+        """
+        if self.traces is None:
+            raise RuntimeError("Call load() before subset()")
+        if n_units is not None:
+            unit_ids = self.traces.coords["unit_id"].values[:n_units]
+            self.traces = self.traces.sel(unit_id=unit_ids)
+            if self.footprints is not None:
+                self.footprints = self.footprints.sel(unit_id=unit_ids)
+        if n_frames is not None:
+            frame_ids = self.traces.coords["frame"].values[:n_frames]
+            self.traces = self.traces.sel(frame=frame_ids)
+            if self.trajectory is not None:
+                self.trajectory = self.trajectory.iloc[:n_frames].reset_index(drop=True)
+        logger.info(
+            "Subset: %d units, %d frames",
+            self.traces.sizes["unit_id"],
+            self.traces.sizes["frame"],
+        )
+
     @abc.abstractmethod
     def preprocess_behavior(self) -> None:
         """Preprocess behavior data. Subclass-specific pipelines."""
@@ -414,8 +437,6 @@ class BasePlaceCellDataset(abc.ABC):
             "n_stable": n_stable,
             "n_place_cells": n_place_cells,
         }
-
-    # ── Bundle I/O ──────────────────────────────────────────────────────
 
     def save_bundle(self, path: str | Path, *, save_figures: bool = True) -> Path:
         """Save all analysis results to a portable ``.pcellbundle`` directory.

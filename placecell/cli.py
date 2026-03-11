@@ -44,6 +44,18 @@ def cli() -> None:
     show_default=True,
     help="Number of parallel worker processes for analyze_units.",
 )
+@click.option(
+    "--subset-units",
+    type=int,
+    default=None,
+    help="Keep only the first N neural units (for generating small test data).",
+)
+@click.option(
+    "--subset-frames",
+    type=int,
+    default=None,
+    help="Keep only the first N frames (for generating small test data).",
+)
 def analysis(
     config: str,
     data_path: str,
@@ -51,6 +63,8 @@ def analysis(
     yes: bool,
     show: bool,
     workers: int,
+    subset_units: int | None,
+    subset_frames: int | None,
 ) -> None:
     """Run the place cell analysis pipeline."""
     from tqdm.auto import tqdm
@@ -66,6 +80,8 @@ def analysis(
     ds = BasePlaceCellDataset.from_yaml(config, data_path)
 
     ds.load()
+    if subset_units is not None or subset_frames is not None:
+        ds.subset(n_units=subset_units, n_frames=subset_frames)
     ds.preprocess_behavior()
     ds.deconvolve(progress_bar=tqdm)
     ds.match_events()
