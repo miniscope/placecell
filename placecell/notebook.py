@@ -323,7 +323,7 @@ def create_unit_browser(
         ax4.hist(result.shuffled_sis, bins=15, color="gray", alpha=0.7, edgecolor="black")
         ax4.axvline(result.si, color="red", linestyle="--", linewidth=2)
         ax4.set_title(f"SI: {result.si:.2f}, p={result.p_val:.3f}", fontsize=9)
-        ax4.set_xlabel("SI (bits/s)", fontsize=8)
+        ax4.set_xlabel("SI (bits/spike)", fontsize=8)
         ax4.set_ylabel("Count", fontsize=8)
         ax4.tick_params(labelsize=7)
         ax4.set_box_aspect(1)
@@ -678,7 +678,7 @@ def create_shuffle_browser_1d(
                 pct95, color="black", linewidth=1, linestyle="--", label=f"95th pctl ({pct95:.3f})"
             )
         ax.axvline(res.si, color="red", linewidth=2, label=f"Observed ({res.si:.3f})")
-        ax.set_xlabel("Spatial information (bits/s)", fontsize=8)
+        ax.set_xlabel("Spatial information (bits/spike)", fontsize=8)
         ax.set_ylabel("Density", fontsize=8)
         sig_str = "PASS" if res.p_val < p_value_threshold else "fail"
         ax.set_title(f"SI test (p={res.p_val:.3f}, {sig_str})", fontsize=9)

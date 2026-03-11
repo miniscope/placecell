@@ -209,19 +209,38 @@ def plot_summary_scatter(
     ax2.set_ylim(lo, hi)
     ax2.set_aspect("equal")
 
-    # ── Panel 4: Overall Rate (lambda) bar chart ───────────────────
+    # Panel 4: Amplitude rate (bars, left axis) + event count rate (line, right axis)
+    event_count_rates = np.array(
+        [unit_results[uid].event_count_rate for uid in unit_ids]
+    )
     has_rates = np.any(overall_rates > 0)
     if has_rates:
         sort_idx = np.argsort(overall_rates)[::-1]
-        sorted_rates = overall_rates[sort_idx]
+        x_pos = np.arange(len(sort_idx))
         ax4.bar(
-            np.arange(len(sorted_rates)),
-            sorted_rates,
-            color="gray",
+            x_pos,
+            overall_rates[sort_idx],
+            color="steelblue",
             edgecolor="none",
             width=1.0,
+            alpha=0.6,
+            label="Amplitude rate",
         )
-        ax4.set_xlim(-0.5, len(sorted_rates) - 0.5)
+        ax4.set_xlim(-0.5, len(sort_idx) - 0.5)
+        ax4.set_ylabel("Amplitude rate (a.u./s)", fontsize=10, color="steelblue")
+        ax4.tick_params(axis="y", labelcolor="steelblue")
+
+        ax4r = ax4.twinx()
+        ax4r.plot(
+            x_pos,
+            event_count_rates[sort_idx],
+            color="coral",
+            linewidth=1.2,
+            alpha=0.8,
+            label="Event count rate",
+        )
+        ax4r.set_ylabel("Event count rate (1/s)", fontsize=10, color="coral")
+        ax4r.tick_params(axis="y", labelcolor="coral")
     else:
         ax4.text(
             0.5,
@@ -233,8 +252,7 @@ def plot_summary_scatter(
             fontsize=10,
             color="gray",
         )
-    ax4.set_xlabel("Unit (sorted)", fontsize=10)
-    ax4.set_ylabel("Overall rate (events/s)", fontsize=10)
+    ax4.set_xlabel("Unit (sorted by amplitude rate)", fontsize=10)
 
     # ── Panel 3: Density contour (Guo et al. style) ──────────────
     valid = np.isfinite(si_vals) & np.isfinite(fisher_z)

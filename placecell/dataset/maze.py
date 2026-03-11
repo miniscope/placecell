@@ -392,6 +392,7 @@ class MazeDataset(BasePlaceCellDataset):
                 shuffled_sis=result["shuffled_sis"],
                 shuffled_rate_p95=None,
                 overall_rate=result["overall_rate"],
+                event_count_rate=result["event_count_rate"],
                 stability_corr=result["stability_corr"],
                 stability_z=result["stability_z"],
                 stability_p_val=result["stability_p_val"],

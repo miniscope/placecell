@@ -687,15 +687,17 @@ def compute_unit_analysis(
     )
     rate_map_raw = compute_raw_rate_map(unit_data, occupancy_time, valid_mask, x_edges, y_edges)
 
-    # Overall rate (lambda): total_events / total_time
+    # Overall rate: amplitude-weighted and binary event count
     valid_occ = valid_mask & (occupancy_time > 0)
-    if np.any(valid_occ):
+    total_time = float(np.sum(occupancy_time[valid_occ])) if np.any(valid_occ) else 0.0
+    if total_time > 0:
         overall_rate = float(
-            np.sum(rate_map_raw[valid_occ] * occupancy_time[valid_occ])
-            / np.sum(occupancy_time[valid_occ])
+            np.sum(rate_map_raw[valid_occ] * occupancy_time[valid_occ]) / total_time
         )
+        event_count_rate = float(len(unit_data)) / total_time
     else:
         overall_rate = 0.0
+        event_count_rate = 0.0
 
     # Spatial information
     si, p_val, shuffled_sis = compute_spatial_information(
@@ -794,6 +796,7 @@ def compute_unit_analysis(
         "rate_map": rate_map,
         "rate_map_raw": rate_map_raw,
         "overall_rate": overall_rate,
+        "event_count_rate": event_count_rate,
         "si": si,
         "p_val": p_val,
         "shuffled_sis": shuffled_sis,

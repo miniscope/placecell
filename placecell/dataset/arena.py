@@ -340,6 +340,7 @@ class ArenaDataset(BasePlaceCellDataset):
                 shuffled_rate_p95=result["shuffled_rate_p95"],
                 p_val=result["p_val"],
                 overall_rate=result["overall_rate"],
+                event_count_rate=result["event_count_rate"],
                 stability_corr=result["stability_corr"],
                 stability_z=result["stability_z"],
                 stability_p_val=result["stability_p_val"],

@@ -15,7 +15,6 @@ behavior:
   jump_threshold_mm: 100.0
   spatial_map_2d: null
   spatial_map_1d:
-    bin_width_mm: 10.0
     min_occupancy: 0.1
     spatial_sigma: 3.0
     n_shuffles: 100
@@ -26,5 +25,6 @@ behavior:
     n_split_blocks: 10
     block_shifts:
     - 0.0
+    bin_width_mm: 10.0
     split_by_direction: true
     require_complete_traversal: false
