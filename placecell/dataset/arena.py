@@ -103,7 +103,6 @@ class ArenaDataset(BasePlaceCellDataset):
 
         bcfg = self.cfg.behavior
 
-        # Preserve the raw trajectory before any corrections
         self.trajectory_raw = self.trajectory.copy()
 
         dcfg = self.data_cfg
@@ -126,7 +125,6 @@ class ArenaDataset(BasePlaceCellDataset):
 
             scale_x, scale_y = self.mm_per_px_xy
 
-            # Store intermediate snapshots for visualization
             self._preprocess_steps: dict[str, pd.DataFrame] = {}
             self._preprocess_steps["Raw"] = self.trajectory[["x", "y"]].copy()
 
@@ -174,7 +172,6 @@ class ArenaDataset(BasePlaceCellDataset):
                 scale_y,
             )
 
-            # Convert all preprocess snapshots to mm for consistent visualization
             for step_name in self._preprocess_steps:
                 df = self._preprocess_steps[step_name]
                 df["x"] = (df["x"] - x_min) * scale_x

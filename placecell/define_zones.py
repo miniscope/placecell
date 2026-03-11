@@ -165,7 +165,6 @@ def define_zones(
     def save_zones() -> None:
         save_data: dict = {}
 
-        # Build zones dict
         zones_dict: dict = {}
         for zone in zone_names:
             poly = polygons[zone]
@@ -173,7 +172,6 @@ def define_zones(
             if len(poly) < min_points:
                 continue
 
-            # Remove duplicate closing point for arms
             final_poly = poly.copy()
             if (
                 zone_types.get(zone) == "arm"

@@ -43,7 +43,7 @@ class OasisConfig(BaseModel):
 class NeuralConfig(BaseModel):
     """Neural data paths and deconvolution settings."""
 
-    fps: float = Field(20.0, description="Sampling rate (fps).")
+    fps: float = Field(..., description="Sampling rate (fps).")
     oasis: OasisConfig = Field(...)
     trace_name: str = Field("C", description="Zarr group name (e.g. 'C' or 'C_lp').")
 
@@ -211,7 +211,7 @@ class BehaviorConfig(BaseModel):
         description="'arena' for 2D open-field, 'maze' for 1D arm analysis.",
     )
     speed_threshold: float = Field(
-        25.0,
+        ...,
         description="Minimum running speed (mm/s).",
     )
     speed_window_frames: int = Field(

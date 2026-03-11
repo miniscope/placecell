@@ -218,7 +218,6 @@ def assign_traversal_direction(
     zone_changed = df[zone_column] != df[zone_column].shift(1)
     frame_gap = df["frame_index"].diff() > 1
     boundary = zone_changed | frame_gap
-    # First row is always a boundary
     boundary.iloc[0] = True
     df["traversal_id"] = boundary.cumsum()
 
@@ -227,13 +226,11 @@ def assign_traversal_direction(
     traversal_dir = (first_pos < direction_threshold).map({True: "fwd", False: "rev"})
     df["direction"] = df["traversal_id"].map(traversal_dir)
 
-    # Build effective arm order: [Arm_1_fwd, Arm_1_rev, Arm_2_fwd, ...]
     effective_order = []
     for arm in arm_order:
         effective_order.append(f"{arm}_fwd")
         effective_order.append(f"{arm}_rev")
 
-    # Create directional zone label and recompute arm_index + pos_1d
     df["zone_dir"] = df[zone_column] + "_" + df["direction"]
     zone_dir_to_idx = {name: i for i, name in enumerate(effective_order)}
     df["arm_index"] = df["zone_dir"].map(zone_dir_to_idx)
@@ -309,7 +306,6 @@ def filter_complete_traversals(
 
     arm_set = set(arm_order)
 
-    # Build sorted lookup from full trajectory
     full_sorted = full_trajectory.sort_values("frame_index")
     full_fi = full_sorted["frame_index"].values
     full_zone = full_sorted[zone_column].values
