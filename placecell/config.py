@@ -279,6 +279,11 @@ class BaseDataConfig(BaseModel):
     behavior_timestamp: str = Field(..., description="Path to behavior timestamp CSV.")
     behavior_video: str | None = Field(None, description="Path to behavior video file.")
     bodypart: str | None = Field(None, description="DLC bodypart name (e.g. 'LED').")
+    overlay_frame_index: int = Field(
+        1000,
+        ge=0,
+        description="Video frame index for overlay figures (clamped to video length).",
+    )
     x_col: str = Field("x", description="X-axis column name in behavior CSV.")
     y_col: str = Field("y", description="Y-axis column name in behavior CSV.")
     config_override: dict[str, Any] | None = Field(

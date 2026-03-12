@@ -90,9 +90,9 @@ class UnitResult:
     unit_data:
         Speed-filtered deconvolved events for this unit (subset of event_place).
     overall_rate:
-        Amplitude-weighted event rate (sum of deconvolved amplitudes / total time).
+        Amplitude-weighted event rate in a.u./s (sum of deconvolved amplitudes / total time).
     event_count_rate:
-        Binary event count rate (number of events / total time).
+        Binary event count rate in 1/s (number of events / total time).
     trace_data:
         Raw calcium trace for this unit (None if traces unavailable).
     trace_times:
@@ -302,12 +302,16 @@ class BasePlaceCellDataset(abc.ABC):
                 import cv2
 
                 cap = cv2.VideoCapture(str(self.behavior_video_path))
+                total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                idx = min(self.data_cfg.overlay_frame_index, total - 1) if total > 0 else 0
+                if idx > 0:
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
                 ret, frame = cap.read()
                 cap.release()
                 if ret:
                     self.behavior_video_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     logger.info(
-                        "Loaded behavior video frame from %s", self.behavior_video_path.name
+                        "Loaded behavior video frame %d from %s", idx, self.behavior_video_path.name
                     )
                 else:
                     logger.warning("Could not read frame from %s", self.behavior_video_path)
