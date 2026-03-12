@@ -127,7 +127,6 @@ def compute_rate_map(
     rate_map[valid_mask] = event_weights[valid_mask] / occupancy_time[valid_mask]
     rate_map_smooth = gaussian_filter_normalized(rate_map, sigma=spatial_sigma)
 
-    # Normalize to 0-1 range
     valid_rate_values = rate_map_smooth[valid_mask]
     if len(valid_rate_values) > 0 and np.nanmax(valid_rate_values) > 0:
         rate_map_smooth[valid_mask] = rate_map_smooth[valid_mask] / np.nanmax(valid_rate_values)
@@ -532,17 +531,14 @@ def compute_stability_score(
         rate_map = np.zeros_like(occ)
         rate_map[mask] = event_weights[mask] / occ[mask]
 
-        # Smooth the rate map (zeros in invalid bins won't propagate NaN)
         rate_map_smooth = gaussian_filter_normalized(rate_map, sigma=spatial_sigma)
 
-        # Set invalid bins to NaN after smoothing
         rate_map_smooth[~mask] = np.nan
         return rate_map_smooth
 
     rate_map_first = compute_half_rate_map(events_first, occ_first, valid_first)
     rate_map_second = compute_half_rate_map(events_second, occ_second, valid_second)
 
-    # Compute correlation only on bins valid in both halves
     both_valid = valid_first & valid_second
     if not np.any(both_valid):
         return np.nan, np.nan, np.nan, rate_map_first, rate_map_second
@@ -550,7 +546,6 @@ def compute_stability_score(
     vals_first = rate_map_first[both_valid]
     vals_second = rate_map_second[both_valid]
 
-    # Remove any remaining NaN values
     finite_mask = np.isfinite(vals_first) & np.isfinite(vals_second)
     if np.sum(finite_mask) < 3:  # Need at least 3 points for correlation
         return np.nan, np.nan, np.nan, rate_map_first, rate_map_second
@@ -562,7 +557,6 @@ def compute_stability_score(
     corr = np.corrcoef(vals_first, vals_second)[0, 1]
 
     # Fisher z-transform: z = 0.5 * ln((1+r)/(1-r)) = arctanh(r)
-    # Clip to avoid infinity at r=1 or r=-1
     corr_clipped = np.clip(corr, -0.9999, 0.9999)
     fisher_z = np.arctanh(corr_clipped)
 
@@ -687,15 +681,17 @@ def compute_unit_analysis(
     )
     rate_map_raw = compute_raw_rate_map(unit_data, occupancy_time, valid_mask, x_edges, y_edges)
 
-    # Overall rate (lambda): total_events / total_time
+    # Overall rate: amplitude-weighted and binary event count
     valid_occ = valid_mask & (occupancy_time > 0)
-    if np.any(valid_occ):
+    total_time = float(np.sum(occupancy_time[valid_occ])) if np.any(valid_occ) else 0.0
+    if total_time > 0:
         overall_rate = float(
-            np.sum(rate_map_raw[valid_occ] * occupancy_time[valid_occ])
-            / np.sum(occupancy_time[valid_occ])
+            np.sum(rate_map_raw[valid_occ] * occupancy_time[valid_occ]) / total_time
         )
+        event_count_rate = float(len(unit_data)) / total_time
     else:
         overall_rate = 0.0
+        event_count_rate = 0.0
 
     # Spatial information
     si, p_val, shuffled_sis = compute_spatial_information(
@@ -794,6 +790,7 @@ def compute_unit_analysis(
         "rate_map": rate_map,
         "rate_map_raw": rate_map_raw,
         "overall_rate": overall_rate,
+        "event_count_rate": event_count_rate,
         "si": si,
         "p_val": p_val,
         "shuffled_sis": shuffled_sis,
@@ -920,7 +917,6 @@ def compute_place_field_mask(
             continue
         extension_cutoff = threshold * field_peak
 
-        # Find all candidate bins above the extension threshold
         candidate = valid & (rate_map >= extension_cutoff)
         candidate_labeled, _ = label(candidate)
 

@@ -147,20 +147,18 @@ def plot_summary_scatter(
             shuffle_parts.append(f"min shift {min_shift_seconds}s")
         logger.info("Shuffle test: %s", ", ".join(shuffle_parts))
 
-    # ── Figure layout: 4 panels ───────────────────────────────────
     fig = plt.figure(figsize=(20, 4.5))
 
-    ax1 = fig.add_axes([0.03, 0.14, 0.20, 0.78])
-    ax2 = fig.add_axes([0.27, 0.14, 0.20, 0.78])
-    ax4 = fig.add_axes([0.51, 0.14, 0.20, 0.78])
+    ax1 = fig.add_axes([0.03, 0.14, 0.19, 0.78])
+    ax2 = fig.add_axes([0.26, 0.14, 0.19, 0.78])
+    ax4 = fig.add_axes([0.49, 0.14, 0.19, 0.78])
 
     # Panel 3: density contour with marginals
-    left3 = 0.76
-    ax3 = fig.add_axes([left3, 0.14, 0.18, 0.64])
-    ax3_top = fig.add_axes([left3, 0.80, 0.18, 0.14])
-    ax3_right = fig.add_axes([left3 + 0.19, 0.14, 0.035, 0.64])
+    left3 = 0.78
+    ax3 = fig.add_axes([left3, 0.14, 0.16, 0.64])
+    ax3_top = fig.add_axes([left3, 0.80, 0.16, 0.14])
+    ax3_right = fig.add_axes([left3 + 0.17, 0.14, 0.035, 0.64])
 
-    # ── Panel 1: P-value scatter ──────────────────────────────────
     ax1.scatter(
         p_vals,
         stab_pvals,
@@ -184,7 +182,6 @@ def plot_summary_scatter(
     ]
     ax1.legend(handles=legend_elements, loc="upper right", fontsize=8)
 
-    # ── Panel 2: SI vs Fisher Z (no regression) ──────────────────
     ax2.scatter(
         si_vals,
         fisher_z,
@@ -209,19 +206,36 @@ def plot_summary_scatter(
     ax2.set_ylim(lo, hi)
     ax2.set_aspect("equal")
 
-    # ── Panel 4: Overall Rate (lambda) bar chart ───────────────────
+    # Panel 4: Amplitude rate (bars, left axis) + event count rate (line, right axis)
+    event_count_rates = np.array([unit_results[uid].event_count_rate for uid in unit_ids])
     has_rates = np.any(overall_rates > 0)
     if has_rates:
         sort_idx = np.argsort(overall_rates)[::-1]
-        sorted_rates = overall_rates[sort_idx]
+        x_pos = np.arange(len(sort_idx))
         ax4.bar(
-            np.arange(len(sorted_rates)),
-            sorted_rates,
-            color="gray",
+            x_pos,
+            overall_rates[sort_idx],
+            color="steelblue",
             edgecolor="none",
             width=1.0,
+            alpha=0.6,
+            label="Amplitude rate",
         )
-        ax4.set_xlim(-0.5, len(sorted_rates) - 0.5)
+        ax4.set_xlim(-0.5, len(sort_idx) - 0.5)
+        ax4.set_ylabel("Amplitude rate (a.u./s)", fontsize=10, color="steelblue")
+        ax4.tick_params(axis="y", labelcolor="steelblue")
+
+        ax4r = ax4.twinx()
+        ax4r.plot(
+            x_pos,
+            event_count_rates[sort_idx],
+            color="coral",
+            linewidth=1.2,
+            alpha=0.8,
+            label="Event count rate",
+        )
+        ax4r.set_ylabel("Event count rate (1/s)", fontsize=10, color="coral")
+        ax4r.tick_params(axis="y", labelcolor="coral")
     else:
         ax4.text(
             0.5,
@@ -233,10 +247,8 @@ def plot_summary_scatter(
             fontsize=10,
             color="gray",
         )
-    ax4.set_xlabel("Unit (sorted)", fontsize=10)
-    ax4.set_ylabel("Overall rate (events/s)", fontsize=10)
+    ax4.set_xlabel("Unit (sorted by amplitude rate)", fontsize=10)
 
-    # ── Panel 3: Density contour (Guo et al. style) ──────────────
     valid = np.isfinite(si_vals) & np.isfinite(fisher_z)
     si_v = si_vals[valid]
     z_v = fisher_z[valid]
@@ -582,8 +594,6 @@ def plot_footprints_filled(
     ax_mp.set_title("Max Projection")
     ax_mp.axis("off")
 
-    # Right: filled footprints on black background
-    # Build an RGB composite: each cell gets a color, overlapping cells blend
     h, w = max_proj.shape[:2]
     composite = np.zeros((h, w, 3), dtype=float)
     for i, uid in enumerate(unit_ids):
@@ -812,9 +822,6 @@ def plot_preprocess_steps(
 
     fig.tight_layout()
     return fig
-
-
-# ── 1D / maze visualization ────────────────────────────────────────────
 
 
 def plot_graph_overlay(
@@ -1066,7 +1073,6 @@ def plot_shuffle_test_1d(
     centers = 0.5 * (edges[:-1] + edges[1:])
     rate_maps_all = np.array([unit_results[uid].rate_map for uid in place_cell_ids])
 
-    # Find valid columns: bins that are finite in at least one cell
     valid_cols = np.any(np.isfinite(rate_maps_all), axis=0)
     n_excluded = int((~valid_cols).sum())
     n_total = len(valid_cols)
@@ -1083,7 +1089,6 @@ def plot_shuffle_test_1d(
     sort_order = np.argsort(peak_positions)
     sorted_ids = [place_cell_ids[i] for i in sort_order]
 
-    # Build compressed heatmap: exclude invalid columns
     rate_maps_sorted = rate_maps_all[sort_order][:, valid_cols]
     rate_maps_sorted = np.where(np.isfinite(rate_maps_sorted), rate_maps_sorted, 0.0)
     valid_centers = centers[valid_cols]
@@ -1092,7 +1097,6 @@ def plot_shuffle_test_1d(
     compressed_boundaries = []
     if arm_boundaries:
         for b in arm_boundaries:
-            # Find how many valid bins are to the left of this boundary
             idx = int(np.sum(valid_centers < b))
             compressed_boundaries.append(idx)
 
@@ -1432,7 +1436,6 @@ def plot_position_and_traces_1d(
     ax_tr.set_xlabel(time_label)
     ax_tr.set_ylim(-0.1 * trace_height, n_sel * trace_height + 0.1 * trace_height)
 
-    # Set xlim to data boundaries
     t_max = beh_time[-1]
     if trajectory_1d_filtered is not None:
         t_max = max(t_max, filt_time[-1])
@@ -1571,7 +1574,6 @@ def plot_position_and_traces_2d(
     ax_tr.set_xlabel(time_label)
     ax_tr.set_ylim(-0.1 * trace_height, n_sel * trace_height + 0.1 * trace_height)
 
-    # Set xlim to data boundaries
     t_max = beh_time[-1]
     for uid in selected:
         res = unit_results[uid]

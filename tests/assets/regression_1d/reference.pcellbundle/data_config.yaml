@@ -1,0 +1,23 @@
+behavior_fps: 20.0
+neural_path: neural_data
+neural_timestamp: neural_timestamp.csv
+behavior_position: behavior_position.csv
+behavior_timestamp: behavior_timestamp.csv
+behavior_video: null
+bodypart: LED
+x_col: x_pinned
+y_col: y_pinned
+config_override: null
+type: maze
+behavior_graph: behavior_graph.yaml
+mm_per_pixel: 1.0
+arm_order:
+- Arm_1
+- Arm_2
+- Arm_3
+- Arm_4
+zone_column: zone
+arm_position_column: arm_position
+zone_tracking: behavior_position.csv
+zone_connections: null
+zone_detection: null

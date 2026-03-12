@@ -1,0 +1,21 @@
+behavior_fps: 20.0
+neural_path: neural_data
+neural_timestamp: neural_timestamp.csv
+behavior_position: behavior_position.csv
+behavior_timestamp: behavior_timestamp.csv
+behavior_video: null
+bodypart: LED
+x_col: x
+y_col: y
+config_override: null
+type: arena
+arena_bounds:
+- 52.0
+- 565.0
+- 50.0
+- 565.0
+arena_size_mm:
+- 500.0
+- 500.0
+camera_height_mm: 500.0
+tracking_height_mm: 50.0

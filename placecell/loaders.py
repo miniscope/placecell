@@ -125,7 +125,6 @@ def load_behavior_data(
         window_frames=speed_window_frames,
     )
 
-    # Trim to time range if specified
     if time_range is not None:
         t_start, t_end = time_range
         mask = (trajectory_with_speed["unix_time"] >= t_start) & (
@@ -169,7 +168,6 @@ def load_visualization_data(
 
     neural_path = Path(neural_path)
 
-    # Load traces
     try:
         traces = load_calcium_traces(neural_path, trace_name=trace_name)
     except FileNotFoundError:
@@ -177,7 +175,6 @@ def load_visualization_data(
     except (KeyError, ValueError) as e:
         logger.warning(f"Failed to load traces from {trace_name}.zarr: {e}")
 
-    # Load max projection and footprints
     try:
         max_proj_path = neural_path / "max_proj.zarr"
         if max_proj_path.exists():
@@ -199,7 +196,6 @@ def load_visualization_data(
             A_ds = xr.open_zarr(a_path, consolidated=False)
             footprints = A_ds["A"] if "A" in A_ds else A_ds[list(A_ds.data_vars)[0]]
 
-            # Validate unit_id coordinates
             if "unit_id" in footprints.coords:
                 unit_ids = footprints.coords["unit_id"].values
                 if len(set(unit_ids)) == 1:

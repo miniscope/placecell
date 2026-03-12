@@ -153,6 +153,7 @@ def create_unit_browser(
     place_field_threshold: float = 0.05,
     place_field_min_bins: int = 5,
     speed_unit: str = "mm/s",
+    place_cell_ids: list[int] | None = None,
 ) -> tuple[plt.Figure, widgets.VBox]:
     """Create interactive place cell browser widget.
 
@@ -186,6 +187,8 @@ def create_unit_browser(
         Time window for trace display in seconds.
     place_field_threshold : float
         Fraction of peak rate to define place field boundary for red contour.
+    place_cell_ids : list[int] or None
+        Unit IDs of place cells for toggle filtering.
 
     Returns
     -------
@@ -194,15 +197,15 @@ def create_unit_browser(
     controls : widgets.VBox
         Widget controls (sliders and buttons).
     """
-    n_units = len(unique_units)
+    all_units = list(unique_units)
+    pc_units = sorted(place_cell_ids) if place_cell_ids else []
+    active_units = list(pc_units) if pc_units else list(all_units)
 
-    # Create figure with 3 rows
     fig = plt.figure(figsize=(10, 8))
     fig.canvas.toolbar_visible = False
     fig.canvas.header_visible = False
     fig.canvas.layout.width = "100%"
 
-    # Create axes - 3 rows: top (unit/traj/SI), middle (3 rate maps), bottom (trace)
     # Top row (leave space above for text annotations)
     ax1 = fig.add_axes([0, 0.65, 0.25, 0.27])  # Unit footprint
     ax2 = fig.add_axes([0.33, 0.65, 0.25, 0.27])  # Trajectory
@@ -221,7 +224,8 @@ def create_unit_browser(
     def render_unit(unit_idx: int, trace_start: float) -> None:
         nonlocal text_annotations
 
-        unit_id = unique_units[unit_idx]
+        n_units = len(active_units)
+        unit_id = active_units[unit_idx]
         result = unit_results[unit_id]
 
         for ax in [ax1, ax2, ax3a, ax3b, ax3c, ax4, ax5]:
@@ -258,7 +262,6 @@ def create_unit_browser(
             x_vals = vis_data_above["x"].values
             y_vals = vis_data_above["y"].values
 
-            # Find spatial bin index for each event
             x_bin_idx = np.digitize(x_vals, x_edges) - 1
             y_bin_idx = np.digitize(y_vals, y_edges) - 1
 
@@ -314,7 +317,6 @@ def create_unit_browser(
         ax3c.set_title(title, fontsize=9)
         ax3c.axis("off")
 
-        # Set same color scale for all three
         im1.set_clim(0.0, 1.0)
         im2.set_clim(0.0, 1.0)
         im3.set_clim(0.0, 1.0)
@@ -323,7 +325,7 @@ def create_unit_browser(
         ax4.hist(result.shuffled_sis, bins=15, color="gray", alpha=0.7, edgecolor="black")
         ax4.axvline(result.si, color="red", linestyle="--", linewidth=2)
         ax4.set_title(f"SI: {result.si:.2f}, p={result.p_val:.3f}", fontsize=9)
-        ax4.set_xlabel("SI (bits/s)", fontsize=8)
+        ax4.set_xlabel("SI (bits/spike)", fontsize=8)
         ax4.set_ylabel("Count", fontsize=8)
         ax4.tick_params(labelsize=7)
         ax4.set_box_aspect(1)
@@ -480,17 +482,15 @@ def create_unit_browser(
 
         fig.canvas.draw_idle()
 
-    # Get max trace time
     max_trace_time = 0.0
     for r in unit_results.values():
         if r.trace_times is not None and len(r.trace_times) > 0:
             max_trace_time = max(max_trace_time, r.trace_times[-1])
 
-    # Widgets
     unit_slider = widgets.IntSlider(
         value=0,
         min=0,
-        max=n_units - 1,
+        max=len(active_units) - 1,
         step=1,
         description="Unit:",
         continuous_update=False,
@@ -511,10 +511,10 @@ def create_unit_browser(
     next_btn = widgets.Button(description="Next >", layout=widgets.Layout(width="70px"))
 
     def on_prev(_: Any) -> None:
-        unit_slider.value = (unit_slider.value - 1) % n_units
+        unit_slider.value = (unit_slider.value - 1) % max(1, len(active_units))
 
     def on_next(_: Any) -> None:
-        unit_slider.value = (unit_slider.value + 1) % n_units
+        unit_slider.value = (unit_slider.value + 1) % max(1, len(active_units))
 
     prev_btn.on_click(on_prev)
     next_btn.on_click(on_next)
@@ -526,9 +526,34 @@ def create_unit_browser(
     trace_slider.observe(update, names="value")
 
     nav_box = widgets.HBox([prev_btn, unit_slider, next_btn], layout=widgets.Layout(width="100%"))
-    controls = widgets.VBox([nav_box, trace_slider], layout=widgets.Layout(width="100%"))
 
-    # Render initial unit
+    control_rows: list[widgets.Widget] = []
+    if pc_units:
+        n_all = len(all_units)
+        n_pc = len(pc_units)
+        pc_label = f"Place cells ({n_pc})"
+        all_label = f"All ({n_all})"
+        filter_toggle = widgets.ToggleButtons(
+            options=[pc_label, all_label],
+            value=pc_label,
+            description="Show:",
+            style={"button_width": "auto"},
+        )
+
+        def _on_filter(change: Any) -> None:
+            if change["new"].startswith("Place cells"):
+                active_units[:] = pc_units
+            else:
+                active_units[:] = all_units
+            unit_slider.max = max(0, len(active_units) - 1)
+            unit_slider.value = 0
+
+        filter_toggle.observe(_on_filter, names="value")
+        control_rows.append(filter_toggle)
+
+    control_rows.extend([nav_box, trace_slider])
+    controls = widgets.VBox(control_rows, layout=widgets.Layout(width="100%"))
+
     render_unit(0, 0)
 
     return fig, controls
@@ -536,26 +561,26 @@ def create_unit_browser(
 
 def browse_units(
     ds: ArenaDataset,
-    unit_results: dict[int, dict] | None = None,
     place_field_threshold: float | None = None,
 ) -> tuple[plt.Figure, widgets.VBox]:
     """Create a unit browser from an ArenaDataset.
+
+    Includes an "All / Place cells" toggle when place cells are available.
 
     Parameters
     ----------
     ds:
         Dataset with completed analysis (analyze_units must have been called).
-    unit_results:
-        Subset of results to browse. Defaults to ds.unit_results.
     place_field_threshold:
         Override for place field contour threshold.
     """
-    results = unit_results if unit_results is not None else ds.unit_results
     scfg = ds.spatial
+    place_cell_results = ds.place_cells()
+    pc_ids = sorted(place_cell_results.keys()) if place_cell_results else None
 
     return create_unit_browser(
-        unit_results=results,
-        unique_units=sorted(results.keys()),
+        unit_results=ds.unit_results,
+        unique_units=sorted(ds.unit_results.keys()),
         trajectory_df=ds.trajectory_filtered,
         df_all_events=ds.event_index,
         max_proj=ds.max_proj,
@@ -570,6 +595,7 @@ def browse_units(
         place_field_threshold=place_field_threshold or scfg.place_field_threshold,
         place_field_min_bins=scfg.place_field_min_bins,
         speed_unit="mm/s" if ds.mm_per_px else "px/s",
+        place_cell_ids=pc_ids,
     )
 
 
@@ -623,7 +649,6 @@ def create_shuffle_browser_1d(
             txt.remove()
         text_annotations = []
 
-        # ── Panel 1: Rate map ──────────────────────────────────────
         ax = axes[0]
         rm = res.rate_map
         valid = np.isfinite(rm)
@@ -661,7 +686,6 @@ def create_shuffle_browser_1d(
         ax.tick_params(labelsize=7)
         ax.legend(fontsize=6, loc="upper right")
 
-        # ── Panel 2: SI shuffle distribution ───────────────────────
         ax = axes[1]
         if len(res.shuffled_sis) > 0:
             ax.hist(
@@ -678,14 +702,13 @@ def create_shuffle_browser_1d(
                 pct95, color="black", linewidth=1, linestyle="--", label=f"95th pctl ({pct95:.3f})"
             )
         ax.axvline(res.si, color="red", linewidth=2, label=f"Observed ({res.si:.3f})")
-        ax.set_xlabel("Spatial information (bits/s)", fontsize=8)
+        ax.set_xlabel("Spatial information (bits/spike)", fontsize=8)
         ax.set_ylabel("Density", fontsize=8)
         sig_str = "PASS" if res.p_val < p_value_threshold else "fail"
         ax.set_title(f"SI test (p={res.p_val:.3f}, {sig_str})", fontsize=9)
         ax.tick_params(labelsize=7)
         ax.legend(fontsize=6)
 
-        # ── Panel 3: Stability shuffle distribution ────────────────
         ax = axes[2]
         if len(res.shuffled_stability) > 0:
             ax.hist(
@@ -728,7 +751,6 @@ def create_shuffle_browser_1d(
         ax.tick_params(labelsize=7)
         ax.legend(fontsize=6)
 
-        # ── Status text ────────────────────────────────────────────
         is_sig = res.p_val < p_value_threshold
         is_stable = not np.isnan(res.stability_p_val) and res.stability_p_val < p_value_threshold
         if is_sig and is_stable:
@@ -757,7 +779,6 @@ def create_shuffle_browser_1d(
         fig.tight_layout(rect=[0, 0, 1, 0.93])
         fig.canvas.draw_idle()
 
-    # ── Widgets ────────────────────────────────────────────────────
     unit_slider = widgets.IntSlider(
         value=0,
         min=0,
@@ -803,6 +824,7 @@ def create_unit_browser_1d(
     arm_boundaries: list[float] | None = None,
     arm_labels: list[str] | None = None,
     speed_unit: str = "pos/s",
+    place_cell_ids: list[int] | None = None,
 ) -> tuple[plt.Figure, widgets.VBox]:
     """Interactive unit browser for 1D maze analysis.
 
@@ -831,9 +853,12 @@ def create_unit_browser_1d(
         Arm boundary positions for vertical markers.
     arm_labels:
         Labels for each arm segment.
+    place_cell_ids : list[int] or None
+        Unit IDs of place cells for toggle filtering.
     """
-    sorted_ids = sorted(unit_results.keys())
-    n_units = len(sorted_ids)
+    all_units = sorted(unit_results.keys())
+    pc_units = sorted(place_cell_ids) if place_cell_ids else []
+    active_units = list(pc_units) if pc_units else list(all_units)
     centers = 0.5 * (edges[:-1] + edges[1:])
 
     fig = plt.figure(figsize=(14, 6))
@@ -853,7 +878,8 @@ def create_unit_browser_1d(
     def _render(unit_idx: int, trace_start: float) -> None:
         nonlocal text_annotations
 
-        uid = sorted_ids[unit_idx]
+        n_units = len(active_units)
+        uid = active_units[unit_idx]
         res = unit_results[uid]
 
         for ax in [ax_rm, ax_si_shuf, ax_stab_shuf, ax_trace]:
@@ -862,7 +888,6 @@ def create_unit_browser_1d(
             txt.remove()
         text_annotations = []
 
-        # ── Overlaid rate maps ────────────────────────────────────
         valid_full = np.isfinite(res.rate_map)
         valid_1st = np.isfinite(res.rate_map_first)
         valid_2nd = np.isfinite(res.rate_map_second)
@@ -917,7 +942,6 @@ def create_unit_browser_1d(
         ax_rm.tick_params(labelsize=6)
         ax_rm.legend(fontsize=6, loc="upper right", framealpha=0.8)
 
-        # ── SI shuffle histogram ──────────────────────────────────
         if res.shuffled_sis is not None and len(res.shuffled_sis) > 0:
             ax_si_shuf.hist(
                 res.shuffled_sis,
@@ -933,7 +957,6 @@ def create_unit_browser_1d(
         ax_si_shuf.tick_params(labelsize=5)
         ax_si_shuf.set_ylabel("Count", fontsize=6)
 
-        # ── Stability shuffle histogram ───────────────────────────
         if res.shuffled_stability is not None and len(res.shuffled_stability) > 0:
             ax_stab_shuf.hist(
                 res.shuffled_stability,
@@ -963,7 +986,6 @@ def create_unit_browser_1d(
         ax_stab_shuf.tick_params(labelsize=5)
         ax_stab_shuf.set_ylabel("Count", fontsize=6)
 
-        # ── Trace with events ─────────────────────────────────────
         if res.trace_data is not None and res.trace_times is not None:
             trace = res.trace_data
             t_full = res.trace_times
@@ -1045,7 +1067,6 @@ def create_unit_browser_1d(
         else:
             ax_trace.text(0.5, 0.5, "No trace data", ha="center", va="center", fontsize=8)
 
-        # ── Status text ───────────────────────────────────────────
         is_sig = res.p_val < p_value_threshold
         is_stable = not np.isnan(res.stability_p_val) and res.stability_p_val < p_value_threshold
         n_events = len(res.unit_data) if not res.unit_data.empty else 0
@@ -1117,17 +1138,15 @@ def create_unit_browser_1d(
 
         fig.canvas.draw_idle()
 
-    # ── Max trace time ────────────────────────────────────────────
     max_trace_time = 0.0
     for r in unit_results.values():
         if r.trace_times is not None and len(r.trace_times) > 0:
             max_trace_time = max(max_trace_time, r.trace_times[-1])
 
-    # ── Widgets ───────────────────────────────────────────────────
     unit_slider = widgets.IntSlider(
         value=0,
         min=0,
-        max=max(0, n_units - 1),
+        max=max(0, len(active_units) - 1),
         step=1,
         description="Unit:",
         continuous_update=False,
@@ -1146,10 +1165,10 @@ def create_unit_browser_1d(
     next_btn = widgets.Button(description="Next >", layout=widgets.Layout(width="70px"))
 
     def _on_prev(_: Any) -> None:
-        unit_slider.value = (unit_slider.value - 1) % n_units
+        unit_slider.value = (unit_slider.value - 1) % max(1, len(active_units))
 
     def _on_next(_: Any) -> None:
-        unit_slider.value = (unit_slider.value + 1) % n_units
+        unit_slider.value = (unit_slider.value + 1) % max(1, len(active_units))
 
     prev_btn.on_click(_on_prev)
     next_btn.on_click(_on_next)
@@ -1161,7 +1180,33 @@ def create_unit_browser_1d(
     trace_slider.observe(_update, names="value")
 
     nav = widgets.HBox([prev_btn, unit_slider, next_btn], layout=widgets.Layout(width="100%"))
-    controls = widgets.VBox([nav, trace_slider], layout=widgets.Layout(width="100%"))
+
+    control_rows: list[widgets.Widget] = []
+    if pc_units:
+        n_all = len(all_units)
+        n_pc = len(pc_units)
+        pc_label = f"Place cells ({n_pc})"
+        all_label = f"All ({n_all})"
+        filter_toggle = widgets.ToggleButtons(
+            options=[pc_label, all_label],
+            value=pc_label,
+            description="Show:",
+            style={"button_width": "auto"},
+        )
+
+        def _on_filter(change: Any) -> None:
+            if change["new"].startswith("Place cells"):
+                active_units[:] = pc_units
+            else:
+                active_units[:] = all_units
+            unit_slider.max = max(0, len(active_units) - 1)
+            unit_slider.value = 0
+
+        filter_toggle.observe(_on_filter, names="value")
+        control_rows.append(filter_toggle)
+
+    control_rows.extend([nav, trace_slider])
+    controls = widgets.VBox(control_rows, layout=widgets.Layout(width="100%"))
 
     _render(0, 0)
     return fig, controls
@@ -1169,22 +1214,22 @@ def create_unit_browser_1d(
 
 def browse_units_1d(
     ds: Any,
-    unit_results: dict[int, Any] | None = None,
 ) -> tuple[plt.Figure, widgets.VBox]:
     """Create a 1D unit browser from a MazeDataset.
+
+    Includes an "All / Place cells" toggle when place cells are available.
 
     Parameters
     ----------
     ds:
         MazeDataset with completed analysis.
-    unit_results:
-        Subset of results to browse. Defaults to ds.unit_results.
     """
-    results = unit_results if unit_results is not None else ds.unit_results
     scfg = ds.spatial_1d
+    place_cell_results = ds.place_cells()
+    pc_ids = sorted(place_cell_results.keys()) if place_cell_results else None
 
     return create_unit_browser_1d(
-        unit_results=results,
+        unit_results=ds.unit_results,
         edges=ds.edges_1d,
         df_all_events=ds.event_index,
         trace_name=ds.cfg.neural.trace_name,
@@ -1194,4 +1239,5 @@ def browse_units_1d(
         arm_boundaries=ds.arm_boundaries,
         arm_labels=ds.effective_arm_order,
         speed_unit="mm/s" if ds.arm_lengths is not None else "pos/s",
+        place_cell_ids=pc_ids,
     )

@@ -127,7 +127,6 @@ class MazeDataset(BasePlaceCellDataset):
         bcfg = self.cfg.behavior
         scfg = self.spatial_1d
 
-        # Load behavior graph for physical arm lengths (optional)
         if self.behavior_graph_path is not None and self.behavior_graph_path.exists():
             self.graph_polylines = load_graph_polylines(self.behavior_graph_path)
             self.graph_mm_per_pixel = dcfg.mm_per_pixel or 1.0
@@ -137,7 +136,6 @@ class MazeDataset(BasePlaceCellDataset):
         else:
             self.arm_lengths = None
 
-        # Serialize to 1D
         self.trajectory_1d = serialize_arm_position(
             self.trajectory,
             arm_order=dcfg.arm_order,
@@ -286,7 +284,6 @@ class MazeDataset(BasePlaceCellDataset):
             segment_bins=self.segment_bins,
         )
 
-        # Store in x_edges for compatibility with save_bundle
         self.x_edges = self.edges_1d
         self.y_edges = None
 
@@ -392,6 +389,7 @@ class MazeDataset(BasePlaceCellDataset):
                 shuffled_sis=result["shuffled_sis"],
                 shuffled_rate_p95=None,
                 overall_rate=result["overall_rate"],
+                event_count_rate=result["event_count_rate"],
                 stability_corr=result["stability_corr"],
                 stability_z=result["stability_z"],
                 stability_p_val=result["stability_p_val"],

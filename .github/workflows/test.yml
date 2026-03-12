@@ -29,10 +29,13 @@ jobs:
         run: pip install pdm
 
       - name: Install dependencies
-        run: pdm install -G tests
+        run: pdm install -G tests -G notebook
 
       - name: Run tests with coverage
         run: pdm run pytest tests/ -v --cov=placecell --cov-report=xml --cov-report=term
+
+      - name: Run notebook smoke tests
+        run: pdm run pytest --nbmake notebook/view_results_arena.ipynb notebook/view_results_maze.ipynb -v
 
       - name: Code Coverage Summary
         if: matrix.python-version == '3.11' && github.event_name == 'pull_request'

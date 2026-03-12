@@ -108,7 +108,6 @@ def detect_zones(
             and new_zone is not None
             and not is_valid_transition(current_zone, new_zone, zone_graph, zone_types)
         ):
-            # Check for valid alternatives
             valid_alternatives = []
             for alt_zone, alt_prob in zone_probs.items():
                 if (
@@ -168,7 +167,6 @@ def detect_zones(
 
         pred_label = current_zone if current_zone else "Unknown"
 
-        # Calculate arm-pinned coordinates
         arm_position = None
         pinned_x, pinned_y = x, y
         if zone_types.get(pred_label) == "arm" and pred_label in zone_polygons:
@@ -439,7 +437,6 @@ def detect_zones_from_csv(
 
     x_coords = df[x_col].values.astype(float)
     y_coords = df[y_col].values.astype(float)
-    # Load zone config (geometry + optional file-level connections)
     zone_polygons, zone_types, file_graph = load_zone_config(zone_config_path)
 
     # Data config connections override file connections
@@ -468,7 +465,6 @@ def detect_zones_from_csv(
         progress_bar=progress_bar,
     )
 
-    # Build output in DLC multi-index format
     output_data = {
         (scorer, bodypart, "x"): x_coords,
         (scorer, bodypart, "y"): y_coords,

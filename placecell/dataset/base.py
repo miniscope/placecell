@@ -10,6 +10,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import xarray as xr
+import yaml
 
 from placecell.config import (
     AnalysisConfig,
@@ -89,7 +90,9 @@ class UnitResult:
     unit_data:
         Speed-filtered deconvolved events for this unit (subset of event_place).
     overall_rate:
-        Overall firing rate (total events / total time), i.e. lambda.
+        Amplitude-weighted event rate in a.u./s (sum of deconvolved amplitudes / total time).
+    event_count_rate:
+        Binary event count rate in 1/s (number of events / total time).
     trace_data:
         Raw calcium trace for this unit (None if traces unavailable).
     trace_times:
@@ -112,6 +115,7 @@ class UnitResult:
     vis_data_above: pd.DataFrame
     unit_data: pd.DataFrame
     overall_rate: float
+    event_count_rate: float
     trace_data: np.ndarray | None
     trace_times: np.ndarray | None
 
@@ -298,12 +302,16 @@ class BasePlaceCellDataset(abc.ABC):
                 import cv2
 
                 cap = cv2.VideoCapture(str(self.behavior_video_path))
+                total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                idx = min(self.data_cfg.overlay_frame_index, total - 1) if total > 0 else 0
+                if idx > 0:
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
                 ret, frame = cap.read()
                 cap.release()
                 if ret:
                     self.behavior_video_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     logger.info(
-                        "Loaded behavior video frame from %s", self.behavior_video_path.name
+                        "Loaded behavior video frame %d from %s", idx, self.behavior_video_path.name
                     )
                 else:
                     logger.warning("Could not read frame from %s", self.behavior_video_path)
@@ -314,6 +322,29 @@ class BasePlaceCellDataset(abc.ABC):
     def load(self) -> None:
         """Load neural traces, behavior data, and visualization assets."""
         ...
+
+    def subset(self, n_units: int | None = None, n_frames: int | None = None) -> None:
+        """Trim loaded data to the first *n_units* units and *n_frames* frames.
+
+        Must be called after :meth:`load` and before :meth:`preprocess_behavior`.
+        """
+        if self.traces is None:
+            raise RuntimeError("Call load() before subset()")
+        if n_units is not None:
+            unit_ids = self.traces.coords["unit_id"].values[:n_units]
+            self.traces = self.traces.sel(unit_id=unit_ids)
+            if self.footprints is not None:
+                self.footprints = self.footprints.sel(unit_id=unit_ids)
+        if n_frames is not None:
+            frame_ids = self.traces.coords["frame"].values[:n_frames]
+            self.traces = self.traces.sel(frame=frame_ids)
+            if self.trajectory is not None:
+                self.trajectory = self.trajectory.iloc[:n_frames].reset_index(drop=True)
+        logger.info(
+            "Subset: %d units, %d frames",
+            self.traces.sizes["unit_id"],
+            self.traces.sizes["frame"],
+        )
 
     @abc.abstractmethod
     def preprocess_behavior(self) -> None:
@@ -414,8 +445,6 @@ class BasePlaceCellDataset(abc.ABC):
             "n_place_cells": n_place_cells,
         }
 
-    # ── Bundle I/O ──────────────────────────────────────────────────────
-
     def save_bundle(self, path: str | Path, *, save_figures: bool = True) -> Path:
         """Save all analysis results to a portable ``.pcellbundle`` directory.
 
@@ -451,6 +480,16 @@ class BasePlaceCellDataset(abc.ABC):
 
         # Config
         self.cfg.to_yaml(path / "config.yaml")
+
+        # Data config
+        if self.data_cfg is not None:
+            with open(path / "data_config.yaml", "w") as f:
+                yaml.dump(
+                    self.data_cfg.model_dump(mode="json"),
+                    f,
+                    default_flow_style=False,
+                    sort_keys=False,
+                )
 
         # Spatial arrays
         spatial_kw: dict[str, np.ndarray] = {}
@@ -578,6 +617,7 @@ class BasePlaceCellDataset(abc.ABC):
             "si",
             "p_val",
             "overall_rate",
+            "event_count_rate",
             "stability_corr",
             "stability_z",
             "stability_p_val",
@@ -647,7 +687,11 @@ class BasePlaceCellDataset(abc.ABC):
 
         # Config
         cfg = AnalysisConfig.from_yaml(path / "config.yaml")
-        ds = cls(cfg)
+        data_cfg = None
+        data_cfg_path = path / "data_config.yaml"
+        if data_cfg_path.exists():
+            data_cfg = BaseDataConfig.from_yaml(data_cfg_path)
+        ds = cls(cfg, data_cfg=data_cfg)
 
         # Spatial arrays
         spatial_path = path / "spatial.npz"
@@ -745,6 +789,7 @@ class BasePlaceCellDataset(abc.ABC):
             "si",
             "p_val",
             "overall_rate",
+            "event_count_rate",
             "stability_corr",
             "stability_z",
             "stability_p_val",
@@ -753,14 +798,10 @@ class BasePlaceCellDataset(abc.ABC):
         scalars_df = pd.read_csv(ur_dir / "scalars.csv")
         unit_ids = scalars_df["unit_id"].tolist()
 
-        scalar_defaults = {"overall_rate": 0.0}
         scalars_by_uid: dict[int, dict] = {}
         for _, row in scalars_df.iterrows():
             uid = int(row["unit_id"])
-            scalars_by_uid[uid] = {
-                f: row[f] if f in row.index else scalar_defaults.get(f, np.nan)
-                for f in scalar_fields
-            }
+            scalars_by_uid[uid] = {f: row[f] for f in scalar_fields}
 
         # Read arrays
         arrays_by_uid: dict[int, dict] = {uid: {} for uid in unit_ids}
@@ -798,7 +839,8 @@ class BasePlaceCellDataset(abc.ABC):
                 rate_map_raw=ar.get("rate_map_raw", np.array([])),
                 si=float(sc["si"]),
                 p_val=float(sc["p_val"]),
-                overall_rate=float(sc.get("overall_rate", 0.0)),
+                overall_rate=float(sc["overall_rate"]),
+                event_count_rate=float(sc["event_count_rate"]),
                 shuffled_sis=ar.get("shuffled_sis", np.array([])),
                 shuffled_rate_p95=ar.get("shuffled_rate_p95", np.array([])),
                 stability_corr=float(sc["stability_corr"]),
