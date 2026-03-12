@@ -6,6 +6,11 @@ Edit CONFIG, DATA_ROOT, and DATA_YAMLS below, then run:
 
 from pathlib import Path
 
+import pandas as pd
+from tqdm.auto import tqdm
+
+from placecell.dataset import BasePlaceCellDataset
+
 HERE = Path(__file__).resolve().parent
 
 CONFIG = "example_pcell_config"  # stem name from placecell/config/ or path
@@ -21,11 +26,6 @@ DATA_YAMLS = [
 
 
 def main() -> None:
-    import pandas as pd
-    from tqdm.auto import tqdm
-
-    from placecell.dataset import BasePlaceCellDataset
-
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     rows = []
