@@ -13,6 +13,7 @@ import xarray as xr
 import yaml
 
 from placecell.config import (
+    CONFIG_DIR,
     AnalysisConfig,
     BaseDataConfig,
     BaseSpatialMapConfig,
@@ -205,11 +206,15 @@ class BasePlaceCellDataset(abc.ABC):
         Parameters
         ----------
         config:
-            Path to the analysis config YAML file.
+            Path to analysis config YAML, or a stem name matching a
+            bundled config in ``placecell/config/`` (e.g. ``"example_pcell_config"``).
         data_path:
             Path to the per-session data paths YAML file.
         """
-        cfg = AnalysisConfig.from_yaml(Path(config))
+        config_path = Path(config)
+        if not config_path.suffix and not config_path.exists():
+            config_path = CONFIG_DIR / f"{config}.yaml"
+        cfg = AnalysisConfig.from_yaml(config_path)
 
         data_path = Path(data_path)
         data_dir = data_path.parent
