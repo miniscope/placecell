@@ -1,9 +1,15 @@
 # Installation
 
-```bash
-# Typical installation:
-pdm install
+> **Note:** PyPI distribution is planned. For now, install directly from GitHub.
 
-# Installation with specific groups:
-pdm install -G [dev/tests/docs/all]
+```bash
+pip install git+https://github.com/miniscope/placecell.git
+```
+
+## Development
+
+```bash
+git clone https://github.com/miniscope/placecell.git
+cd placecell
+uv sync --extra all
 ```
