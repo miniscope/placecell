@@ -138,7 +138,7 @@ behavior_timestamp: path/to/behavior_timestamp.csv
 
 ### Analysis Config
 
-:::{dropdown} pcell_config.yaml
+:::{dropdown} arena_config.yaml
 ```yaml
 neural:
   fps: 20.0

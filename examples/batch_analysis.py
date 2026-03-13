@@ -13,7 +13,7 @@ from placecell.dataset import BasePlaceCellDataset
 
 HERE = Path(__file__).resolve().parent
 
-CONFIG = "example_pcell_config"  # stem name from placecell/config/ or path
+CONFIG = "example_arena_config"  # stem name from placecell/config/ or path
 DATA_ROOT = HERE / "../data"    # adjust to your data directory
 OUTPUT_DIR = HERE / "../output"
 WORKERS = 4

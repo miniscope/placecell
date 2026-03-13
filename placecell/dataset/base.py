@@ -207,7 +207,7 @@ class BasePlaceCellDataset(abc.ABC):
         ----------
         config:
             Path to analysis config YAML, or a stem name matching a
-            bundled config in ``placecell/config/`` (e.g. ``"example_pcell_config"``).
+            bundled config in ``placecell/config/`` (e.g. ``"example_arena_config"``).
         data_path:
             Path to the per-session data paths YAML file.
         """
