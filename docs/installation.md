@@ -3,7 +3,7 @@
 > **Note:** PyPI distribution is planned. For now, install directly from GitHub.
 
 ```bash
-pip install git+https://github.com/miniscope/placecell.git
+pip install --no-binary oasis-deconv git+https://github.com/miniscope/placecell.git
 ```
 
 ## Development
