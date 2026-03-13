@@ -27,5 +27,4 @@ behavior:
     place_field_min_bins: 5
     place_field_seed_percentile: 95
     n_split_blocks: 10
-    block_shifts:
-    - 0
+    block_shift: 0

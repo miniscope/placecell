@@ -517,55 +517,25 @@ def compute_unit_analysis_1d(
     events_above = unit_data
     vis_threshold = 0.0
 
-    block_shifts = scfg.block_shifts or [0.0]
-
-    z_scores = []
-    p_vals = []
-    all_shuffled_corrs = []
-    rate_map_first = None
-    rate_map_second = None
-    for shift in block_shifts:
-        corr_i, z_i, p_i, rm1_i, rm2_i, shuf_corrs_i = compute_stability_score_1d(
-            unit_data,
-            trajectory_df,
-            occupancy_time,
-            valid_mask,
-            edges,
-            spatial_sigma=scfg.spatial_sigma,
-            behavior_fps=behavior_fps,
-            min_occupancy=scfg.min_occupancy,
-            n_split_blocks=scfg.n_split_blocks,
-            block_shift=shift,
-            n_shuffles=scfg.n_shuffles,
-            random_seed=random_seed,
-            min_shift_seconds=scfg.min_shift_seconds,
-            si_weight_mode=scfg.si_weight_mode,
-            pos_column=pos_column,
-            segment_bins=segment_bins,
-        )
-        if np.isfinite(z_i):
-            z_scores.append(z_i)
-        if np.isfinite(p_i):
-            p_vals.append(p_i)
-        if len(shuf_corrs_i) > 0:
-            all_shuffled_corrs.append(shuf_corrs_i)
-        if rate_map_first is None:
-            rate_map_first, rate_map_second = rm1_i, rm2_i
-
-    if z_scores:
-        stability_z = float(np.mean(z_scores))
-        stability_corr = float(np.tanh(stability_z))
-    else:
-        stability_z = np.nan
-        stability_corr = np.nan
-    stability_p_val = float(np.mean(p_vals)) if p_vals else np.nan
-
-    if rate_map_first is None:
-        nan_map = np.full_like(occupancy_time, np.nan)
-        rate_map_first = nan_map
-        rate_map_second = nan_map
-
-    shuffled_stability = all_shuffled_corrs[0] if all_shuffled_corrs else np.array([])
+    # Stability test
+    stability_corr, stability_z, stability_p_val, rate_map_first, rate_map_second, shuffled_stability = compute_stability_score_1d(
+        unit_data,
+        trajectory_df,
+        occupancy_time,
+        valid_mask,
+        edges,
+        spatial_sigma=scfg.spatial_sigma,
+        behavior_fps=behavior_fps,
+        min_occupancy=scfg.min_occupancy,
+        n_split_blocks=scfg.n_split_blocks,
+        block_shift=scfg.block_shift,
+        n_shuffles=scfg.n_shuffles,
+        random_seed=random_seed,
+        min_shift_seconds=scfg.min_shift_seconds,
+        si_weight_mode=scfg.si_weight_mode,
+        pos_column=pos_column,
+        segment_bins=segment_bins,
+    )
 
     return {
         "rate_map": rate_map,

@@ -95,12 +95,11 @@ class BaseSpatialMapConfig(BaseModel):
         le=100,
         description="Number of temporal blocks for interleaved stability splitting.",
     )
-    block_shifts: list[float] = Field(
-        [0.0],
-        description=(
-            "Block boundary shifts as fractions of block width. "
-            "Each produces an independent split; results are Fisher z-averaged."
-        ),
+    block_shift: float = Field(
+        0.0,
+        ge=0.0,
+        lt=1.0,
+        description="Block boundary shift as fraction of block width (0.0 to <1.0).",
     )
 
 

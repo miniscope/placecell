@@ -22,6 +22,6 @@ behavior:
     min_shift_seconds: 20
     si_weight_mode: amplitude
     n_split_blocks: 10
-    block_shifts: [0]
+    block_shift: 0
     split_by_direction: true
     require_complete_traversal: true  # keep only room-to-room traversals
