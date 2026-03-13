@@ -1,7 +1,7 @@
 """Batch place cell analysis across multiple sessions.
 
-Edit CONFIG, DATA_ROOT, and DATA_YAMLS below, then run:
-    python examples/batch_analysis.py
+Edit SESSIONS below, then run:
+    python batch_analysis.py
 """
 
 from pathlib import Path
@@ -11,17 +11,16 @@ from tqdm.auto import tqdm
 
 from placecell.dataset import BasePlaceCellDataset
 
-HERE = Path(__file__).resolve().parent
-
-CONFIG = "example_arena_config"  # stem name from placecell/config/ or path
-DATA_ROOT = HERE / "../data"    # adjust to your data directory
-OUTPUT_DIR = HERE / "../output"
+ARENA_CONFIG = "example_arena_config"  # stem name from placecell/config/ or path
+MAZE_CONFIG = "example_maze_config"
+OUTPUT_DIR = Path("bundle")
 WORKERS = 4
 
-DATA_YAMLS = [
-    DATA_ROOT / "data1.yaml",
-    DATA_ROOT / "data2.yaml",
-    # Add more YAML paths as needed
+# List of (config, data_yaml_path) pairs.
+SESSIONS = [
+    (ARENA_CONFIG, Path("data/arena/mouse1/mouse1_day1.yaml")),
+    (ARENA_CONFIG, Path("data/arena/mouse1/mouse1_day2.yaml")),
+    (MAZE_CONFIG, Path("data/maze/mouse1/mouse1_day1.yaml")),
 ]
 
 
@@ -29,11 +28,11 @@ def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     rows = []
-    for i, data_path in enumerate(DATA_YAMLS):
+    for i, (config, data_path) in enumerate(SESSIONS):
         name = data_path.stem
-        print(f"\n[{i + 1}/{len(DATA_YAMLS)}] {name}")
+        print(f"\n[{i + 1}/{len(SESSIONS)}] {name}")
 
-        ds = BasePlaceCellDataset.from_yaml(CONFIG, data_path)
+        ds = BasePlaceCellDataset.from_yaml(config, data_path)
         ds.load()
         ds.preprocess_behavior()
         ds.deconvolve(progress_bar=tqdm)
