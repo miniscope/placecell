@@ -521,7 +521,14 @@ def compute_unit_analysis_1d(
     vis_threshold = 0.0
 
     # Stability test
-    stability_corr, stability_z, stability_p_val, rate_map_first, rate_map_second, shuffled_stability = compute_stability_score_1d(
+    (
+        stability_corr,
+        stability_z,
+        stability_p_val,
+        rate_map_first,
+        rate_map_second,
+        shuffled_stability,
+    ) = compute_stability_score_1d(
         unit_data,
         trajectory_df,
         occupancy_time,
