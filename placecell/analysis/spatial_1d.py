@@ -185,8 +185,7 @@ def compute_spatial_information_1d(
     -------
     tuple: (spatial_info, p_value, shuffled_sis)
     """
-    if random_seed is not None:
-        np.random.seed(random_seed)
+    rng = np.random.RandomState(random_seed)
 
     if unit_events.empty:
         return 0.0, 1.0, np.zeros(n_shuffles)
@@ -209,14 +208,17 @@ def compute_spatial_information_1d(
         rate_map[~valid_mask] = 0.0
 
     total_time = np.sum(occupancy_time[valid_mask])
-    total_events = np.sum(event_weights[valid_mask])
 
-    if total_time <= 0 or total_events <= 0:
+    if total_time <= 0 or np.sum(event_weights[valid_mask]) <= 0:
         return 0.0, 1.0, np.zeros(n_shuffles)
 
-    overall_lambda = total_events / total_time
+    # Compute overall rate from smoothed map so Σ P_i × (λ_i/λ̄) = 1
+    overall_lambda = np.sum(rate_map[valid_mask] * occupancy_time[valid_mask]) / total_time
     P_i = np.zeros_like(occupancy_time)
     P_i[valid_mask] = occupancy_time[valid_mask] / total_time
+
+    if overall_lambda <= 0:
+        return 0.0, 1.0, np.zeros(n_shuffles)
 
     valid_si = (rate_map > 0) & valid_mask
     if np.any(valid_si):
@@ -243,9 +245,9 @@ def compute_spatial_information_1d(
     shuffled_sis = []
     for _ in range(n_shuffles):
         if min_shift_frames > 0:
-            shift = np.random.randint(min_shift_frames, n_frames - min_shift_frames)
+            shift = rng.randint(min_shift_frames, n_frames - min_shift_frames)
         else:
-            shift = np.random.randint(n_frames)
+            shift = rng.randint(n_frames)
         s_shuffled = np.roll(aligned_events, shift)
 
         event_w_shuf, _ = np.histogram(traj_pos, bins=edges, weights=s_shuffled)
@@ -259,16 +261,18 @@ def compute_spatial_information_1d(
             )
             rate_shuf[~valid_mask] = 0.0
 
-        valid_s = (rate_shuf > 0) & valid_mask
-        if np.any(valid_s):
-            ratio_s = rate_shuf[valid_s] / overall_lambda
+        # Use smoothed overall rate for each shuffle (consistent SI)
+        shuf_lambda = np.sum(rate_shuf[valid_mask] * occupancy_time[valid_mask]) / total_time
+        valid_s = (rate_shuf > 0) & valid_mask & (shuf_lambda > 0)
+        if np.any(valid_s) and shuf_lambda > 0:
+            ratio_s = rate_shuf[valid_s] / shuf_lambda
             si_shuf = np.sum(P_i[valid_s] * ratio_s * np.log2(ratio_s))
         else:
             si_shuf = 0.0
         shuffled_sis.append(si_shuf)
 
     shuffled_sis = np.array(shuffled_sis)
-    p_val = np.sum(shuffled_sis >= actual_si) / n_shuffles
+    p_val = (np.sum(shuffled_sis >= actual_si) + 1) / (n_shuffles + 1)
 
     return actual_si, p_val, shuffled_sis
 
@@ -399,8 +403,7 @@ def compute_stability_score_1d(
 
     # Shuffle-based stability significance test
     if n_shuffles > 0:
-        if random_seed is not None:
-            np.random.seed(random_seed)
+        rng = np.random.RandomState(random_seed)
 
         traj_frames = trajectory_df["beh_frame_index"].values
         u_grouped = unit_events.groupby("beh_frame_index")["s"].sum()
@@ -415,9 +418,9 @@ def compute_stability_score_1d(
         shuffled_corrs = np.empty(n_shuffles)
         for i in range(n_shuffles):
             if min_shift_frames > 0:
-                shift = np.random.randint(min_shift_frames, n_frames - min_shift_frames)
+                shift = rng.randint(min_shift_frames, n_frames - min_shift_frames)
             else:
-                shift = np.random.randint(n_frames)
+                shift = rng.randint(n_frames)
             shifted = np.roll(aligned_events, shift)
 
             ew1, _ = np.histogram(
@@ -445,7 +448,7 @@ def compute_stability_score_1d(
                 continue
             shuffled_corrs[i] = np.corrcoef(v1[fm], v2[fm])[0, 1]
 
-        stability_p_val = float(np.sum(shuffled_corrs >= corr) / n_shuffles)
+        stability_p_val = float((np.sum(shuffled_corrs >= corr) + 1) / (n_shuffles + 1))
     else:
         stability_p_val = np.nan
         shuffled_corrs = np.array([])
