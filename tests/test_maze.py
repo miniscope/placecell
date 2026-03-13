@@ -88,10 +88,12 @@ class TestComputeSpeed1D:
             }
         )
         result = compute_speed_1d(df, window_frames=3)
-        # Frame 0: window to frame 3, but arm_index differs (0 vs 1) → speed=0
-        # Frame 1: window to frame 4, arm_index differs (0 vs 1) → speed=0
-        assert result.iloc[0]["speed_1d"] == 0.0
+        # Centered window (half=1): frames whose window spans the arm
+        # boundary get speed=0 because the same-arm check fails.
+        # Frame 1: window [0,2], arm_index[2]=1 ≠ arm_index[1]=0 → speed=0
+        # Frame 2: window [1,3], arm_index[1]=0 ≠ arm_index[2]=1 → speed=0
         assert result.iloc[1]["speed_1d"] == 0.0
+        assert result.iloc[2]["speed_1d"] == 0.0
 
 
 def _make_directional_trajectory() -> pd.DataFrame:

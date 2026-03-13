@@ -422,7 +422,9 @@ def compute_stability_score_1d(
 
     # Shuffle-based stability significance test
     if n_shuffles > 0:
-        rng = np.random.RandomState(random_seed)
+        # Offset seed so stability shuffles are independent of SI shuffles
+        stab_seed = random_seed + 224737 if random_seed is not None else None
+        rng = np.random.RandomState(stab_seed)
 
         traj_frames = trajectory_df["beh_frame_index"].values
         u_grouped = unit_events.groupby("beh_frame_index")["s"].sum()
