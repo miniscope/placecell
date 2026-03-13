@@ -5,6 +5,7 @@ behavior_position: behavior_position.csv
 behavior_timestamp: behavior_timestamp.csv
 behavior_video: null
 bodypart: LED
+overlay_frame_index: 1000
 x_col: x_pinned
 y_col: y_pinned
 config_override: null

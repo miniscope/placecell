@@ -292,9 +292,15 @@ def build_event_place_dataframe(
 ) -> pd.DataFrame:
     """Match neural events to behavior positions for place-cell analysis.
 
-    For each event, finds the closest behavior frame in time, filters out
-    matches where the timestamp difference exceeds 0.5 / behavior_fps, and
-    drops events below the speed threshold.
+    For each event, finds the closest behavior frame in time using binary
+    search (``np.searchsorted``) and nearest-neighbor comparison of the
+    two flanking behavior frames. Multiple neural events may map to the
+    same behavior frame when they occur faster than the behavior sampling
+    rate; this is expected and handled correctly by downstream histogram-
+    based analyses.
+
+    Matches where the timestamp difference exceeds ``0.5 / behavior_fps``
+    are discarded, and events below the speed threshold are dropped.
 
     Parameters
     ----------
@@ -336,8 +342,8 @@ def build_event_place_dataframe(
     idx = np.searchsorted(beh_time_arr, event_times, side="left")
     idx_clipped = np.clip(idx, 0, len(beh_time_arr) - 1)
 
-    idx_left = idx_clipped
-    idx_right = np.clip(idx_clipped + 1, 0, len(beh_time_arr) - 1)
+    idx_right = idx_clipped
+    idx_left = np.clip(idx_clipped - 1, 0, len(beh_time_arr) - 1)
 
     time_diff_left = np.abs(event_times - beh_time_arr[idx_left])
     time_diff_right = np.abs(event_times - beh_time_arr[idx_right])

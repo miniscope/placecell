@@ -22,8 +22,7 @@ behavior:
     min_shift_seconds: 20.0
     si_weight_mode: amplitude
     n_split_blocks: 10
-    block_shifts:
-    - 0.0
+    block_shift: 0.0
     bins: 50
     event_threshold_sigma: 0.0
     place_field_threshold: 0.35

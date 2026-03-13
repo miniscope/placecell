@@ -188,8 +188,7 @@ def compute_spatial_information(
     tuple
         (spatial_info, p_value, shuffled_sis)
     """
-    if random_seed is not None:
-        np.random.seed(random_seed)
+    rng = np.random.RandomState(random_seed)
 
     if unit_events.empty:
         return 0.0, 1.0, np.zeros(n_shuffles)
@@ -211,14 +210,17 @@ def compute_spatial_information(
         rate_map[~valid_mask] = 0.0
 
     total_time = np.sum(occupancy_time[valid_mask])
-    total_events = np.sum(event_weights[valid_mask])
 
-    if total_time <= 0 or total_events <= 0:
+    if total_time <= 0 or np.sum(event_weights[valid_mask]) <= 0:
         return 0.0, 1.0, np.zeros(n_shuffles)
 
-    overall_lambda = total_events / total_time
+    # Compute overall rate from smoothed map so Σ P_i × (λ_i/λ̄) = 1
+    overall_lambda = np.sum(rate_map[valid_mask] * occupancy_time[valid_mask]) / total_time
     P_i = np.zeros_like(occupancy_time)
     P_i[valid_mask] = occupancy_time[valid_mask] / total_time
+
+    if overall_lambda <= 0:
+        return 0.0, 1.0, np.zeros(n_shuffles)
 
     valid_si = (rate_map > 0) & valid_mask
     if np.any(valid_si):
@@ -244,9 +246,9 @@ def compute_spatial_information(
     shuffled_sis = []
     for _ in range(n_shuffles):
         if min_shift_frames > 0:
-            shift = np.random.randint(min_shift_frames, n_frames - min_shift_frames)
+            shift = rng.randint(min_shift_frames, n_frames - min_shift_frames)
         else:
-            shift = np.random.randint(n_frames)
+            shift = rng.randint(n_frames)
         s_shuffled = np.roll(aligned_events, shift)
 
         event_w_shuf, _, _ = np.histogram2d(
@@ -263,16 +265,18 @@ def compute_spatial_information(
             rate_shuf = gaussian_filter_normalized(rate_shuf, sigma=spatial_sigma)
             rate_shuf[~valid_mask] = 0.0
 
-        valid_s = (rate_shuf > 0) & valid_mask
-        if np.any(valid_s):
-            ratio_s = rate_shuf[valid_s] / overall_lambda
+        # Use smoothed overall rate for each shuffle (consistent SI)
+        shuf_lambda = np.sum(rate_shuf[valid_mask] * occupancy_time[valid_mask]) / total_time
+        valid_s = (rate_shuf > 0) & valid_mask & (shuf_lambda > 0)
+        if np.any(valid_s) and shuf_lambda > 0:
+            ratio_s = rate_shuf[valid_s] / shuf_lambda
             si_shuf = np.sum(P_i[valid_s] * ratio_s * np.log2(ratio_s))
         else:
             si_shuf = 0.0
         shuffled_sis.append(si_shuf)
 
     shuffled_sis = np.array(shuffled_sis)
-    p_val = np.sum(shuffled_sis >= actual_si) / n_shuffles
+    p_val = (np.sum(shuffled_sis >= actual_si) + 1) / (n_shuffles + 1)
 
     return actual_si, p_val, shuffled_sis
 
@@ -568,8 +572,7 @@ def compute_stability_score(
 
     # Shuffle-based stability significance test
     if n_shuffles > 0:
-        if random_seed is not None:
-            np.random.seed(random_seed)
+        rng = np.random.RandomState(random_seed)
 
         traj_frames = trajectory_df["beh_frame_index"].values
         u_grouped = unit_events.groupby("beh_frame_index")["s"].sum()
@@ -585,9 +588,9 @@ def compute_stability_score(
         shuffled_corrs = np.empty(n_shuffles)
         for i in range(n_shuffles):
             if min_shift_frames > 0:
-                shift = np.random.randint(min_shift_frames, n_frames - min_shift_frames)
+                shift = rng.randint(min_shift_frames, n_frames - min_shift_frames)
             else:
-                shift = np.random.randint(n_frames)
+                shift = rng.randint(n_frames)
             shifted = np.roll(aligned_events, shift)
 
             ew1, _, _ = np.histogram2d(
@@ -621,7 +624,7 @@ def compute_stability_score(
                 continue
             shuffled_corrs[i] = np.corrcoef(v1[fm], v2[fm])[0, 1]
 
-        stability_p_val = float(np.sum(shuffled_corrs >= corr) / n_shuffles)
+        stability_p_val = float((np.sum(shuffled_corrs >= corr) + 1) / (n_shuffles + 1))
     else:
         stability_p_val = np.nan
         shuffled_corrs = np.array([])
@@ -734,57 +737,31 @@ def compute_unit_analysis(
         percentile=scfg.place_field_seed_percentile,
     )
 
-    # Stability test — run for each block shift and Fisher z-average
-    block_shifts = scfg.block_shifts or [0.0]
-
-    z_scores = []
-    p_vals = []
-    all_shuffled_corrs = []
-    rate_map_first = None
-    rate_map_second = None
-    for shift in block_shifts:
-        corr_i, z_i, p_i, rm1_i, rm2_i, shuf_corrs_i = compute_stability_score(
-            unit_data,
-            trajectory_df,
-            occupancy_time,
-            valid_mask,
-            x_edges,
-            y_edges,
-            spatial_sigma=scfg.spatial_sigma,
-            behavior_fps=behavior_fps,
-            min_occupancy=scfg.min_occupancy,
-            n_split_blocks=scfg.n_split_blocks,
-            block_shift=shift,
-            n_shuffles=scfg.n_shuffles,
-            random_seed=random_seed,
-            min_shift_seconds=scfg.min_shift_seconds,
-            si_weight_mode=scfg.si_weight_mode,
-        )
-        if np.isfinite(z_i):
-            z_scores.append(z_i)
-        if np.isfinite(p_i):
-            p_vals.append(p_i)
-        if len(shuf_corrs_i) > 0:
-            all_shuffled_corrs.append(shuf_corrs_i)
-        # Keep rate maps from the first shift for display
-        if rate_map_first is None:
-            rate_map_first, rate_map_second = rm1_i, rm2_i
-
-    if z_scores:
-        stability_z = float(np.mean(z_scores))
-        stability_corr = float(np.tanh(stability_z))
-    else:
-        stability_z = np.nan
-        stability_corr = np.nan
-    stability_p_val = float(np.mean(p_vals)) if p_vals else np.nan
-
-    if rate_map_first is None:
-        nan_map = np.full_like(occupancy_time, np.nan)
-        rate_map_first = nan_map
-        rate_map_second = nan_map
-
-    # Use first shift's shuffled correlations (matches displayed rate maps)
-    shuffled_stability = all_shuffled_corrs[0] if all_shuffled_corrs else np.array([])
+    # Stability test
+    (
+        stability_corr,
+        stability_z,
+        stability_p_val,
+        rate_map_first,
+        rate_map_second,
+        shuffled_stability,
+    ) = compute_stability_score(
+        unit_data,
+        trajectory_df,
+        occupancy_time,
+        valid_mask,
+        x_edges,
+        y_edges,
+        spatial_sigma=scfg.spatial_sigma,
+        behavior_fps=behavior_fps,
+        min_occupancy=scfg.min_occupancy,
+        n_split_blocks=scfg.n_split_blocks,
+        block_shift=scfg.block_shift,
+        n_shuffles=scfg.n_shuffles,
+        random_seed=random_seed,
+        min_shift_seconds=scfg.min_shift_seconds,
+        si_weight_mode=scfg.si_weight_mode,
+    )
 
     return {
         "rate_map": rate_map,
