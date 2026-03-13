@@ -20,7 +20,7 @@ dependencies = [
     "pyarrow>=23.0.0",
     "rich>=13.0.0",
     "click>=8.3.1",
-    "ipympl[notebook]>=0.10.0",
+    "ipympl>=0.10.0",
 ]
 
 [project.scripts]
