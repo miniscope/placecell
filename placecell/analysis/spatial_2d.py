@@ -123,9 +123,11 @@ def compute_rate_map(
         bins=[x_edges, y_edges],
         weights=unit_events["s"],
     )
-    rate_map = np.zeros_like(occupancy_time)
-    rate_map[valid_mask] = event_weights[valid_mask] / occupancy_time[valid_mask]
-    rate_map_smooth = gaussian_filter_normalized(rate_map, sigma=spatial_sigma)
+    # Smooth numerator and denominator independently (Skaggs et al. 1996)
+    event_smooth = gaussian_filter_normalized(event_weights, sigma=spatial_sigma)
+    occ_smooth = gaussian_filter_normalized(occupancy_time, sigma=spatial_sigma)
+    rate_map_smooth = np.zeros_like(occupancy_time)
+    rate_map_smooth[valid_mask] = event_smooth[valid_mask] / occ_smooth[valid_mask]
 
     valid_rate_values = rate_map_smooth[valid_mask]
     if len(valid_rate_values) > 0 and np.nanmax(valid_rate_values) > 0:
@@ -201,13 +203,16 @@ def compute_spatial_information(
         bins=[x_edges, y_edges],
         weights=weights,
     )
-    rate_map = np.zeros_like(occupancy_time)
-    rate_map[valid_mask] = event_weights[valid_mask] / occupancy_time[valid_mask]
 
-    # Apply Gaussian smoothing to match stability test and literature convention
+    # Smooth numerator and denominator independently (Skaggs et al. 1996)
     if spatial_sigma > 0:
-        rate_map = gaussian_filter_normalized(rate_map, sigma=spatial_sigma)
-        rate_map[~valid_mask] = 0.0
+        event_smooth = gaussian_filter_normalized(event_weights, sigma=spatial_sigma)
+        occ_smooth = gaussian_filter_normalized(occupancy_time, sigma=spatial_sigma)
+        rate_map = np.zeros_like(occupancy_time)
+        rate_map[valid_mask] = event_smooth[valid_mask] / occ_smooth[valid_mask]
+    else:
+        rate_map = np.zeros_like(occupancy_time)
+        rate_map[valid_mask] = event_weights[valid_mask] / occupancy_time[valid_mask]
 
     total_time = np.sum(occupancy_time[valid_mask])
 
@@ -248,7 +253,7 @@ def compute_spatial_information(
         if min_shift_frames > 0:
             shift = rng.randint(min_shift_frames, n_frames - min_shift_frames)
         else:
-            shift = rng.randint(n_frames)
+            shift = rng.randint(1, n_frames)
         s_shuffled = np.roll(aligned_events, shift)
 
         event_w_shuf, _, _ = np.histogram2d(
@@ -257,13 +262,16 @@ def compute_spatial_information(
             bins=[x_edges, y_edges],
             weights=s_shuffled,
         )
-        rate_shuf = np.zeros_like(occupancy_time)
-        rate_shuf[valid_mask] = event_w_shuf[valid_mask] / occupancy_time[valid_mask]
 
-        # Apply same smoothing to shuffled rate maps
+        # Smooth numerator and denominator independently
         if spatial_sigma > 0:
-            rate_shuf = gaussian_filter_normalized(rate_shuf, sigma=spatial_sigma)
-            rate_shuf[~valid_mask] = 0.0
+            event_smooth = gaussian_filter_normalized(event_w_shuf, sigma=spatial_sigma)
+            occ_smooth = gaussian_filter_normalized(occupancy_time, sigma=spatial_sigma)
+            rate_shuf = np.zeros_like(occupancy_time)
+            rate_shuf[valid_mask] = event_smooth[valid_mask] / occ_smooth[valid_mask]
+        else:
+            rate_shuf = np.zeros_like(occupancy_time)
+            rate_shuf[valid_mask] = event_w_shuf[valid_mask] / occupancy_time[valid_mask]
 
         # Use smoothed overall rate for each shuffle (consistent SI)
         shuf_lambda = np.sum(rate_shuf[valid_mask] * occupancy_time[valid_mask]) / total_time
@@ -364,7 +372,7 @@ def compute_shuffled_rate_percentile(
         if min_shift_frames > 0:
             shift = rng.randint(min_shift_frames, n_frames - min_shift_frames)
         else:
-            shift = rng.randint(n_frames)
+            shift = rng.randint(1, n_frames)
         s_shuffled = np.roll(aligned_events, shift)
 
         event_w_shuf, _, _ = np.histogram2d(
@@ -373,9 +381,11 @@ def compute_shuffled_rate_percentile(
             bins=[x_edges, y_edges],
             weights=s_shuffled,
         )
-        rate_shuf = np.zeros_like(occupancy_time)
-        rate_shuf[valid_mask] = event_w_shuf[valid_mask] / occupancy_time[valid_mask]
-        rate_shuf_smooth = gaussian_filter_normalized(rate_shuf, sigma=spatial_sigma)
+        # Smooth numerator and denominator independently
+        event_smooth = gaussian_filter_normalized(event_w_shuf, sigma=spatial_sigma)
+        occ_smooth = gaussian_filter_normalized(occupancy_time, sigma=spatial_sigma)
+        rate_shuf_smooth = np.zeros_like(occupancy_time)
+        rate_shuf_smooth[valid_mask] = event_smooth[valid_mask] / occ_smooth[valid_mask]
 
         # Normalize 0-1 (same as actual rate map)
         peak = np.nanmax(rate_shuf_smooth[valid_mask]) if np.any(valid_mask) else 0
@@ -531,11 +541,11 @@ def compute_stability_score(
             weights=events["s"],
         )
 
-        # Compute rate map - use 0 for invalid bins to prevent NaN propagation
-        rate_map = np.zeros_like(occ)
-        rate_map[mask] = event_weights[mask] / occ[mask]
-
-        rate_map_smooth = gaussian_filter_normalized(rate_map, sigma=spatial_sigma)
+        # Smooth numerator and denominator independently
+        event_smooth = gaussian_filter_normalized(event_weights, sigma=spatial_sigma)
+        occ_smooth_half = gaussian_filter_normalized(occ, sigma=spatial_sigma)
+        rate_map_smooth = np.zeros_like(occ)
+        rate_map_smooth[mask] = event_smooth[mask] / occ_smooth_half[mask]
 
         rate_map_smooth[~mask] = np.nan
         return rate_map_smooth
@@ -590,7 +600,7 @@ def compute_stability_score(
             if min_shift_frames > 0:
                 shift = rng.randint(min_shift_frames, n_frames - min_shift_frames)
             else:
-                shift = rng.randint(n_frames)
+                shift = rng.randint(1, n_frames)
             shifted = np.roll(aligned_events, shift)
 
             ew1, _, _ = np.histogram2d(
@@ -599,9 +609,10 @@ def compute_stability_score(
                 bins=[x_edges, y_edges],
                 weights=shifted[traj_first_mask],
             )
+            es1 = gaussian_filter_normalized(ew1, sigma=spatial_sigma)
+            os1 = gaussian_filter_normalized(occ_first, sigma=spatial_sigma)
             rm1 = np.zeros_like(occ_first)
-            rm1[valid_first] = ew1[valid_first] / occ_first[valid_first]
-            rm1 = gaussian_filter_normalized(rm1, sigma=spatial_sigma)
+            rm1[valid_first] = es1[valid_first] / os1[valid_first]
 
             ew2, _, _ = np.histogram2d(
                 traj_x[traj_second_mask],
@@ -609,9 +620,10 @@ def compute_stability_score(
                 bins=[x_edges, y_edges],
                 weights=shifted[traj_second_mask],
             )
+            es2 = gaussian_filter_normalized(ew2, sigma=spatial_sigma)
+            os2 = gaussian_filter_normalized(occ_second, sigma=spatial_sigma)
             rm2 = np.zeros_like(occ_second)
-            rm2[valid_second] = ew2[valid_second] / occ_second[valid_second]
-            rm2 = gaussian_filter_normalized(rm2, sigma=spatial_sigma)
+            rm2[valid_second] = es2[valid_second] / os2[valid_second]
 
             bv = valid_first & valid_second
             if not np.any(bv):

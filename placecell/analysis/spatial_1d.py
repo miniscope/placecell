@@ -127,11 +127,15 @@ def compute_rate_map_1d(
         weights=unit_events["s"],
     )
     event_weights = event_weights.astype(float)
-    rate_map = np.zeros_like(occupancy_time)
-    rate_map[valid_mask] = event_weights[valid_mask] / occupancy_time[valid_mask]
-    rate_map_smooth = gaussian_filter_normalized_1d(
-        rate_map, sigma=spatial_sigma, segment_bins=segment_bins
+    # Smooth numerator and denominator independently (Skaggs et al. 1996)
+    event_smooth = gaussian_filter_normalized_1d(
+        event_weights, sigma=spatial_sigma, segment_bins=segment_bins
     )
+    occ_smooth = gaussian_filter_normalized_1d(
+        occupancy_time, sigma=spatial_sigma, segment_bins=segment_bins
+    )
+    rate_map_smooth = np.zeros_like(occupancy_time)
+    rate_map_smooth[valid_mask] = event_smooth[valid_mask] / occ_smooth[valid_mask]
 
     valid_rate_values = rate_map_smooth[valid_mask]
     if len(valid_rate_values) > 0 and np.nanmax(valid_rate_values) > 0:
@@ -198,14 +202,19 @@ def compute_spatial_information_1d(
         weights=weights,
     )
     event_weights = event_weights.astype(float)
-    rate_map = np.zeros_like(occupancy_time)
-    rate_map[valid_mask] = event_weights[valid_mask] / occupancy_time[valid_mask]
-
+    # Smooth numerator and denominator independently (Skaggs et al. 1996)
     if spatial_sigma > 0:
-        rate_map = gaussian_filter_normalized_1d(
-            rate_map, sigma=spatial_sigma, segment_bins=segment_bins
+        event_smooth = gaussian_filter_normalized_1d(
+            event_weights, sigma=spatial_sigma, segment_bins=segment_bins
         )
-        rate_map[~valid_mask] = 0.0
+        occ_smooth = gaussian_filter_normalized_1d(
+            occupancy_time, sigma=spatial_sigma, segment_bins=segment_bins
+        )
+        rate_map = np.zeros_like(occupancy_time)
+        rate_map[valid_mask] = event_smooth[valid_mask] / occ_smooth[valid_mask]
+    else:
+        rate_map = np.zeros_like(occupancy_time)
+        rate_map[valid_mask] = event_weights[valid_mask] / occupancy_time[valid_mask]
 
     total_time = np.sum(occupancy_time[valid_mask])
 
@@ -247,19 +256,25 @@ def compute_spatial_information_1d(
         if min_shift_frames > 0:
             shift = rng.randint(min_shift_frames, n_frames - min_shift_frames)
         else:
-            shift = rng.randint(n_frames)
+            shift = rng.randint(1, n_frames)
         s_shuffled = np.roll(aligned_events, shift)
 
         event_w_shuf, _ = np.histogram(traj_pos, bins=edges, weights=s_shuffled)
         event_w_shuf = event_w_shuf.astype(float)
-        rate_shuf = np.zeros_like(occupancy_time)
-        rate_shuf[valid_mask] = event_w_shuf[valid_mask] / occupancy_time[valid_mask]
 
+        # Smooth numerator and denominator independently
         if spatial_sigma > 0:
-            rate_shuf = gaussian_filter_normalized_1d(
-                rate_shuf, sigma=spatial_sigma, segment_bins=segment_bins
+            event_smooth = gaussian_filter_normalized_1d(
+                event_w_shuf, sigma=spatial_sigma, segment_bins=segment_bins
             )
-            rate_shuf[~valid_mask] = 0.0
+            occ_smooth = gaussian_filter_normalized_1d(
+                occupancy_time, sigma=spatial_sigma, segment_bins=segment_bins
+            )
+            rate_shuf = np.zeros_like(occupancy_time)
+            rate_shuf[valid_mask] = event_smooth[valid_mask] / occ_smooth[valid_mask]
+        else:
+            rate_shuf = np.zeros_like(occupancy_time)
+            rate_shuf[valid_mask] = event_w_shuf[valid_mask] / occupancy_time[valid_mask]
 
         # Use smoothed overall rate for each shuffle (consistent SI)
         shuf_lambda = np.sum(rate_shuf[valid_mask] * occupancy_time[valid_mask]) / total_time
@@ -366,11 +381,15 @@ def compute_stability_score_1d(
             weights=events["s"],
         )
         event_weights = event_weights.astype(float)
-        rate_map = np.zeros_like(occ)
-        rate_map[mask] = event_weights[mask] / occ[mask]
-        rate_map_smooth = gaussian_filter_normalized_1d(
-            rate_map, sigma=spatial_sigma, segment_bins=segment_bins
+        # Smooth numerator and denominator independently
+        event_smooth = gaussian_filter_normalized_1d(
+            event_weights, sigma=spatial_sigma, segment_bins=segment_bins
         )
+        occ_smooth_half = gaussian_filter_normalized_1d(
+            occ, sigma=spatial_sigma, segment_bins=segment_bins
+        )
+        rate_map_smooth = np.zeros_like(occ)
+        rate_map_smooth[mask] = event_smooth[mask] / occ_smooth_half[mask]
         rate_map_smooth[~mask] = np.nan
         return rate_map_smooth
 
@@ -420,22 +439,32 @@ def compute_stability_score_1d(
             if min_shift_frames > 0:
                 shift = rng.randint(min_shift_frames, n_frames - min_shift_frames)
             else:
-                shift = rng.randint(n_frames)
+                shift = rng.randint(1, n_frames)
             shifted = np.roll(aligned_events, shift)
 
             ew1, _ = np.histogram(
                 traj_pos[traj_first_mask], bins=edges, weights=shifted[traj_first_mask]
             )
+            es1 = gaussian_filter_normalized_1d(
+                ew1.astype(float), sigma=spatial_sigma, segment_bins=segment_bins
+            )
+            os1 = gaussian_filter_normalized_1d(
+                occ_first, sigma=spatial_sigma, segment_bins=segment_bins
+            )
             rm1 = np.zeros_like(occ_first)
-            rm1[valid_first] = ew1.astype(float)[valid_first] / occ_first[valid_first]
-            rm1 = gaussian_filter_normalized_1d(rm1, sigma=spatial_sigma, segment_bins=segment_bins)
+            rm1[valid_first] = es1[valid_first] / os1[valid_first]
 
             ew2, _ = np.histogram(
                 traj_pos[traj_second_mask], bins=edges, weights=shifted[traj_second_mask]
             )
+            es2 = gaussian_filter_normalized_1d(
+                ew2.astype(float), sigma=spatial_sigma, segment_bins=segment_bins
+            )
+            os2 = gaussian_filter_normalized_1d(
+                occ_second, sigma=spatial_sigma, segment_bins=segment_bins
+            )
             rm2 = np.zeros_like(occ_second)
-            rm2[valid_second] = ew2.astype(float)[valid_second] / occ_second[valid_second]
-            rm2 = gaussian_filter_normalized_1d(rm2, sigma=spatial_sigma, segment_bins=segment_bins)
+            rm2[valid_second] = es2[valid_second] / os2[valid_second]
 
             bv = valid_first & valid_second
             if not np.any(bv):
