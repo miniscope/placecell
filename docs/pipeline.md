@@ -136,6 +136,8 @@ behavior_timestamp: path/to/behavior_timestamp.csv
 ```
 :::
 
+`placecell` reads the DLC scorer name from the CSV header and does not require a fixed scorer string such as `3DMazeTrack` or `FuzzyTrack`.
+
 ### Analysis Config
 
 :::{dropdown} arena_config.yaml

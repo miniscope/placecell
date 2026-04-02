@@ -35,6 +35,8 @@ behavior_timestamp: path/to/behavior_timestamp.csv
 ```
 :::
 
+`placecell` is scorer-agnostic for DLC-style CSVs; configure the correct `bodypart`, and the scorer name is read from the file header.
+
 ### 2. Create analysis config
 
 Create `config.yaml` with analysis parameters:
