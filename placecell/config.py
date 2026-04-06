@@ -200,6 +200,11 @@ class ZoneDetectionConfig(BaseModel):
         ge=1,
         description="Frame subsampling factor for video export.",
     )
+    playback_speed: float = Field(
+        10.0,
+        gt=0.0,
+        description="Playback speed multiplier for exported zone videos.",
+    )
 
 
 class BehaviorConfig(BaseModel):

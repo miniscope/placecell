@@ -8,15 +8,17 @@ import numpy as np
 import pandas as pd
 
 from placecell.geometry import (
-    closest_point_on_polyline,
+    closest_point_on_polyline_prepared,
     get_zone_probabilities,
     is_valid_transition,
     load_zone_config,
-    position_along_polyline,
+    position_along_polyline_prepared,
+    prepare_zone_geometry,
 )
 from placecell.log import init_logger
 
 logger = init_logger(__name__)
+_EMPTY_TRANSITIONS: frozenset[str] = frozenset()
 
 
 def detect_zones(
@@ -68,6 +70,16 @@ def detect_zones(
     -------
     DataFrame with columns: zone, x_pinned, y_pinned, arm_position.
     """
+    prepared_geometry = prepare_zone_geometry(zone_polygons, zone_types)
+    valid_transitions = {
+        zone_name: {
+            other_zone
+            for other_zone in zone_polygons
+            if is_valid_transition(zone_name, other_zone, zone_graph, zone_types)
+        }
+        for zone_name in zone_polygons
+    }
+
     current_zone = None
     frames_in_current_zone = 0
     forbidden_candidate_zone = None
@@ -93,6 +105,7 @@ def detect_zones(
             room_decay_power=room_decay_power,
             arm_decay_power=arm_decay_power,
             normalize=True,
+            prepared_geometry=prepared_geometry,
         )
 
         if zone_probs:
@@ -106,22 +119,23 @@ def detect_zones(
         if (
             current_zone is not None
             and new_zone is not None
-            and not is_valid_transition(current_zone, new_zone, zone_graph, zone_types)
+            and new_zone not in valid_transitions.get(current_zone, _EMPTY_TRANSITIONS)
         ):
-            valid_alternatives = []
+            best_alt_zone = None
+            best_alt_prob = 0.0
             for alt_zone, alt_prob in zone_probs.items():
                 if (
-                    alt_prob > 0
+                    alt_prob > best_alt_prob
                     and alt_zone != new_zone
-                    and is_valid_transition(current_zone, alt_zone, zone_graph, zone_types)
+                    and alt_zone in valid_transitions.get(current_zone, _EMPTY_TRANSITIONS)
                 ):
-                    valid_alternatives.append((alt_zone, alt_prob))
+                    best_alt_zone = alt_zone
+                    best_alt_prob = alt_prob
 
-            if valid_alternatives:
-                best_alt_zone = max(valid_alternatives, key=lambda x: x[1])
-                if best_alt_zone[1] >= min_confidence and best_alt_zone[1] > pred_confidence:
-                    new_zone = best_alt_zone[0]
-                    pred_confidence = best_alt_zone[1]
+            if best_alt_zone is not None:
+                if best_alt_prob >= min_confidence and best_alt_prob > pred_confidence:
+                    new_zone = best_alt_zone
+                    pred_confidence = best_alt_prob
 
         if current_zone is None:
             if new_zone and pred_confidence >= min_confidence:
@@ -132,7 +146,7 @@ def detect_zones(
             forbidden_candidate_zone = None
             forbidden_consecutive_frames = 0
         else:
-            is_valid = is_valid_transition(current_zone, new_zone, zone_graph, zone_types)
+            is_valid = new_zone in valid_transitions.get(current_zone, _EMPTY_TRANSITIONS)
 
             if is_valid:
                 if pred_confidence >= min_confidence and frames_in_current_zone >= min_frames_same:
@@ -170,8 +184,9 @@ def detect_zones(
         arm_position = None
         pinned_x, pinned_y = x, y
         if zone_types.get(pred_label) == "arm" and pred_label in zone_polygons:
-            arm_position = position_along_polyline((x, y), zone_polygons[pred_label])
-            pinned_pt = closest_point_on_polyline((x, y), zone_polygons[pred_label])
+            geometry = prepared_geometry[pred_label]
+            arm_position = position_along_polyline_prepared((x, y), geometry)
+            pinned_pt = closest_point_on_polyline_prepared((x, y), geometry)
             pinned_x, pinned_y = float(pinned_pt[0]), float(pinned_pt[1])
 
         zones.append(pred_label)
@@ -236,6 +251,7 @@ def export_zone_video(
     output_path: str | Path,
     fps: float | None = None,
     interpolate: int = 5,
+    playback_speed: float = 10.0,
     progress_bar: type | None = None,
 ) -> None:
     """Render zone detection results as an annotated video.
@@ -264,6 +280,8 @@ def export_zone_video(
     interpolate:
         Frame subsampling factor. Only every *interpolate*-th frame is
         written to the output video (default 5).
+    playback_speed:
+        Playback speed multiplier relative to the source video timeline.
     """
     try:
         import cv2
@@ -281,8 +299,8 @@ def export_zone_video(
     if fps is None:
         fps = cap.get(cv2.CAP_PROP_FPS) or 20.0
 
-    # Adjust output fps to preserve real-time playback speed
-    out_fps = fps / max(interpolate, 1)
+    step = max(interpolate, 1)
+    out_fps = fps * playback_speed / step
 
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writer = cv2.VideoWriter(str(output_path), fourcc, out_fps, (width, height))
@@ -293,28 +311,33 @@ def export_zone_video(
     x_pinned = result["x_pinned"].values
     y_pinned = result["y_pinned"].values
     n_frames = len(zones)
+    zone_draw_data = {
+        zone_name: (np.asarray(points, dtype=np.int32), zone_types.get(zone_name) == "room")
+        for zone_name, points in zone_polygons.items()
+    }
 
     frame_iter = range(n_frames)
     if progress_bar is not None:
         frame_iter = progress_bar(frame_iter, desc="Exporting video")
 
     for frame_idx in frame_iter:
+        if frame_idx % step != 0:
+            ret = cap.grab()
+            if not ret:
+                break
+            continue
         ret, frame = cap.read()
         if not ret:
             break
-
-        # Skip frames for subsampling
-        if frame_idx % max(interpolate, 1) != 0:
-            continue
 
         zone_label = zones[frame_idx]
         x, y = x_coords[frame_idx], y_coords[frame_idx]
         xp, yp = x_pinned[frame_idx], y_pinned[frame_idx]
 
         # Draw only the current zone overlay
-        if zone_label in zone_polygons:
-            pts = np.array(zone_polygons[zone_label], dtype=np.int32)
-            if zone_types.get(zone_label) == "room" and len(pts) >= 3:
+        if zone_label in zone_draw_data:
+            pts, is_room = zone_draw_data[zone_label]
+            if is_room and len(pts) >= 3:
                 overlay = frame.copy()
                 cv2.fillPoly(overlay, [pts], overlay_color)
                 cv2.addWeighted(overlay, 0.3, frame, 0.7, 0, frame)
@@ -356,8 +379,16 @@ def export_zone_video(
 
     cap.release()
     writer.release()
-    n_written = n_frames // max(interpolate, 1)
-    logger.info("Zone video saved to %s (%d frames)", output_path, n_written)
+    n_written = (n_frames + step - 1) // step
+    logger.info(
+        "Zone video saved to %s (%d frames, source_fps=%.3f, out_fps=%.3f, step=%d, playback=%.2fx)",
+        output_path,
+        n_written,
+        fps,
+        out_fps,
+        step,
+        playback_speed,
+    )
 
 
 def detect_zones_from_csv(
@@ -377,6 +408,7 @@ def detect_zones_from_csv(
     video_path: str | Path | None = None,
     video_output: str | Path | None = None,
     interpolate: int = 5,
+    playback_speed: float = 10.0,
     progress_bar: type | None = None,
 ) -> None:
     """Detect zones from a DLC-format tracking CSV.
@@ -416,6 +448,8 @@ def detect_zones_from_csv(
         Output video path. Defaults to ``zone_detection.mp4`` next to output CSV.
     interpolate:
         Frame subsampling factor for video export (default 5).
+    playback_speed:
+        Playback speed multiplier for exported zone video.
     """
     logger.info("Loading position data from %s", input_csv)
 
@@ -503,6 +537,7 @@ def detect_zones_from_csv(
             zone_types=zone_types,
             output_path=video_output,
             interpolate=interpolate,
+            playback_speed=playback_speed,
             progress_bar=progress_bar,
         )
 

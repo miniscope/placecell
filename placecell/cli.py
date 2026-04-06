@@ -211,7 +211,18 @@ def define_zones_cmd(data_path: str, rooms: int, arms: int) -> None:
     default=None,
     help="Frame subsampling factor for video export (default: from config, or 5).",
 )
-def detect_zones_cmd(data_path: str, output: str | None, interpolate: int | None) -> None:
+@click.option(
+    "--playback-speed",
+    type=float,
+    default=None,
+    help="Playback speed multiplier for exported zone video (default: from config, or 10).",
+)
+def detect_zones_cmd(
+    data_path: str,
+    output: str | None,
+    interpolate: int | None,
+    playback_speed: float | None,
+) -> None:
     """Run zone detection on tracking CSV using the zone graph."""
     from tqdm.auto import tqdm
 
@@ -276,6 +287,7 @@ def detect_zones_cmd(data_path: str, output: str | None, interpolate: int | None
         zone_connections=data_cfg.zone_connections,
         video_path=video_path,
         interpolate=interpolate if interpolate is not None else zd.interpolate,
+        playback_speed=playback_speed if playback_speed is not None else zd.playback_speed,
         progress_bar=tqdm,
     )
     click.echo(f"Zone detection saved to {output_path}")
