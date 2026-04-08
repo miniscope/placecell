@@ -204,10 +204,11 @@ def compute_spatial_information(
         weights=weights,
     )
 
-    # Smooth numerator and denominator independently (Skaggs et al. 1996)
+    # Smooth numerator and denominator independently (Skaggs et al. 1996).
+    # occ_smooth is loop-invariant and is reused inside the shuffle loop below.
     if spatial_sigma > 0:
-        event_smooth = gaussian_filter_normalized(event_weights, sigma=spatial_sigma)
         occ_smooth = gaussian_filter_normalized(occupancy_time, sigma=spatial_sigma)
+        event_smooth = gaussian_filter_normalized(event_weights, sigma=spatial_sigma)
         rate_map = np.zeros_like(occupancy_time)
         rate_map[valid_mask] = event_smooth[valid_mask] / occ_smooth[valid_mask]
     else:
@@ -263,10 +264,9 @@ def compute_spatial_information(
             weights=s_shuffled,
         )
 
-        # Smooth numerator and denominator independently
+        # Smooth numerator only; occ_smooth was hoisted out of the loop above.
         if spatial_sigma > 0:
             event_smooth = gaussian_filter_normalized(event_w_shuf, sigma=spatial_sigma)
-            occ_smooth = gaussian_filter_normalized(occupancy_time, sigma=spatial_sigma)
             rate_shuf = np.zeros_like(occupancy_time)
             rate_shuf[valid_mask] = event_smooth[valid_mask] / occ_smooth[valid_mask]
         else:
@@ -368,6 +368,9 @@ def compute_shuffled_rate_percentile(
 
     shuffled_rates = np.zeros((n_shuffles, *occupancy_time.shape))
 
+    # Smoothed occupancy is loop-invariant.
+    occ_smooth = gaussian_filter_normalized(occupancy_time, sigma=spatial_sigma)
+
     for i in range(n_shuffles):
         if min_shift_frames > 0:
             shift = rng.randint(min_shift_frames, n_frames - min_shift_frames)
@@ -381,9 +384,8 @@ def compute_shuffled_rate_percentile(
             bins=[x_edges, y_edges],
             weights=s_shuffled,
         )
-        # Smooth numerator and denominator independently
+        # Smooth numerator only; occ_smooth was hoisted out of the loop above.
         event_smooth = gaussian_filter_normalized(event_w_shuf, sigma=spatial_sigma)
-        occ_smooth = gaussian_filter_normalized(occupancy_time, sigma=spatial_sigma)
         rate_shuf_smooth = np.zeros_like(occupancy_time)
         rate_shuf_smooth[valid_mask] = event_smooth[valid_mask] / occ_smooth[valid_mask]
 
@@ -512,7 +514,12 @@ def compute_stability_score(
     time_per_frame = 1.0 / behavior_fps
 
     def compute_half_occupancy(traj_half: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
-        """Compute occupancy and valid mask for a trajectory half."""
+        """Return raw half-occupancy and a smoothed-occupancy validity mask.
+
+        The mask is derived from smoothed occupancy so noisy edge bins are
+        excluded, but the rate-map and shuffle paths apply Skaggs (1996)
+        single smoothing to the raw occupancy.
+        """
         if traj_half.empty:
             occ = np.zeros_like(occupancy_time)
             mask = np.zeros_like(valid_mask, dtype=bool)
@@ -521,7 +528,7 @@ def compute_stability_score(
         occ = counts * time_per_frame
         occ_smooth = gaussian_filter_normalized(occ, sigma=spatial_sigma)
         mask = occ_smooth >= min_occupancy
-        return occ_smooth, mask
+        return occ, mask
 
     occ_first, valid_first = compute_half_occupancy(traj_first)
     occ_second, valid_second = compute_half_occupancy(traj_second)
@@ -597,6 +604,10 @@ def compute_stability_score(
         min_shift_frames = int(min_shift_seconds * behavior_fps)
         min_shift_frames = min(min_shift_frames, n_frames // 2)
 
+        # Smoothed half-occupancies are loop-invariant.
+        os1 = gaussian_filter_normalized(occ_first, sigma=spatial_sigma)
+        os2 = gaussian_filter_normalized(occ_second, sigma=spatial_sigma)
+
         shuffled_corrs = np.empty(n_shuffles)
         for i in range(n_shuffles):
             if min_shift_frames > 0:
@@ -612,7 +623,6 @@ def compute_stability_score(
                 weights=shifted[traj_first_mask],
             )
             es1 = gaussian_filter_normalized(ew1, sigma=spatial_sigma)
-            os1 = gaussian_filter_normalized(occ_first, sigma=spatial_sigma)
             rm1 = np.zeros_like(occ_first)
             rm1[valid_first] = es1[valid_first] / os1[valid_first]
 
@@ -623,7 +633,6 @@ def compute_stability_score(
                 weights=shifted[traj_second_mask],
             )
             es2 = gaussian_filter_normalized(ew2, sigma=spatial_sigma)
-            os2 = gaussian_filter_normalized(occ_second, sigma=spatial_sigma)
             rm2 = np.zeros_like(occ_second)
             rm2[valid_second] = es2[valid_second] / os2[valid_second]
 

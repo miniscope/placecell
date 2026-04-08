@@ -202,13 +202,14 @@ def compute_spatial_information_1d(
         weights=weights,
     )
     event_weights = event_weights.astype(float)
-    # Smooth numerator and denominator independently (Skaggs et al. 1996)
+    # Smooth numerator and denominator independently (Skaggs et al. 1996).
+    # occ_smooth is loop-invariant and is reused inside the shuffle loop below.
     if spatial_sigma > 0:
-        event_smooth = gaussian_filter_normalized_1d(
-            event_weights, sigma=spatial_sigma, segment_bins=segment_bins
-        )
         occ_smooth = gaussian_filter_normalized_1d(
             occupancy_time, sigma=spatial_sigma, segment_bins=segment_bins
+        )
+        event_smooth = gaussian_filter_normalized_1d(
+            event_weights, sigma=spatial_sigma, segment_bins=segment_bins
         )
         rate_map = np.zeros_like(occupancy_time)
         rate_map[valid_mask] = event_smooth[valid_mask] / occ_smooth[valid_mask]
@@ -262,13 +263,10 @@ def compute_spatial_information_1d(
         event_w_shuf, _ = np.histogram(traj_pos, bins=edges, weights=s_shuffled)
         event_w_shuf = event_w_shuf.astype(float)
 
-        # Smooth numerator and denominator independently
+        # Smooth numerator only; occ_smooth was hoisted out of the loop above.
         if spatial_sigma > 0:
             event_smooth = gaussian_filter_normalized_1d(
                 event_w_shuf, sigma=spatial_sigma, segment_bins=segment_bins
-            )
-            occ_smooth = gaussian_filter_normalized_1d(
-                occupancy_time, sigma=spatial_sigma, segment_bins=segment_bins
             )
             rate_shuf = np.zeros_like(occupancy_time)
             rate_shuf[valid_mask] = event_smooth[valid_mask] / occ_smooth[valid_mask]
@@ -357,6 +355,9 @@ def compute_stability_score_1d(
     time_per_frame = 1.0 / behavior_fps
 
     def compute_half_occupancy(traj_half: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+        # Returns raw occupancy; the validity mask is derived from smoothed
+        # occupancy so noisy edge bins are excluded, but the rate-map and
+        # shuffle paths apply Skaggs (1996) single smoothing to the raw occ.
         if traj_half.empty:
             return np.zeros_like(occupancy_time), np.zeros_like(valid_mask, dtype=bool)
         counts, _ = np.histogram(traj_half[pos_column], bins=edges)
@@ -365,7 +366,7 @@ def compute_stability_score_1d(
             occ, sigma=spatial_sigma, segment_bins=segment_bins
         )
         mask = occ_smooth >= min_occupancy
-        return occ_smooth, mask
+        return occ, mask
 
     occ_first, valid_first = compute_half_occupancy(traj_first)
     occ_second, valid_second = compute_half_occupancy(traj_second)
@@ -436,6 +437,14 @@ def compute_stability_score_1d(
         min_shift_frames = int(min_shift_seconds * behavior_fps)
         min_shift_frames = min(min_shift_frames, n_frames // 2)
 
+        # Smoothed half-occupancies are loop-invariant.
+        os1 = gaussian_filter_normalized_1d(
+            occ_first, sigma=spatial_sigma, segment_bins=segment_bins
+        )
+        os2 = gaussian_filter_normalized_1d(
+            occ_second, sigma=spatial_sigma, segment_bins=segment_bins
+        )
+
         shuffled_corrs = np.empty(n_shuffles)
         for i in range(n_shuffles):
             if min_shift_frames > 0:
@@ -450,9 +459,6 @@ def compute_stability_score_1d(
             es1 = gaussian_filter_normalized_1d(
                 ew1.astype(float), sigma=spatial_sigma, segment_bins=segment_bins
             )
-            os1 = gaussian_filter_normalized_1d(
-                occ_first, sigma=spatial_sigma, segment_bins=segment_bins
-            )
             rm1 = np.zeros_like(occ_first)
             rm1[valid_first] = es1[valid_first] / os1[valid_first]
 
@@ -461,9 +467,6 @@ def compute_stability_score_1d(
             )
             es2 = gaussian_filter_normalized_1d(
                 ew2.astype(float), sigma=spatial_sigma, segment_bins=segment_bins
-            )
-            os2 = gaussian_filter_normalized_1d(
-                occ_second, sigma=spatial_sigma, segment_bins=segment_bins
             )
             rm2 = np.zeros_like(occ_second)
             rm2[valid_second] = es2[valid_second] / os2[valid_second]

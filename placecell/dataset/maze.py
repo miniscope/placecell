@@ -414,6 +414,7 @@ class MazeDataset(BasePlaceCellDataset):
         except ImportError:
             return saved
 
+        from placecell.analysis.pvo_1d import compute_dataset_arm_pvo, plot_arm_pvo_grid
         from placecell.visualization import (
             plot_graph_overlay,
             plot_occupancy_preview_1d,
@@ -460,6 +461,18 @@ class MazeDataset(BasePlaceCellDataset):
                     saved.append("population_rate_map.pdf")
                 except Exception:
                     logger.warning("Failed to save population_rate_map.pdf", exc_info=True)
+
+                try:
+                    pvo_results = compute_dataset_arm_pvo(self, use_place_cells=True)
+                    fig = plot_arm_pvo_grid(
+                        pvo_results,
+                        self.effective_arm_order,
+                    )
+                    fig.savefig(figures_dir / "global_pvo_matrix.pdf", bbox_inches="tight")
+                    _plt.close(fig)
+                    saved.append("global_pvo_matrix.pdf")
+                except Exception:
+                    logger.warning("Failed to save global_pvo_matrix.pdf", exc_info=True)
 
             place_cell_results = self.place_cells()
             if place_cell_results and self.trajectory_1d is not None:

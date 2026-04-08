@@ -3,57 +3,47 @@
 import numpy as np
 
 from placecell.geometry import (
-    closest_point_on_polyline,
     closest_point_on_polyline_prepared,
     get_zone_probabilities,
-    min_distance_to_polyline,
     min_distance_to_polyline_prepared,
-    point_in_polygon,
     point_in_polygon_prepared,
-    position_along_polyline,
     position_along_polyline_prepared,
     prepare_polygon_geometry,
     prepare_polyline_geometry,
     prepare_zone_geometry,
-    signed_distance_to_polygon,
     signed_distance_to_polygon_prepared,
 )
 
 
-def test_prepared_polygon_helpers_match_uncached_versions() -> None:
+def test_prepared_polygon_helpers_on_known_rectangle() -> None:
+    # Axis-aligned rectangle [0,0]-[5,4]; signed distance is positive inside.
     polygon = np.array([[0, 0], [5, 0], [5, 4], [0, 4]], dtype=np.int32)
     geometry = prepare_polygon_geometry(polygon)
 
-    inside_point = (2.0, 1.5)
-    outside_point = (7.0, 1.0)
+    inside = (2.0, 1.5)
+    outside = (7.0, 1.0)
 
-    assert point_in_polygon_prepared(inside_point, geometry) == point_in_polygon(inside_point, polygon)
-    assert point_in_polygon_prepared(outside_point, geometry) == point_in_polygon(
-        outside_point, polygon
-    )
-    assert signed_distance_to_polygon_prepared(
-        inside_point, geometry
-    ) == signed_distance_to_polygon(inside_point, polygon)
-    assert signed_distance_to_polygon_prepared(
-        outside_point, geometry
-    ) == signed_distance_to_polygon(outside_point, polygon)
+    assert point_in_polygon_prepared(inside, geometry) is True
+    assert point_in_polygon_prepared(outside, geometry) is False
+    # Inside: closest edge is the bottom (y=0), distance 1.5.
+    np.testing.assert_allclose(signed_distance_to_polygon_prepared(inside, geometry), 1.5)
+    # Outside: closest edge is the right side (x=5) at y=1, distance 2.0.
+    np.testing.assert_allclose(signed_distance_to_polygon_prepared(outside, geometry), -2.0)
 
 
-def test_prepared_polyline_helpers_match_uncached_versions() -> None:
+def test_prepared_polyline_helpers_on_known_path() -> None:
+    # Two-segment polyline: (0,0)->(4,0)->(8,4). Total length = 4 + sqrt(32).
     polyline = np.array([[0, 0], [4, 0], [8, 4]], dtype=np.int32)
     geometry = prepare_polyline_geometry(polyline)
     point = (5.0, 2.0)
 
-    assert min_distance_to_polyline_prepared(point, geometry) == min_distance_to_polyline(
-        point, polyline
-    )
-    np.testing.assert_array_equal(
-        closest_point_on_polyline_prepared(point, geometry),
-        closest_point_on_polyline(point, polyline),
-    )
-    assert position_along_polyline_prepared(point, geometry) == position_along_polyline(
-        point, polyline
-    )
+    # Closest point on the second segment at parameter t=0.375 is (5.5, 1.5);
+    # min distance = sqrt(0.5).
+    np.testing.assert_allclose(min_distance_to_polyline_prepared(point, geometry), np.sqrt(0.5))
+    np.testing.assert_allclose(closest_point_on_polyline_prepared(point, geometry), [5.5, 1.5])
+    expected_arc = 4.0 + 0.375 * np.sqrt(32.0)
+    expected_norm = expected_arc / (4.0 + np.sqrt(32.0))
+    np.testing.assert_allclose(position_along_polyline_prepared(point, geometry), expected_norm)
 
 
 def test_get_zone_probabilities_matches_with_prepared_geometry() -> None:
@@ -88,4 +78,4 @@ def test_get_zone_probabilities_matches_with_prepared_geometry() -> None:
 
     assert cached.keys() == uncached.keys()
     for zone_name in cached:
-        assert cached[zone_name] == uncached[zone_name]
+        np.testing.assert_allclose(cached[zone_name], uncached[zone_name])

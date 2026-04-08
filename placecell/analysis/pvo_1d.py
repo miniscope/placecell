@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-import pandas as pd
 
 try:
     import matplotlib.pyplot as plt
@@ -21,15 +20,9 @@ class ArmPVOResult:
     arm_a: str
     arm_b: str
     pvo: np.ndarray
-    mean_diagonal: float
     n_units: int
-    n_bins_per_arm: int
-
-
-def _require_segment_bins(segment_bins: list[int] | None) -> list[int]:
-    if segment_bins is None or len(segment_bins) < 2:
-        raise ValueError("segment_bins must contain at least two boundaries.")
-    return list(segment_bins)
+    n_bins_arm_a: int
+    n_bins_arm_b: int
 
 
 def _stack_rate_maps(
@@ -60,35 +53,6 @@ def _stack_rate_maps(
     if not rate_maps:
         raise ValueError("No usable rate maps found for the selected units.")
     return np.vstack(rate_maps), kept_ids
-
-
-def _resample_segment(segment_map: np.ndarray, n_bins: int) -> np.ndarray:
-    """Resample one unit-by-position segment map onto a common normalized axis."""
-    if segment_map.ndim != 2:
-        raise ValueError(f"segment_map must be 2D, got shape {segment_map.shape}.")
-    if n_bins < 2:
-        raise ValueError("n_bins must be at least 2.")
-
-    n_units, orig_bins = segment_map.shape
-    if orig_bins == 0:
-        return np.full((n_units, n_bins), np.nan, dtype=float)
-    if orig_bins == n_bins:
-        return segment_map.astype(float, copy=True)
-
-    src = np.linspace(0.0, 1.0, orig_bins)
-    dst = np.linspace(0.0, 1.0, n_bins)
-    out = np.full((n_units, n_bins), np.nan, dtype=float)
-
-    for i in range(n_units):
-        row = np.asarray(segment_map[i], dtype=float)
-        valid = np.isfinite(row)
-        if valid.sum() == 0:
-            continue
-        if valid.sum() == 1:
-            out[i, :] = row[valid][0]
-            continue
-        out[i, :] = np.interp(dst, src[valid], row[valid])
-    return out
 
 
 def _cosine_overlap(x: np.ndarray, y: np.ndarray) -> float:
@@ -131,40 +95,33 @@ def compute_arm_pvo(
     segment_labels: list[str],
     *,
     unit_ids: list[int] | None = None,
-    n_position_bins: int = 40,
 ) -> dict[tuple[str, str], ArmPVOResult]:
-    """Compute arm-by-arm population-vector overlap from 1D rate maps.
-
-    Each arm segment is resampled onto a normalized 0..1 position axis so
-    segments with different lengths can be compared directly.
-    """
-    bins = _require_segment_bins(segment_bins)
-    if len(segment_labels) != len(bins) - 1:
+    """Compute arm-by-arm population-vector overlap from 1D rate maps."""
+    if segment_bins is None or len(segment_bins) < 2:
+        raise ValueError("segment_bins must contain at least two boundaries.")
+    if len(segment_labels) != len(segment_bins) - 1:
         raise ValueError("segment_labels length must equal len(segment_bins) - 1.")
 
     rate_maps, kept_ids = _stack_rate_maps(unit_results, unit_ids=unit_ids)
-
     segments: dict[str, np.ndarray] = {}
     for i, label in enumerate(segment_labels):
-        start = bins[i]
-        stop = bins[i + 1]
+        start = segment_bins[i]
+        stop = segment_bins[i + 1]
         if stop <= start:
             raise ValueError(f"Invalid segment bounds for {label}: {start}..{stop}")
-        segments[label] = _resample_segment(rate_maps[:, start:stop], n_position_bins)
+        segments[label] = rate_maps[:, start:stop].astype(float, copy=True)
 
     results: dict[tuple[str, str], ArmPVOResult] = {}
     for arm_a, seg_a in segments.items():
         for arm_b, seg_b in segments.items():
             pvo = population_vector_overlap(seg_a, seg_b)
-            diag = np.diag(pvo)
-            mean_diagonal = float(np.nanmean(diag)) if np.isfinite(diag).any() else np.nan
             results[(arm_a, arm_b)] = ArmPVOResult(
                 arm_a=arm_a,
                 arm_b=arm_b,
                 pvo=pvo,
-                mean_diagonal=mean_diagonal,
                 n_units=len(kept_ids),
-                n_bins_per_arm=n_position_bins,
+                n_bins_arm_a=seg_a.shape[1],
+                n_bins_arm_b=seg_b.shape[1],
             )
     return results
 
@@ -173,16 +130,14 @@ def compute_dataset_arm_pvo(
     ds: Any,
     *,
     use_place_cells: bool = True,
-    n_position_bins: int = 40,
 ) -> dict[tuple[str, str], ArmPVOResult]:
     """Compute arm-by-arm PVO directly from a loaded MazeDataset bundle."""
     if not hasattr(ds, "unit_results") or not hasattr(ds, "segment_bins"):
         raise ValueError("Dataset does not look like a maze bundle with analyzed units.")
 
-    unit_ids = None
+    unit_ids: list[int] | None = None
     if use_place_cells:
-        place_cell_results = ds.place_cells()
-        unit_ids = sorted(place_cell_results)
+        unit_ids = sorted(ds.place_cells())
         if not unit_ids:
             raise ValueError("No place cells available in this dataset.")
 
@@ -191,81 +146,31 @@ def compute_dataset_arm_pvo(
         ds.segment_bins,
         ds.effective_arm_order,
         unit_ids=unit_ids,
-        n_position_bins=n_position_bins,
     )
-
-
-def arm_pvo_summary(results: dict[tuple[str, str], ArmPVOResult]) -> pd.DataFrame:
-    """Create a flat summary table from arm-pair PVO results."""
-    rows = []
-    for (arm_a, arm_b), res in sorted(results.items()):
-        rows.append(
-            {
-                "arm_a": arm_a,
-                "arm_b": arm_b,
-                "mean_diagonal": res.mean_diagonal,
-                "n_units": res.n_units,
-                "n_bins_per_arm": res.n_bins_per_arm,
-            }
-        )
-    return pd.DataFrame(rows)
-
-
-def plot_arm_pvo(
-    result: ArmPVOResult,
-    *,
-    ax: Any = None,
-    vmin: float = 0.0,
-    vmax: float = 1.0,
-    cmap: str = "inferno",
-) -> Any:
-    """Plot one arm-pair PVO matrix."""
-    if plt is None:
-        raise ImportError("matplotlib is required for plotting.")
-
-    if ax is None:
-        _, ax = plt.subplots(figsize=(4, 3.5))
-
-    im = ax.imshow(
-        result.pvo,
-        origin="upper",
-        aspect="equal",
-        interpolation="nearest",
-        extent=[0, 1, 0, 1],
-        vmin=vmin,
-        vmax=vmax,
-        cmap=cmap,
-    )
-    ax.set_xlabel(f"{result.arm_b} position")
-    ax.set_ylabel(f"{result.arm_a} position")
-    ax.set_title(f"{result.arm_a} vs {result.arm_b}\nmean diag={result.mean_diagonal:.3f}")
-    return im
 
 
 def fuse_arm_pvo(
     results: dict[tuple[str, str], ArmPVOResult],
     segment_labels: list[str],
-) -> np.ndarray:
+) -> tuple[np.ndarray, list[int], list[int]]:
     """Fuse arm-pair PVO blocks into one large tiled image."""
     if not segment_labels:
         raise ValueError("segment_labels must not be empty.")
-    first = results[(segment_labels[0], segment_labels[0])].pvo
-    block_nrows, block_ncols = first.shape
-    fused = np.full(
-        (len(segment_labels) * block_nrows, len(segment_labels) * block_ncols),
-        np.nan,
-        dtype=float,
-    )
+    row_sizes = [results[(arm_a, segment_labels[0])].pvo.shape[0] for arm_a in segment_labels]
+    col_sizes = [results[(segment_labels[0], arm_b)].pvo.shape[1] for arm_b in segment_labels]
+    row_offsets = np.cumsum([0, *row_sizes])
+    col_offsets = np.cumsum([0, *col_sizes])
+    fused = np.full((row_offsets[-1], col_offsets[-1]), np.nan, dtype=float)
 
     for i, arm_a in enumerate(segment_labels):
         for j, arm_b in enumerate(segment_labels):
             block = results[(arm_a, arm_b)].pvo
-            r0 = i * block_nrows
-            r1 = (i + 1) * block_nrows
-            c0 = j * block_ncols
-            c1 = (j + 1) * block_ncols
+            r0 = row_offsets[i]
+            r1 = row_offsets[i + 1]
+            c0 = col_offsets[j]
+            c1 = col_offsets[j + 1]
             fused[r0:r1, c0:c1] = block
-    return fused
+    return fused, row_sizes, col_sizes
 
 
 def plot_arm_pvo_grid(
@@ -290,8 +195,7 @@ def plot_arm_pvo_grid(
     if len(display_labels) != n:
         raise ValueError("display_labels length must match segment_labels length.")
 
-    fused = fuse_arm_pvo(results, segment_labels)
-    block_size = results[(segment_labels[0], segment_labels[0])].pvo.shape[0]
+    fused, row_sizes, col_sizes = fuse_arm_pvo(results, segment_labels)
 
     fig, ax = plt.subplots(figsize=(figsize_scale * n, figsize_scale * n))
     fig.subplots_adjust(left=0.18, right=0.90, bottom=0.14, top=0.88)
@@ -305,14 +209,17 @@ def plot_arm_pvo_grid(
         cmap=cmap,
     )
 
-    boundaries = np.arange(1, n) * block_size - 0.5
-    for b in boundaries:
+    row_offsets = np.cumsum([0, *row_sizes])
+    col_offsets = np.cumsum([0, *col_sizes])
+    for b in row_offsets[1:-1] - 0.5:
         ax.axhline(b, color=separator_color, linewidth=separator_linewidth)
+    for b in col_offsets[1:-1] - 0.5:
         ax.axvline(b, color=separator_color, linewidth=separator_linewidth)
 
-    centers = np.arange(n) * block_size + (block_size - 1) / 2
-    ax.set_xticks(centers)
-    ax.set_yticks(centers)
+    row_centers = [(row_offsets[i] + row_offsets[i + 1] - 1) / 2 for i in range(n)]
+    col_centers = [(col_offsets[i] + col_offsets[i + 1] - 1) / 2 for i in range(n)]
+    ax.set_xticks(col_centers)
+    ax.set_yticks(row_centers)
     ax.set_xticklabels(display_labels, rotation=45, ha="left", rotation_mode="anchor")
     ax.set_yticklabels(display_labels)
     ax.tick_params(top=True, bottom=False, labeltop=True, labelbottom=False, length=0)

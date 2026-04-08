@@ -176,7 +176,7 @@ def closest_point_on_polyline_prepared(
 ) -> np.ndarray:
     """Find the closest point on a prepared polyline."""
     closest, _, _, _ = _project_point_to_path_geometry(point, geometry)
-    return closest.astype(np.int32)
+    return closest
 
 
 def position_along_polyline_prepared(
@@ -190,154 +190,6 @@ def position_along_polyline_prepared(
     arc_length = geometry.cumulative_lengths[best_segment_idx]
     arc_length += best_t * geometry.seg_lengths[best_segment_idx]
     return float(arc_length / geometry.total_length)
-
-
-def point_in_polygon(point: tuple[float, float], polygon: np.ndarray) -> bool:
-    """Check if a point is inside a polygon using ray-casting algorithm.
-
-    Parameters
-    ----------
-    point:
-        (x, y) coordinate to test.
-    polygon:
-        Array of shape (N, 2) defining the polygon vertices.
-
-    Returns
-    -------
-    True if the point is inside (or on the boundary of) the polygon.
-    """
-    return point_in_polygon_prepared(point, prepare_polygon_geometry(polygon))
-
-
-def _point_to_segment_distance(
-    point: tuple[float, float],
-    seg_start: np.ndarray,
-    seg_end: np.ndarray,
-) -> float:
-    """Calculate distance from a point to a line segment.
-
-    Parameters
-    ----------
-    point:
-        (x, y) coordinate.
-    seg_start, seg_end:
-        Endpoints of the segment.
-    """
-    point = np.array(point, dtype=np.float64)
-    seg_start = np.array(seg_start, dtype=np.float64)
-    seg_end = np.array(seg_end, dtype=np.float64)
-
-    seg_vec = seg_end - seg_start
-    point_vec = point - seg_start
-
-    seg_len_sq = np.dot(seg_vec, seg_vec)
-    if seg_len_sq == 0:
-        return float(np.linalg.norm(point - seg_start))
-
-    t = np.clip(np.dot(point_vec, seg_vec) / seg_len_sq, 0.0, 1.0)
-    closest = seg_start + t * seg_vec
-    return float(np.linalg.norm(point - closest))
-
-
-def signed_distance_to_polygon(
-    point: tuple[float, float],
-    polygon: np.ndarray,
-) -> float:
-    """Signed distance from a point to a polygon boundary.
-
-    Parameters
-    ----------
-    point:
-        (x, y) coordinate.
-    polygon:
-        Array of shape (N, 2) defining the polygon vertices.
-
-    Returns
-    -------
-    Positive if the point is inside, negative if outside.
-    Magnitude is the minimum distance to any edge.
-    """
-    return signed_distance_to_polygon_prepared(point, prepare_polygon_geometry(polygon))
-
-
-def distance_to_polyline(
-    point: tuple[float, float],
-    polyline: np.ndarray,
-    max_distance: float = 20.0,
-) -> bool:
-    """Check if a point is near a polyline (within max_distance).
-
-    Parameters
-    ----------
-    point:
-        (x, y) coordinate.
-    polyline:
-        Array of shape (N, 2) defining the polyline.
-    max_distance:
-        Maximum distance threshold.
-    """
-    min_dist = float("inf")
-    for i in range(len(polyline) - 1):
-        d = _point_to_segment_distance(point, polyline[i], polyline[i + 1])
-        if d < min_dist:
-            min_dist = d
-    return min_dist <= max_distance
-
-
-def min_distance_to_polyline(
-    point: tuple[float, float],
-    polyline: np.ndarray,
-) -> float:
-    """Compute minimum distance from a point to a polyline.
-
-    Parameters
-    ----------
-    point:
-        (x, y) coordinate.
-    polyline:
-        Array of shape (N, 2) defining the polyline.
-    """
-    return min_distance_to_polyline_prepared(point, prepare_polyline_geometry(polyline))
-
-
-def closest_point_on_polyline(
-    point: tuple[float, float],
-    polyline: np.ndarray,
-) -> np.ndarray:
-    """Find the closest point on a polyline to a given point.
-
-    Parameters
-    ----------
-    point:
-        (x, y) coordinate.
-    polyline:
-        Array of shape (N, 2) defining the polyline.
-
-    Returns
-    -------
-    Closest point on the polyline as (x, y) numpy array.
-    """
-    return closest_point_on_polyline_prepared(point, prepare_polyline_geometry(polyline))
-
-
-def position_along_polyline(
-    point: tuple[float, float],
-    polyline: np.ndarray,
-) -> float:
-    """Calculate normalized position (0-1) along a polyline for a given point.
-
-    Parameters
-    ----------
-    point:
-        (x, y) coordinate.
-    polyline:
-        Array of shape (N, 2) defining the polyline.
-
-    Returns
-    -------
-    Position along the polyline from 0 (start) to 1 (end).
-    """
-    return position_along_polyline_prepared(point, prepare_polyline_geometry(polyline))
 
 
 def get_zone_probabilities(
@@ -379,37 +231,39 @@ def get_zone_probabilities(
     probs: dict[str, float] = {zone: 0.0 for zone in zone_polygons}
 
     for zone_name, polygon in zone_polygons.items():
-        geometry = prepared_geometry.get(zone_name) if prepared_geometry is not None else None
-        if zone_types.get(zone_name) == "room":
-            if soft_boundary:
-                # signed dist: positive inside, negative outside
-                if isinstance(geometry, PolygonGeometry):
-                    dist = signed_distance_to_polygon_prepared(point, geometry)
-                else:
-                    dist = signed_distance_to_polygon(point, polygon)
-                if dist >= arm_max_distance:
-                    probs[zone_name] = 1.0
-                elif dist > -arm_max_distance:
-                    # Smooth decay across the boundary band
-                    normalized = (dist + arm_max_distance) / (2 * arm_max_distance)
-                    probs[zone_name] = normalized**room_decay_power
-                # else: 0.0 (too far outside)
-            else:
-                probs[zone_name] = 1.0 if point_in_polygon(point, polygon) else 0.0
+        if zone_types.get(zone_name) != "room":
+            continue
+        cached = prepared_geometry.get(zone_name) if prepared_geometry is not None else None
+        poly_geom = (
+            cached if isinstance(cached, PolygonGeometry) else prepare_polygon_geometry(polygon)
+        )
+        if soft_boundary:
+            # signed dist: positive inside, negative outside
+            dist = signed_distance_to_polygon_prepared(point, poly_geom)
+            if dist >= arm_max_distance:
+                probs[zone_name] = 1.0
+            elif dist > -arm_max_distance:
+                # Smooth decay across the boundary band
+                normalized = (dist + arm_max_distance) / (2 * arm_max_distance)
+                probs[zone_name] = normalized**room_decay_power
+            # else: 0.0 (too far outside)
+        else:
+            probs[zone_name] = 1.0 if point_in_polygon_prepared(point, poly_geom) else 0.0
 
     for zone_name, polyline in zone_polygons.items():
-        if zone_types.get(zone_name) == "arm":
-            geometry = prepared_geometry.get(zone_name) if prepared_geometry is not None else None
-            if isinstance(geometry, PathGeometry):
-                min_dist = min_distance_to_polyline_prepared(point, geometry)
+        if zone_types.get(zone_name) != "arm":
+            continue
+        cached = prepared_geometry.get(zone_name) if prepared_geometry is not None else None
+        path_geom = (
+            cached if isinstance(cached, PathGeometry) else prepare_polyline_geometry(polyline)
+        )
+        min_dist = min_distance_to_polyline_prepared(point, path_geom)
+        if min_dist <= arm_max_distance:
+            if soft_boundary:
+                normalized_dist = min_dist / arm_max_distance
+                probs[zone_name] = max(0.0, 1.0 - normalized_dist**arm_decay_power)
             else:
-                min_dist = min_distance_to_polyline(point, polyline)
-            if min_dist <= arm_max_distance:
-                if soft_boundary:
-                    normalized_dist = min_dist / arm_max_distance
-                    probs[zone_name] = max(0.0, 1.0 - normalized_dist**arm_decay_power)
-                else:
-                    probs[zone_name] = 1.0
+                probs[zone_name] = 1.0
 
     if normalize:
         total = sum(probs.values())

@@ -132,10 +132,13 @@ def detect_zones(
                     best_alt_zone = alt_zone
                     best_alt_prob = alt_prob
 
-            if best_alt_zone is not None:
-                if best_alt_prob >= min_confidence and best_alt_prob > pred_confidence:
-                    new_zone = best_alt_zone
-                    pred_confidence = best_alt_prob
+            if (
+                best_alt_zone is not None
+                and best_alt_prob >= min_confidence
+                and best_alt_prob > pred_confidence
+            ):
+                new_zone = best_alt_zone
+                pred_confidence = best_alt_prob
 
         if current_zone is None:
             if new_zone and pred_confidence >= min_confidence:
@@ -381,7 +384,8 @@ def export_zone_video(
     writer.release()
     n_written = (n_frames + step - 1) // step
     logger.info(
-        "Zone video saved to %s (%d frames, source_fps=%.3f, out_fps=%.3f, step=%d, playback=%.2fx)",
+        "Zone video saved to %s (%d frames, source_fps=%.3f, out_fps=%.3f, "
+        "step=%d, playback=%.2fx)",
         output_path,
         n_written,
         fps,
