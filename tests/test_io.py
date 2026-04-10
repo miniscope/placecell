@@ -17,7 +17,7 @@ def test_load_behavior_data_shape(assets_dir: Path) -> None:
 
     # Reference shapes from test assets (speed_threshold=50 filters out slow movement)
     assert len(trajectory_with_speed) == 1500
-    assert len(trajectory_filtered) == 737
+    assert len(trajectory_filtered) == 783
 
 
 def test_load_visualization_data_shape(assets_dir: Path) -> None:

@@ -1,4 +1,4 @@
-scorer,3DMazeTrack,3DMazeTrack,3DMazeTrack,3DMazeTrack,3DMazeTrack,3DMazeTrack,3DMazeTrack
+scorer,FuzzyTrack,FuzzyTrack,FuzzyTrack,FuzzyTrack,FuzzyTrack,FuzzyTrack,FuzzyTrack
 bodyparts,LED,LED,LED,LED,LED,LED,LED
 coords,x,y,x_pinned,y_pinned,likelihood,zone,arm_position
 0,198,406,198,406,1.0,Unknown,

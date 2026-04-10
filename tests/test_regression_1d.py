@@ -256,3 +256,18 @@ def test_save_load_bundle_roundtrip(
             equal_nan=True,
             err_msg=f"unit {uid} rate_map round-trip",
         )
+
+
+def test_save_bundle_includes_maze_summary_figures(
+    pipeline_result: MazeDataset,
+) -> None:
+    """Maze figure export should include the fused global PVO matrix."""
+    with tempfile.TemporaryDirectory() as tmp:
+        bundle_path = pipeline_result.save_bundle(Path(tmp) / "test", save_figures=True)
+
+        assert (bundle_path / "figures" / "occupancy.pdf").exists()
+        assert (bundle_path / "figures" / "population_rate_map.pdf").exists()
+        assert (bundle_path / "figures" / "graph_overlay.pdf").exists()
+        # PVO matrix is only generated when the dataset has place cells
+        has_place_cells = bool(pipeline_result.place_cells())
+        assert (bundle_path / "figures" / "global_pvo_matrix.pdf").exists() == has_place_cells

@@ -172,14 +172,15 @@ def recompute_speed(
     """Recompute speed on a trajectory that already has ``x``, ``y``, ``unix_time``.
 
     Use this after spatial corrections (jump removal, perspective, clipping)
-    to update the ``speed`` column from the corrected positions.
+    to update the ``speed`` column from the corrected positions.  Uses a
+    centered window to avoid temporal bias.
 
     Parameters
     ----------
     trajectory:
         DataFrame with columns ``x``, ``y``, ``unix_time``.
     window_frames:
-        Number of frames to look ahead for speed calculation.
+        Total span of the speed window (half on each side).
 
     Returns
     -------
@@ -190,15 +191,18 @@ def recompute_speed(
     y_vals = df["y"].values
     t_vals = df["unix_time"].values
     n = len(df)
-    speed = np.zeros(n)
-    for i in range(n):
-        end_idx = min(i + window_frames, n - 1)
-        if end_idx > i:
-            dx = x_vals[end_idx] - x_vals[i]
-            dy = y_vals[end_idx] - y_vals[i]
-            dt = t_vals[end_idx] - t_vals[i]
-            if dt > 0:
-                speed[i] = np.sqrt(dx**2 + dy**2) / dt
+    half = window_frames // 2
+
+    start_indices = np.clip(np.arange(n) - half, 0, n - 1)
+    end_indices = np.clip(np.arange(n) + half, 0, n - 1)
+
+    dx = x_vals[end_indices] - x_vals[start_indices]
+    dy = y_vals[end_indices] - y_vals[start_indices]
+    dt = t_vals[end_indices] - t_vals[start_indices]
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        speed = np.where(dt > 0, np.sqrt(dx**2 + dy**2) / dt, 0.0)
+
     trajectory = trajectory.copy()
     trajectory.loc[df.index, "speed"] = speed
     return trajectory
@@ -233,10 +237,11 @@ def compute_behavior_speed(
     timestamps: pd.DataFrame,
     window_frames: int = 10,
 ) -> pd.DataFrame:
-    """Compute speed from behavior positions and timestamps using a window.
+    """Compute speed from behavior positions and timestamps using a centered window.
 
-    Speed is calculated over a window of frames for stability, especially
-    useful at high frame rates where consecutive frame differences are noisy.
+    Speed is calculated over a symmetric window centred on each frame,
+    which avoids the temporal offset and end-of-session data loss of a
+    forward-only window.  At the edges the window shrinks to stay in bounds.
 
     Parameters
     ----------
@@ -245,8 +250,8 @@ def compute_behavior_speed(
     timestamps:
         DataFrame with columns `frame_index`, `unix_time` in seconds.
     window_frames:
-        Number of frames to use for speed calculation. Speed is computed
-        as distance traveled over this window divided by time elapsed.
+        Total span of the speed window (half on each side). Speed is
+        computed as displacement / elapsed time across this window.
 
     Returns
     -------
@@ -260,26 +265,20 @@ def compute_behavior_speed(
     t_vals = df["unix_time"].values
 
     n = len(df)
-    distances = np.zeros(n)
-    time_diffs = np.zeros(n)
+    half = window_frames // 2
 
-    for i in range(n):
-        # Look ahead by window_frames, but don't go past the end
-        end_idx = min(i + window_frames, n - 1)
-        if end_idx > i:
-            dx = x_vals[end_idx] - x_vals[i]
-            dy = y_vals[end_idx] - y_vals[i]
-            dt = t_vals[end_idx] - t_vals[i]
+    start_indices = np.clip(np.arange(n) - half, 0, n - 1)
+    end_indices = np.clip(np.arange(n) + half, 0, n - 1)
 
-            dist = np.sqrt(dx**2 + dy**2)
-            distances[i] = dist
-            time_diffs[i] = dt if dt > 0 else np.nan
-        else:
-            distances[i] = 0.0
-            time_diffs[i] = np.nan
+    dx = x_vals[end_indices] - x_vals[start_indices]
+    dy = y_vals[end_indices] - y_vals[start_indices]
+    dt = t_vals[end_indices] - t_vals[start_indices]
 
-    speed = distances / time_diffs
-    df["speed"] = pd.Series(speed).fillna(0.0)
+    distances = np.sqrt(dx**2 + dy**2)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        speed = np.where(dt > 0, distances / dt, 0.0)
+
+    df["speed"] = speed
     return df
 
 

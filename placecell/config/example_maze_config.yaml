@@ -24,4 +24,4 @@ behavior:
     n_split_blocks: 10
     block_shift: 0
     split_by_direction: true
-    require_complete_traversal: true  # keep only room-to-room traversals
+    require_complete_traversal: false

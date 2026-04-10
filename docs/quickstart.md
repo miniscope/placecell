@@ -1,6 +1,11 @@
 # Quickstart
 
-Run the analysis using the Jupyter notebook at `notebook/workflow_2D.ipynb`.
+`placecell` supports two workflows:
+
+- `arena` for 2D open-field analysis
+- `maze` for 1D arm/graph-based analysis
+
+Use the notebook or Python API after preparing the right data files for your workflow.
 
 ## Required Files
 
@@ -9,10 +14,19 @@ Run the analysis using the Jupyter notebook at `notebook/workflow_2D.ipynb`.
 - `A.zarr`: spatial footprints for cell overlay (optional)
 - `max_proj.zarr`: max projection image for visualization (optional)
 
-**Timestamp and position files:**
+**Always required:**
 - `neural_timestamp.csv`: neural frame timestamps
-- `behavior_position.csv`: animal position with bodypart columns (DeepLabCut format)
 - `behavior_timestamp.csv`: behavior frame timestamps
+
+**Arena (2D) behavior input:**
+- `behavior_position.csv`: animal position with bodypart columns (DeepLabCut format)
+
+**Maze (1D) behavior input:**
+- `zone_tracking.csv`: DLC-style tracking CSV that already contains `x`, `y`, `zone`, and `arm_position`
+- `arm_order` in `data_paths.yaml`
+
+For maze sessions, `zone_tracking.csv` is the runtime input used by `MazeDataset`.
+The raw `behavior_position.csv`, `behavior_graph.yaml`, and `behavior_video` are only needed earlier if you still need to generate `zone_tracking`.
 
 **Configuration files:**
 - `config.yaml`: analysis parameters
@@ -24,22 +38,54 @@ Run the analysis using the Jupyter notebook at `notebook/workflow_2D.ipynb`.
 
 Create `data_paths.yaml` with paths relative to this file:
 
-:::{dropdown} data_paths.yaml
+:::{dropdown} arena data_paths.yaml
 ```yaml
-type: arena  # 'arena' for 2D open-field, 'maze' for 1D arm analysis
-# Directory containing zarr files (C.zarr, A.zarr, max_proj.zarr)
+type: arena
 neural_path: path/to/minian_output
 neural_timestamp: path/to/neural_timestamp.csv
 behavior_position: path/to/behavior_position.csv
 behavior_timestamp: path/to/behavior_timestamp.csv
+behavior_fps: 20.0
+bodypart: LED
 ```
 :::
+
+:::{dropdown} maze data_paths.yaml
+```yaml
+type: maze
+neural_path: path/to/minian_output
+neural_timestamp: path/to/neural_timestamp.csv
+behavior_timestamp: path/to/behavior_timestamp.csv
+behavior_position: path/to/raw_behavior_position.csv  # still needed by current schema / detect-zones
+zone_tracking: path/to/zone_tracking.csv
+behavior_graph: path/to/behavior_graph.yaml  # optional for analysis, needed for detect-zones
+behavior_fps: 20.0
+bodypart: LED
+arm_order:
+  - Arm_1
+  - Arm_2
+  - Arm_3
+  - Arm_4
+```
+:::
+
+`placecell` is scorer-agnostic for DLC-style CSVs; configure the correct `bodypart`, and the scorer name is read from the file header.
+
+For maze analysis, the current config schema still includes `behavior_position`, but the actual analysis path reads `zone_tracking` plus `behavior_timestamp`.
+
+### 1b. If needed, generate `zone_tracking` for maze sessions
+
+If your maze session does not already have `zone_tracking.csv`, prepare it before analysis:
+
+1. Create `behavior_graph.yaml` with `placecell define-zones -d data_paths.yaml --rooms <n> --arms <n>` or provide an existing graph file.
+2. Run `placecell detect-zones -d data_paths.yaml`.
+3. Confirm the output CSV contains `x`, `y`, `zone`, and `arm_position` for your configured `bodypart`.
 
 ### 2. Create analysis config
 
 Create `config.yaml` with analysis parameters:
 
-:::{dropdown} config.yaml
+:::{dropdown} arena config.yaml
 ```yaml
 neural:
   fps: 20.0
@@ -61,9 +107,48 @@ behavior:
 ```
 :::
 
-### 3. Run the notebook
+:::{dropdown} maze config.yaml
+```yaml
+neural:
+  fps: 20.0
+  trace_name: C_lp
+  oasis:
+    g: [1.60, -0.63]
+    baseline: p10
+    penalty: 0.8
+behavior:
+  type: maze
+  speed_threshold: 25
+  speed_window_frames: 5
+  jump_threshold_mm: 100
+  spatial_map_1d:
+    bin_width_mm: 10
+    min_occupancy: 0.025
+    spatial_sigma: 2
+    n_shuffles: 500
+    p_value_threshold: 0.05
+    split_by_direction: true
+    require_complete_traversal: true
+```
+:::
 
-Open `notebook/workflow_2D.ipynb` in Jupyter Lab, set `CONFIG_PATH` and `DATA_PATH` to your config files, and run all cells.
+### 3. Run the analysis
+
+For arena sessions, open `notebook/workflow_2D.ipynb` in Jupyter Lab, set `CONFIG_PATH` and `DATA_PATH`, and run all cells.
+
+For maze sessions, use the Python API or batch workflow after `zone_tracking` has been generated:
+
+```python
+from placecell.dataset import BasePlaceCellDataset
+
+ds = BasePlaceCellDataset.from_yaml("config.yaml", "data_paths.yaml")
+ds.load()
+ds.preprocess_behavior()
+ds.deconvolve()
+ds.match_events()
+ds.compute_occupancy()
+ds.analyze_units()
+```
 
 ## Output
 

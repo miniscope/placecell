@@ -341,12 +341,12 @@ def compute_speed_1d(
     trajectory: pd.DataFrame,
     window_frames: int = 5,
 ) -> pd.DataFrame:
-    """Compute 1D speed along the arm axis.
+    """Compute 1D speed along the arm axis using a centered window.
 
-    Speed is computed as |delta(pos_1d)| / delta(time) over a window
-    of *actual* frame indices, not entry offsets.  Because room frames
-    are absent from the arm-only trajectory, consecutive entries can
-    have large frame_index gaps (room visits).  Using entry offsets
+    Speed is computed as |delta(pos_1d)| / delta(time) over a symmetric
+    window of *actual* frame indices, not entry offsets.  Because room
+    frames are absent from the arm-only trajectory, consecutive entries
+    can have large frame_index gaps (room visits).  Using entry offsets
     would compute distance/time over artificially long intervals,
     systematically underestimating speed in frequently-exited arms.
 
@@ -356,7 +356,8 @@ def compute_speed_1d(
         DataFrame with pos_1d, arm_index, unix_time, frame_index columns.
         Must be arm-only (output of ``serialize_arm_position``).
     window_frames:
-        Look-ahead window in *real* frame numbers.
+        Total span of the speed window (half on each side) in *real*
+        frame numbers.
 
     Returns
     -------
@@ -368,21 +369,25 @@ def compute_speed_1d(
     arm_idx = df["arm_index"].values
     frame_idx = df["frame_index"].values
     n = len(df)
+    half = window_frames // 2
 
-    # For each entry, find the entry whose frame_index is closest to
-    # frame_index[i] + window_frames (the real look-ahead target).
-    target_frames = frame_idx + window_frames
-    end_indices = np.searchsorted(frame_idx, target_frames, side="left")
+    # Find entries closest to frame_index[i] ± half
+    target_start = frame_idx - half
+    target_end = frame_idx + half
+
+    start_indices = np.searchsorted(frame_idx, target_start, side="left")
+    start_indices = np.clip(start_indices, 0, n - 1)
+    end_indices = np.searchsorted(frame_idx, target_end, side="left")
     end_indices = np.clip(end_indices, 0, n - 1)
 
     # Vectorized speed computation
-    dt = t[end_indices] - t
-    dpos = np.abs(pos[end_indices] - pos)
-    same_arm = arm_idx[end_indices] == arm_idx
-    frame_gap = frame_idx[end_indices] - frame_idx
+    dt = t[end_indices] - t[start_indices]
+    dpos = np.abs(pos[end_indices] - pos[start_indices])
+    same_arm = (arm_idx[end_indices] == arm_idx) & (arm_idx[start_indices] == arm_idx)
+    frame_gap = frame_idx[end_indices] - frame_idx[start_indices]
     # Valid: same arm, positive time, and frame gap not absurdly large
     # (allow up to 3x window to tolerate a few missing frames)
-    valid = (end_indices > np.arange(n)) & same_arm & (dt > 0) & (frame_gap <= window_frames * 3)
+    valid = (end_indices > start_indices) & same_arm & (dt > 0) & (frame_gap <= window_frames * 3)
 
     speed = np.zeros(n)
     speed[valid] = dpos[valid] / dt[valid]
