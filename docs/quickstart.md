@@ -22,11 +22,9 @@ Use the notebook or Python API after preparing the right data files for your wor
 - `behavior_position.csv`: animal position with bodypart columns (DeepLabCut format)
 
 **Maze (1D) behavior input:**
-- `zone_tracking.csv`: DLC-style tracking CSV that already contains `x`, `y`, `zone`, and `arm_position`
+- `behavior_position.csv`: raw DLC tracking CSV (`x`, `y`, `likelihood`)
+- `behavior_graph.yaml`: zone polygons + adjacency graph
 - `arm_order` in `data_paths.yaml`
-
-For maze sessions, `zone_tracking.csv` is the runtime input used by `MazeDataset`.
-The raw `behavior_position.csv`, `behavior_graph.yaml`, and `behavior_video` are only needed earlier if you still need to generate `zone_tracking`.
 
 **Configuration files:**
 - `config.yaml`: analysis parameters
@@ -56,9 +54,9 @@ type: maze
 neural_path: path/to/minian_output
 neural_timestamp: path/to/neural_timestamp.csv
 behavior_timestamp: path/to/behavior_timestamp.csv
-behavior_position: path/to/raw_behavior_position.csv  # still needed by current schema / detect-zones
-zone_tracking: path/to/zone_tracking.csv
-behavior_graph: path/to/behavior_graph.yaml  # optional for analysis, needed for detect-zones
+behavior_position: path/to/behavior_position.csv  # raw DLC output
+behavior_graph: path/to/behavior_graph.yaml      # zone polygons + adjacency
+# zone_tracking: path/to/zone_tracking.csv       # optional; defaults to zone_tracking_{stem}.csv
 behavior_fps: 20.0
 bodypart: LED
 arm_order:
@@ -71,15 +69,13 @@ arm_order:
 
 `placecell` is scorer-agnostic for DLC-style CSVs; configure the correct `bodypart`, and the scorer name is read from the file header.
 
-For maze analysis, the current config schema still includes `behavior_position`, but the actual analysis path reads `zone_tracking` plus `behavior_timestamp`.
+### 1b. Maze: zone detection
 
-### 1b. If needed, generate `zone_tracking` for maze sessions
+`placecell analysis` runs zone detection automatically on first use. To drive it explicitly (e.g. to inspect the validation video, or to iterate on `zone_detection` parameters):
 
-If your maze session does not already have `zone_tracking.csv`, prepare it before analysis:
-
-1. Create `behavior_graph.yaml` with `placecell define-zones -d data_paths.yaml --rooms <n> --arms <n>` or provide an existing graph file.
+1. Create `behavior_graph.yaml` with `placecell define-zones -d data_paths.yaml --rooms <n> --arms <n>`.
 2. Run `placecell detect-zones -d data_paths.yaml`.
-3. Confirm the output CSV contains `x`, `y`, `zone`, and `arm_position` for your configured `bodypart`.
+3. Use `placecell analysis --force-redetect` to refresh the cached CSV after parameter changes.
 
 ### 2. Create analysis config
 
@@ -135,7 +131,7 @@ behavior:
 
 For arena sessions, open `notebook/workflow_2D.ipynb` in Jupyter Lab, set `CONFIG_PATH` and `DATA_PATH`, and run all cells.
 
-For maze sessions, use the Python API or batch workflow after `zone_tracking` has been generated:
+For maze sessions, use the CLI or the Python API:
 
 ```python
 from placecell.dataset import BasePlaceCellDataset
@@ -148,6 +144,8 @@ ds.match_events()
 ds.compute_occupancy()
 ds.analyze_units()
 ```
+
+Or: `placecell analysis -c config.yaml -d data_paths.yaml`.
 
 ## Output
 

@@ -57,6 +57,14 @@ def cli() -> None:
     default=None,
     help="Keep only the first N frames (for generating small test data).",
 )
+@click.option(
+    "--force-redetect",
+    is_flag=True,
+    help=(
+        "Force re-running detect-zones even when the cached zone_tracking CSV "
+        "exists. Maze datasets only; ignored for arena."
+    ),
+)
 def analysis(
     config: str,
     data_paths: tuple[str, ...],
@@ -66,6 +74,7 @@ def analysis(
     workers: int,
     subset_units: int | None,
     subset_frames: int | None,
+    force_redetect: bool,
 ) -> None:
     """Run the place cell analysis pipeline.
 
@@ -84,6 +93,7 @@ def analysis(
             workers=workers,
             subset_units=subset_units,
             subset_frames=subset_frames,
+            force_redetect=force_redetect,
         )
 
 
@@ -97,11 +107,13 @@ def _run_one(
     workers: int,
     subset_units: int | None,
     subset_frames: int | None,
+    force_redetect: bool = False,
 ) -> None:
     """Run the pipeline for a single dataset."""
     from tqdm.auto import tqdm
 
     from placecell.dataset.base import BasePlaceCellDataset
+    from placecell.dataset.maze import MazeDataset
 
     data_p = Path(data_path)
     if output is None:
@@ -113,7 +125,12 @@ def _run_one(
 
     ds = BasePlaceCellDataset.from_yaml(config, data_path)
 
-    ds.load()
+    if isinstance(ds, MazeDataset):
+        ds.load(force_redetect=force_redetect)
+    else:
+        if force_redetect:
+            click.echo("--force-redetect ignored: only applies to maze datasets.")
+        ds.load()
     if subset_units is not None or subset_frames is not None:
         ds.subset(n_units=subset_units, n_frames=subset_frames)
     ds.preprocess_behavior()
