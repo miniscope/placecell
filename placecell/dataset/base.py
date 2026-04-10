@@ -247,8 +247,8 @@ class BasePlaceCellDataset(abc.ABC):
                 else None
             ),
             zone_tracking_path=(
-                data_dir / data_cfg.zone_tracking
-                if isinstance(data_cfg, MazeDataConfig) and data_cfg.zone_tracking
+                data_dir / (data_cfg.zone_tracking or f"zone_tracking_{data_path.stem}.csv")
+                if isinstance(data_cfg, MazeDataConfig)
                 else None
             ),
             data_cfg=data_cfg,

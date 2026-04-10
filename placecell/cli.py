@@ -57,6 +57,14 @@ def cli() -> None:
     default=None,
     help="Keep only the first N frames (for generating small test data).",
 )
+@click.option(
+    "--force-redetect",
+    is_flag=True,
+    help=(
+        "Force re-running detect-zones even when the cached zone_tracking CSV "
+        "exists. Maze datasets only; ignored for arena."
+    ),
+)
 def analysis(
     config: str,
     data_paths: tuple[str, ...],
@@ -66,6 +74,7 @@ def analysis(
     workers: int,
     subset_units: int | None,
     subset_frames: int | None,
+    force_redetect: bool,
 ) -> None:
     """Run the place cell analysis pipeline.
 
@@ -84,6 +93,7 @@ def analysis(
             workers=workers,
             subset_units=subset_units,
             subset_frames=subset_frames,
+            force_redetect=force_redetect,
         )
 
 
@@ -97,11 +107,13 @@ def _run_one(
     workers: int,
     subset_units: int | None,
     subset_frames: int | None,
+    force_redetect: bool = False,
 ) -> None:
     """Run the pipeline for a single dataset."""
     from tqdm.auto import tqdm
 
     from placecell.dataset.base import BasePlaceCellDataset
+    from placecell.dataset.maze import MazeDataset
 
     data_p = Path(data_path)
     if output is None:
@@ -113,7 +125,12 @@ def _run_one(
 
     ds = BasePlaceCellDataset.from_yaml(config, data_path)
 
-    ds.load()
+    if isinstance(ds, MazeDataset):
+        ds.load(force_redetect=force_redetect)
+    else:
+        if force_redetect:
+            click.echo("--force-redetect ignored: only applies to maze datasets.")
+        ds.load()
     if subset_units is not None or subset_frames is not None:
         ds.subset(n_units=subset_units, n_frames=subset_frames)
     ds.preprocess_behavior()
@@ -245,17 +262,15 @@ def detect_zones_cmd(
     input_csv = str(data_dir / data_cfg.behavior_position)
     zone_config = str(data_dir / data_cfg.behavior_graph)
 
-    # Determine output path
+    # Determine output path. The default mirrors the runtime default in
+    # MazeDataset.from_yaml so the analysis pipeline will pick the same file
+    # without needing the data config to spell it out.
     if output is not None:
         output_rel = output
     elif data_cfg.zone_tracking:
         output_rel = data_cfg.zone_tracking
     else:
-        # Auto-generate and append to data config YAML
         output_rel = f"zone_tracking_{data_p.stem}.csv"
-        with open(data_p, "a") as f:
-            f.write(f"zone_tracking: {output_rel}\n")
-        click.echo(f"Added zone_tracking: {output_rel} to {data_p}")
 
     output_path = str(data_dir / output_rel)
 

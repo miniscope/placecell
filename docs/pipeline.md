@@ -70,7 +70,7 @@ Saves a copy of the raw trajectory in `trajectory_raw`, then applies corrections
 
 #### `MazeDataset` (1D)
 
-The maze pipeline does **not** clean raw `(x, y)` here. That work happens earlier in the standalone `placecell detect-zones` step (see [Zone Detection](#zone-detection-maze-only) below) which produces the `zone_tracking` CSV that `MazeDataset.load()` reads. By the time `preprocess_behavior()` runs, every frame already has `zone`, `arm_position`, `x_pinned`, `y_pinned` columns derived from a Hampel-filtered raw trajectory.
+`MazeDataset.load()` reads a `zone_tracking` CSV that maps each frame to a zone label and an arm-relative position. If the CSV is missing, `load()` runs [Zone Detection](#zone-detection-maze-only) automatically; pass `--force-redetect` to `placecell analysis` (or `force_redetect=True` to `MazeDataset.load()`) to refresh it.
 
 `preprocess_behavior()` then:
 
@@ -82,15 +82,15 @@ The maze pipeline does **not** clean raw `(x, y)` here. That work happens earlie
 
 ### Zone Detection (maze only)
 
-Before running the analysis pipeline, maze sessions must be passed through `placecell detect-zones` (CLI command) which:
+Zone detection projects raw DLC `(x, y)` onto the maze graph. It runs automatically from `MazeDataset.load()` when the `zone_tracking` CSV is missing, and can also be invoked directly via `placecell detect-zones -d data_paths.yaml` (which additionally exports a validation video).
 
-1. Loads the raw DLC `(x, y)` from `behavior_position.csv`.
-2. **Hampel jump removal** on the raw trajectory using `zone_detection.hampel_window_frames` and `zone_detection.hampel_n_sigmas` from the data config.
-3. For each cleaned frame, computes the per-zone soft-membership probability and runs a state machine (with `min_confidence`, `min_frames_same`, `min_frames_forbidden`, and graph adjacency) to assign a zone label.
-4. For frames assigned to an arm zone, projects the cleaned `(x, y)` onto the arm polyline to get `arm_position` (normalized 0–1) and the pinned point `(x_pinned, y_pinned)`.
-5. Writes the original raw `x, y`, plus `zone`, `arm_position`, `x_pinned`, `y_pinned` to the `zone_tracking` CSV.
+1. Load raw DLC `(x, y)` from `behavior_position.csv`.
+2. **Hampel jump removal** on the raw trajectory using `zone_detection.hampel_window_frames` and `zone_detection.hampel_n_sigmas`.
+3. Compute per-zone soft-membership probability and run a state machine (`min_confidence`, `min_frames_same`, `min_frames_forbidden`, graph adjacency) to assign a zone label per frame.
+4. For arm-zone frames, project the cleaned `(x, y)` onto the arm polyline to get `arm_position` (0–1) and pinned point `(x_pinned, y_pinned)`.
+5. Write the **raw** `x, y` plus `zone`, `arm_position`, `x_pinned`, `y_pinned` to the `zone_tracking` CSV. Hampel cleaning only affects the projection — the raw columns are preserved.
 
-The Hampel filter only affects the projection step — the raw `(x, y)` columns in the output CSV are preserved unchanged so downstream visualizations always show what the tracker actually reported.
+`zone_tracking` defaults to `zone_tracking_{data_path.stem}.csv` next to the data config when not set.
 
 ### `ds.deconvolve()`
 

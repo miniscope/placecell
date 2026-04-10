@@ -12,7 +12,7 @@ from placecell.analysis.spatial_1d import (
     compute_unit_analysis_1d,
 )
 from placecell.behavior import build_event_place_dataframe
-from placecell.config import SpatialMap1DConfig
+from placecell.config import SpatialMap1DConfig, ZoneDetectionConfig
 from placecell.dataset.base import BasePlaceCellDataset, UnitResult
 from placecell.log import init_logger
 from placecell.maze_helper import (
@@ -59,12 +59,64 @@ class MazeDataset(BasePlaceCellDataset):
         """P-value threshold from 1D spatial map config."""
         return self.spatial_1d.p_value_threshold
 
-    def load(self) -> None:
+    def _run_zone_detection(self, *, force: bool = False) -> None:
+        """Run :func:`detect_zones_from_csv` for this dataset.
+
+        Called automatically by :meth:`load` when the cached
+        ``zone_tracking`` CSV is missing or when ``force_redetect=True``.
+        Assumes the caller has already validated ``data_cfg`` and
+        ``bodypart``; only checks the conditions unique to detection.
+        """
+        from placecell.zone_detection import detect_zones_from_csv
+
+        dcfg = self.data_cfg
+        if self.behavior_graph_path is None or not self.behavior_graph_path.exists():
+            raise RuntimeError(
+                "behavior_graph is required to run detect-zones automatically. "
+                "Set it in the data config or run 'placecell detect-zones' manually."
+            )
+
+        zone_csv = self.zone_tracking_path
+        zd = dcfg.zone_detection or ZoneDetectionConfig()
+        action = "Re-running" if force else "zone_tracking CSV not found; running"
+        logger.info(
+            "%s detect-zones (%s -> %s)",
+            action,
+            self.behavior_position_path.name,
+            zone_csv.name,
+        )
+        zone_csv.parent.mkdir(parents=True, exist_ok=True)
+        detect_zones_from_csv(
+            input_csv=self.behavior_position_path,
+            output_csv=zone_csv,
+            zone_config_path=self.behavior_graph_path,
+            bodypart=dcfg.bodypart,
+            arm_max_distance=zd.arm_max_distance,
+            min_confidence=zd.min_confidence,
+            min_confidence_forbidden=zd.min_confidence_forbidden,
+            min_frames_same=zd.min_frames_same,
+            min_frames_forbidden=zd.min_frames_forbidden,
+            room_decay_power=zd.room_decay_power,
+            arm_decay_power=zd.arm_decay_power,
+            soft_boundary=zd.soft_boundary,
+            hampel_window_frames=zd.hampel_window_frames,
+            hampel_n_sigmas=zd.hampel_n_sigmas,
+            zone_connections=dcfg.zone_connections,
+        )
+
+    def load(self, *, force_redetect: bool = False) -> None:
         """Load neural traces, behavior from zone_tracking CSV, and vis assets.
 
-        Unlike ArenaDataset, this does NOT load the raw behavior_position CSV.
-        The maze pipeline only needs the zone_tracking CSV (which already
-        contains x, y, zone, arm_position) plus behavior timestamps.
+        ``MazeDataset`` reads the zone-detected ``zone_tracking`` CSV directly.
+        If the CSV is missing, :meth:`_run_zone_detection` is invoked first
+        to project the raw ``behavior_position`` CSV onto the maze graph.
+
+        Parameters
+        ----------
+        force_redetect:
+            If ``True``, re-run :func:`detect_zones_from_csv` even when
+            ``zone_tracking_path`` already exists. Useful when zone-detection
+            parameters have changed and the cached output is stale.
         """
         self._load_neural_and_viz()
 
@@ -72,13 +124,15 @@ class MazeDataset(BasePlaceCellDataset):
         if dcfg is None or dcfg.bodypart is None:
             raise RuntimeError("bodypart must be set in data config")
 
-        # Behavior: load from zone_tracking CSV (not behavior_position)
+        # Auto-run detect-zones when the cached output is missing or forced.
         zone_csv = self.zone_tracking_path
-        if zone_csv is None or not zone_csv.exists():
-            raise FileNotFoundError(
-                "zone_tracking CSV not found. Run 'placecell detect-zones' first "
-                f"to generate it. Expected: {zone_csv}"
+        if zone_csv is None:
+            raise RuntimeError(
+                "zone_tracking_path is unset; this should not happen for a "
+                "MazeDataset constructed via from_yaml()."
             )
+        if force_redetect or not zone_csv.exists():
+            self._run_zone_detection(force=force_redetect)
 
         df = pd.read_csv(zone_csv, header=[0, 1, 2])
         scorer = df.columns[1][0]
