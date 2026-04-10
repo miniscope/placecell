@@ -262,17 +262,15 @@ def detect_zones_cmd(
     input_csv = str(data_dir / data_cfg.behavior_position)
     zone_config = str(data_dir / data_cfg.behavior_graph)
 
-    # Determine output path
+    # Determine output path. The default mirrors the runtime default in
+    # MazeDataset.from_yaml so the analysis pipeline will pick the same file
+    # without needing the data config to spell it out.
     if output is not None:
         output_rel = output
     elif data_cfg.zone_tracking:
         output_rel = data_cfg.zone_tracking
     else:
-        # Auto-generate and append to data config YAML
         output_rel = f"zone_tracking_{data_p.stem}.csv"
-        with open(data_p, "a") as f:
-            f.write(f"zone_tracking: {output_rel}\n")
-        click.echo(f"Added zone_tracking: {output_rel} to {data_p}")
 
     output_path = str(data_dir / output_rel)
 

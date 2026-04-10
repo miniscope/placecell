@@ -64,25 +64,17 @@ class MazeDataset(BasePlaceCellDataset):
 
         Called automatically by :meth:`load` when the cached
         ``zone_tracking`` CSV is missing or when ``force_redetect=True``.
-
-        Parameters
-        ----------
-        force:
-            Only used for the log line; the caller is responsible for
-            deciding whether to invoke this.
+        Assumes the caller has already validated ``data_cfg`` and
+        ``bodypart``; only checks the conditions unique to detection.
         """
         from placecell.zone_detection import detect_zones_from_csv
 
         dcfg = self.data_cfg
-        if dcfg is None or self.behavior_position_path is None:
-            raise RuntimeError("Cannot run detect-zones without a maze data config.")
         if self.behavior_graph_path is None or not self.behavior_graph_path.exists():
             raise RuntimeError(
                 "behavior_graph is required to run detect-zones automatically. "
                 "Set it in the data config or run 'placecell detect-zones' manually."
             )
-        if dcfg.bodypart is None:
-            raise RuntimeError("bodypart must be set in data config to run detect-zones.")
 
         zone_csv = self.zone_tracking_path
         zd = dcfg.zone_detection or ZoneDetectionConfig()
@@ -115,9 +107,9 @@ class MazeDataset(BasePlaceCellDataset):
     def load(self, *, force_redetect: bool = False) -> None:
         """Load neural traces, behavior from zone_tracking CSV, and vis assets.
 
-        Unlike ArenaDataset, this does NOT load the raw behavior_position CSV.
-        The maze pipeline only needs the zone_tracking CSV (which already
-        contains x, y, zone, arm_position) plus behavior timestamps.
+        ``MazeDataset`` reads the zone-detected ``zone_tracking`` CSV directly.
+        If the CSV is missing, :meth:`_run_zone_detection` is invoked first
+        to project the raw ``behavior_position`` CSV onto the maze graph.
 
         Parameters
         ----------
