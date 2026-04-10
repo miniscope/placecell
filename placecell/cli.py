@@ -284,6 +284,8 @@ def detect_zones_cmd(
         room_decay_power=zd.room_decay_power,
         arm_decay_power=zd.arm_decay_power,
         soft_boundary=zd.soft_boundary,
+        hampel_window_frames=zd.hampel_window_frames,
+        hampel_n_sigmas=zd.hampel_n_sigmas,
         zone_connections=data_cfg.zone_connections,
         video_path=video_path,
         interpolate=interpolate if interpolate is not None else zd.interpolate,

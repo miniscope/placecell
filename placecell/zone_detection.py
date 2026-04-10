@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from placecell.behavior import remove_position_jumps
 from placecell.geometry import (
     closest_point_on_polyline_prepared,
     get_zone_probabilities,
@@ -408,6 +409,8 @@ def detect_zones_from_csv(
     room_decay_power: float = 2.0,
     arm_decay_power: float = 0.5,
     soft_boundary: bool = True,
+    hampel_window_frames: int = 7,
+    hampel_n_sigmas: float = 3.0,
     zone_connections: dict[str, list[str]] | None = None,
     video_path: str | Path | None = None,
     video_output: str | Path | None = None,
@@ -443,6 +446,11 @@ def detect_zones_from_csv(
         Exponent for arm boundary probability decay.
     soft_boundary:
         Use fuzzy distance-based boundaries.
+    hampel_window_frames:
+        Centered rolling window (frames) for the raw-position Hampel filter
+        applied before projection.  Must be >= 3.
+    hampel_n_sigmas:
+        MAD-scaled threshold for the Hampel filter.
     zone_connections:
         Zone adjacency graph (room → list of arms).  If provided,
         overrides any connections in the zone config file.
@@ -473,8 +481,27 @@ def detect_zones_from_csv(
             f"Available: {sorted(set(df.columns.get_level_values(1)))}"
         )
 
-    x_coords = df[x_col].values.astype(float)
-    y_coords = df[y_col].values.astype(float)
+    x_raw = df[x_col].values.astype(float)
+    y_raw = df[y_col].values.astype(float)
+
+    # Hampel-filter raw positions before projection so a single tracker glitch
+    # cannot bleed into the closest-arm classification or arm_position output.
+    # The raw (x, y) are preserved in the output CSV; only the projection
+    # operates on the cleaned coordinates.
+    cleaned_xy, n_jumps = remove_position_jumps(
+        pd.DataFrame({"x": x_raw, "y": y_raw}),
+        window_frames=hampel_window_frames,
+        n_sigmas=hampel_n_sigmas,
+    )
+    x_coords = cleaned_xy["x"].to_numpy()
+    y_coords = cleaned_xy["y"].to_numpy()
+    logger.info(
+        "Hampel jump removal: %d frames interpolated (window=%d, n_sigmas=%.1f)",
+        n_jumps,
+        hampel_window_frames,
+        hampel_n_sigmas,
+    )
+
     zone_polygons, zone_types, file_graph = load_zone_config(zone_config_path)
 
     # Data config connections override file connections
@@ -504,8 +531,8 @@ def detect_zones_from_csv(
     )
 
     output_data = {
-        (scorer, bodypart, "x"): x_coords,
-        (scorer, bodypart, "y"): y_coords,
+        (scorer, bodypart, "x"): x_raw,
+        (scorer, bodypart, "y"): y_raw,
         (scorer, bodypart, "x_pinned"): result["x_pinned"].values,
         (scorer, bodypart, "y_pinned"): result["y_pinned"].values,
         (scorer, bodypart, "zone"): result["zone"].values,
@@ -534,8 +561,8 @@ def detect_zones_from_csv(
             video_output = Path(output_csv).parent / "zone_detection.mp4"
         export_zone_video(
             video_path=video_path,
-            x_coords=x_coords,
-            y_coords=y_coords,
+            x_coords=x_raw,
+            y_coords=y_raw,
             result=result,
             zone_polygons=zone_polygons,
             zone_types=zone_types,

@@ -52,48 +52,62 @@ def _load_behavior_xy(
 
 def remove_position_jumps(
     positions: pd.DataFrame,
-    threshold_px: float,
+    window_frames: int = 7,
+    n_sigmas: float = 3.0,
 ) -> tuple[pd.DataFrame, int]:
-    """Replace implausible position jumps with linear interpolation.
+    """Replace implausible position jumps with linear interpolation (Hampel filter).
 
-    A jump is detected when the frame-to-frame displacement exceeds
-    *threshold_px*.  Jumped frames have their x/y replaced by linearly
-    interpolated values from the surrounding good frames.
+    For each frame the local centroid is the (median x, median y) over a
+    centered window of ``window_frames`` frames. The deviation is the
+    Euclidean distance from the frame to its centroid; the local scale is
+    the rolling median of those deviations. A frame is flagged when its
+    deviation exceeds ``n_sigmas * 1.4826 * scale`` — the standard Hampel
+    rule (Hampel 1974) generalized to 2D via the spatial median.
+
+    Flagged frames have their x/y replaced by linear interpolation from the
+    surrounding good frames.
 
     Parameters
     ----------
     positions:
         DataFrame with columns ``x``, ``y`` (and any others, preserved).
-    threshold_px:
-        Maximum plausible frame-to-frame displacement in pixels.
+    window_frames:
+        Window size for the rolling median centroid and MAD.  Should be odd
+        and large enough to span typical glitch durations.
+    n_sigmas:
+        Number of (MAD-based) standard deviations beyond which a frame is
+        treated as an outlier.  3.0 corresponds to a ~99.7% Gaussian band.
 
     Returns
     -------
     tuple of (DataFrame with jumps interpolated, number of frames fixed).
     """
+    if window_frames < 3:
+        raise ValueError("window_frames must be >= 3.")
+
     df = positions.copy()
-    x = df["x"].values.astype(float)
-    y = df["y"].values.astype(float)
+    x = df["x"].astype(float)
+    y = df["y"].astype(float)
 
-    dx = np.diff(x)
-    dy = np.diff(y)
-    dist = np.sqrt(dx**2 + dy**2)
+    min_periods = window_frames // 2 + 1
+    x_med = x.rolling(window_frames, center=True, min_periods=min_periods).median()
+    y_med = y.rolling(window_frames, center=True, min_periods=min_periods).median()
+    deviation = np.hypot(x - x_med, y - y_med)
+    scale = deviation.rolling(window_frames, center=True, min_periods=min_periods).median()
 
-    bad = np.zeros(len(x), dtype=bool)
-    # Mark frames that *arrive* via a jump.
-    bad[1:] = dist > threshold_px
-    # If a frame also *departs* via a jump (single-frame glitch), the next
-    # good frame is already fine; we only NaN the jumped-to frame.
+    threshold = n_sigmas * 1.4826 * scale
+    bad = (deviation > threshold).fillna(False).to_numpy()
 
-    n_bad = bad.sum()
+    n_bad = int(bad.sum())
     if n_bad > 0:
-        x[bad] = np.nan
-        y[bad] = np.nan
-        # pandas interpolation handles NaN edges via ffill/bfill
-        df["x"] = pd.Series(x).interpolate(limit_direction="both").values
-        df["y"] = pd.Series(y).interpolate(limit_direction="both").values
+        x_clean = x.to_numpy(copy=True)
+        y_clean = y.to_numpy(copy=True)
+        x_clean[bad] = np.nan
+        y_clean[bad] = np.nan
+        df["x"] = pd.Series(x_clean).interpolate(limit_direction="both").to_numpy()
+        df["y"] = pd.Series(y_clean).interpolate(limit_direction="both").to_numpy()
 
-    return df, int(n_bad)
+    return df, n_bad
 
 
 def correct_perspective(

@@ -128,15 +128,17 @@ class ArenaDataset(BasePlaceCellDataset):
             self._preprocess_steps: dict[str, pd.DataFrame] = {}
             self._preprocess_steps["Raw"] = self.trajectory[["x", "y"]].copy()
 
-            # 1. Jump removal (threshold in mm → convert to px using averaged scale)
-            scale_avg = (scale_x + scale_y) / 2.0
-            jump_px = bcfg.jump_threshold_mm / scale_avg
-            self.trajectory, n_jumps = remove_position_jumps(self.trajectory, threshold_px=jump_px)
+            # 1. Hampel-filter outlier removal on the raw 2D trajectory.
+            self.trajectory, n_jumps = remove_position_jumps(
+                self.trajectory,
+                window_frames=bcfg.hampel_window_frames,
+                n_sigmas=bcfg.hampel_n_sigmas,
+            )
             logger.info(
-                "Jump removal: %d frames interpolated (threshold %.0f mm = %.1f px)",
+                "Hampel jump removal: %d frames interpolated (window=%d, n_sigmas=%.1f)",
                 n_jumps,
-                bcfg.jump_threshold_mm,
-                jump_px,
+                bcfg.hampel_window_frames,
+                bcfg.hampel_n_sigmas,
             )
             self._preprocess_steps["Jump removal"] = self.trajectory[["x", "y"]].copy()
 

@@ -80,7 +80,7 @@ no-binary-package = ["oasis-deconv"]
 [tool.ruff]
 target-version = "py311"
 include = ["placecell/**/*.py", "notebook/**/*.ipynb", "pyproject.toml"]
-exclude = ["docs", "tests", "placecell/assets"]
+exclude = ["docs", "tests", "placecell/assets", "placecell/_version.py"]
 line-length = 100
 
 [tool.ruff.lint]

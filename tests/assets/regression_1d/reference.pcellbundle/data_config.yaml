@@ -19,6 +19,6 @@ arm_order:
 - Arm_4
 zone_column: zone
 arm_position_column: arm_position
-zone_tracking: behavior_position.csv
+zone_tracking: zone_tracking.csv
 zone_connections: null
 zone_detection: null
