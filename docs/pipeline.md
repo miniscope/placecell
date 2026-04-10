@@ -50,11 +50,13 @@ save_bundle()                   # .pcellbundle directory with config, arrays, pa
 
 ### `ds.preprocess_behavior()`
 
-Saves a copy of the raw trajectory in `trajectory_raw`, then applies corrections and speed filtering.
+Saves a copy of the raw trajectory in `trajectory_raw`, then applies corrections and speed filtering. The exact steps depend on the dataset type.
+
+#### `ArenaDataset` (2D)
 
 **When `arena_bounds` is configured** (full pipeline):
 
-1. **Jump removal**: interpolate frame-to-frame displacements exceeding `jump_threshold_mm`
+1. **Hampel jump removal**: per-frame outlier detection on the (x, y) trajectory using a centered rolling-median centroid (window=`behavior.hampel_window_frames`) and the MAD-scaled deviation `behavior.hampel_n_sigmas * 1.4826 * MAD`. Flagged frames are linearly interpolated.
 2. **Perspective correction**: correct for camera angle using `camera_height_mm` and `tracking_height_mm`
 3. **Boundary clipping**: clip positions to `arena_bounds`
 4. **Recompute speed**: recalculate speed in mm/s from corrected positions
@@ -62,9 +64,33 @@ Saves a copy of the raw trajectory in `trajectory_raw`, then applies corrections
 
 **When `arena_bounds` is not configured** (fallback with warnings):
 
-- Spatial corrections are skipped (jump removal, perspective correction, boundary clipping)
+- Spatial corrections are skipped (Hampel jump removal, perspective correction, boundary clipping)
 - Speed and position remain in pixels
 - Speed filter is still applied → `trajectory_filtered`
+
+#### `MazeDataset` (1D)
+
+The maze pipeline does **not** clean raw `(x, y)` here. That work happens earlier in the standalone `placecell detect-zones` step (see [Zone Detection](#zone-detection-maze-only) below) which produces the `zone_tracking` CSV that `MazeDataset.load()` reads. By the time `preprocess_behavior()` runs, every frame already has `zone`, `arm_position`, `x_pinned`, `y_pinned` columns derived from a Hampel-filtered raw trajectory.
+
+`preprocess_behavior()` then:
+
+1. **Serialize to 1D**: convert `(zone, arm_position)` into a single concatenated `pos_1d` axis using physical arm lengths from `behavior_graph.yaml`.
+2. **Optionally split by direction**: each contiguous arm traversal becomes `Arm_X_fwd` or `Arm_X_rev` based on its starting position (`split_by_direction`).
+3. **Optionally drop incomplete traversals**: keep only room-to-room arm crossings (`require_complete_traversal`).
+4. **Recompute 1D speed**: centered-window finite-difference on `pos_1d`, with a same-arm guard so cross-arm transitions never inflate the speed estimate.
+5. **Speed filter**: apply `speed_threshold` → `trajectory_1d_filtered`.
+
+### Zone Detection (maze only)
+
+Before running the analysis pipeline, maze sessions must be passed through `placecell detect-zones` (CLI command) which:
+
+1. Loads the raw DLC `(x, y)` from `behavior_position.csv`.
+2. **Hampel jump removal** on the raw trajectory using `zone_detection.hampel_window_frames` and `zone_detection.hampel_n_sigmas` from the data config.
+3. For each cleaned frame, computes the per-zone soft-membership probability and runs a state machine (with `min_confidence`, `min_frames_same`, `min_frames_forbidden`, and graph adjacency) to assign a zone label.
+4. For frames assigned to an arm zone, projects the cleaned `(x, y)` onto the arm polyline to get `arm_position` (normalized 0–1) and the pinned point `(x_pinned, y_pinned)`.
+5. Writes the original raw `x, y`, plus `zone`, `arm_position`, `x_pinned`, `y_pinned` to the `zone_tracking` CSV.
+
+The Hampel filter only affects the projection step — the raw `(x, y)` columns in the output CSV are preserved unchanged so downstream visualizations always show what the tracker actually reported.
 
 ### `ds.deconvolve()`
 
@@ -124,7 +150,7 @@ Four independent computations from the same inputs (events, filtered trajectory,
 
 ### Data Paths Config
 
-:::{dropdown} data_paths.yaml
+:::{dropdown} arena data_paths.yaml
 ```yaml
 type: arena  # 'arena' for 2D open-field, 'maze' for 1D arm analysis
 behavior_fps: 20.0  # Behavior camera sampling rate (Hz)
@@ -133,6 +159,31 @@ neural_path: path/to/neural
 neural_timestamp: path/to/neural_timestamp.csv
 behavior_position: path/to/behavior_position.csv
 behavior_timestamp: path/to/behavior_timestamp.csv
+```
+:::
+
+:::{dropdown} maze data_paths.yaml
+```yaml
+type: maze
+behavior_fps: 20.0
+bodypart: LED
+mm_per_pixel: 1.0
+neural_path: path/to/neural
+neural_timestamp: path/to/neural_timestamp.csv
+behavior_position: path/to/behavior_position.csv  # raw DLC output (input to detect-zones)
+behavior_timestamp: path/to/behavior_timestamp.csv
+behavior_graph: path/to/behavior_graph.yaml       # zone polygons + adjacency graph
+zone_tracking: path/to/zone_tracking.csv          # zone-detected output (input to MazeDataset.load)
+arm_order: [Arm_1, Arm_2, Arm_3, Arm_4]
+zone_column: zone
+arm_position_column: arm_position
+x_col: x_pinned
+y_col: y_pinned
+zone_detection:
+  hampel_window_frames: 7  # Centered window for raw-position Hampel filter (in detect-zones)
+  hampel_n_sigmas: 3.0     # MAD-scaled threshold (~99.7% Gaussian band)
+  arm_max_distance: 60.0   # Max px from arm centerline for arm classification
+  min_confidence: 0.5      # Min zone probability for transition
 ```
 :::
 
@@ -155,7 +206,8 @@ behavior:
   type: arena
   speed_threshold: 10.0  # mm/s
   speed_window_frames: 5
-  jump_threshold_mm: 100  # Max plausible frame-to-frame displacement (mm)
+  hampel_window_frames: 7  # Centered window for raw-position Hampel filter (arena only)
+  hampel_n_sigmas: 3.0  # MAD-scaled threshold (~99.7% Gaussian band)
   spatial_map_2d:
     bins: 50
     min_occupancy: 0.025  # Minimum occupancy (in seconds) to include a bin
@@ -169,5 +221,33 @@ behavior:
     place_field_threshold: 0.35  # Fraction of peak rate for place field boundary
     place_field_min_bins: 5  # Minimum contiguous bins for a place field
     place_field_seed_percentile: 95  # Percentile of shuffled rates for seed detection
+```
+:::
+
+:::{dropdown} maze_config.yaml
+```yaml
+neural:
+  fps: 20.0
+  oasis:
+    g: [1.60, -0.63]
+    baseline: p10
+    penalty: 0.8
+  trace_name: C_lp
+
+behavior:
+  type: maze
+  speed_threshold: 25  # mm/s (note: maze Hampel lives in data config zone_detection block)
+  speed_window_frames: 5
+  spatial_map_1d:
+    bin_width_mm: 10
+    min_occupancy: 0.025
+    spatial_sigma: 2
+    n_shuffles: 1000
+    p_value_threshold: 0.05
+    min_shift_seconds: 20
+    si_weight_mode: amplitude
+    n_split_blocks: 10
+    split_by_direction: true
+    require_complete_traversal: false
 ```
 :::

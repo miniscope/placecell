@@ -195,6 +195,22 @@ class ZoneDetectionConfig(BaseModel):
         True,
         description="Use fuzzy distance-based boundaries instead of hard cutoffs.",
     )
+    hampel_window_frames: int = Field(
+        7,
+        ge=3,
+        description=(
+            "Hampel-filter window for raw position outlier removal "
+            "applied before zone projection (centered, odd, >= 3)."
+        ),
+    )
+    hampel_n_sigmas: float = Field(
+        3.0,
+        gt=0.0,
+        description=(
+            "Hampel-filter threshold in MAD-scaled standard deviations "
+            "(3.0 ~ 99.7% Gaussian band)."
+        ),
+    )
     interpolate: int = Field(
         5,
         ge=1,
@@ -222,10 +238,22 @@ class BehaviorConfig(BaseModel):
         5,
         description="Frames for speed calculation window.",
     )
-    jump_threshold_mm: float = Field(
-        100.0,
+    hampel_window_frames: int = Field(
+        7,
+        ge=3,
+        description=(
+            "Hampel-filter window for position outlier removal "
+            "applied to the raw (x, y) trajectory in the arena pipeline. "
+            "Maze datasets configure this in ZoneDetectionConfig instead."
+        ),
+    )
+    hampel_n_sigmas: float = Field(
+        3.0,
         gt=0.0,
-        description="Max plausible frame-to-frame displacement (mm).",
+        description=(
+            "Hampel-filter threshold in MAD-scaled standard deviations "
+            "(3.0 ~ 99.7% Gaussian band). Arena pipeline only."
+        ),
     )
     spatial_map_2d: SpatialMap2DConfig | None = Field(
         None,

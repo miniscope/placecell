@@ -22,7 +22,6 @@ from placecell.maze_helper import (
     filter_arm_by_speed,
     filter_complete_traversals,
     load_graph_polylines,
-    remove_position_jumps_1d,
     serialize_arm_position,
 )
 
@@ -143,17 +142,6 @@ class MazeDataset(BasePlaceCellDataset):
             arm_position_column=dcfg.arm_position_column,
             arm_lengths=self.arm_lengths,
         )
-
-        # Jump removal on 1D position (symmetric with arena pipeline)
-        self.trajectory_1d, n_jumps = remove_position_jumps_1d(
-            self.trajectory_1d, threshold_mm=bcfg.jump_threshold_mm
-        )
-        if n_jumps > 0:
-            logger.info(
-                "1D jump removal: %d frames interpolated (threshold %.0f mm)",
-                n_jumps,
-                bcfg.jump_threshold_mm,
-            )
 
         # Optionally split by traversal direction (doubles segments)
         if scfg.split_by_direction:

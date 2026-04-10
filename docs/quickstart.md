@@ -120,7 +120,6 @@ behavior:
   type: maze
   speed_threshold: 25
   speed_window_frames: 5
-  jump_threshold_mm: 100
   spatial_map_1d:
     bin_width_mm: 10
     min_occupancy: 0.025

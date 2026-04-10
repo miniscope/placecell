@@ -12,7 +12,8 @@ behavior:
   type: arena
   speed_threshold: 25.0
   speed_window_frames: 5
-  jump_threshold_mm: 100.0
+  hampel_window_frames: 7
+  hampel_n_sigmas: 3.0
   spatial_map_2d:
     min_occupancy: 0.025
     spatial_sigma: 3.0
