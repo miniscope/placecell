@@ -348,8 +348,12 @@ def create_unit_browser(
 
             if df_all_events is not None:
                 unit_all = df_all_events[df_all_events["unit_id"] == unit_id]
-                if "frame" in unit_all.columns and "s" in unit_all.columns and not unit_all.empty:
-                    event_t = unit_all["frame"].values / neural_fps
+                if (
+                    "frame_index" in unit_all.columns
+                    and "s" in unit_all.columns
+                    and not unit_all.empty
+                ):
+                    event_t = unit_all["frame_index"].values / neural_fps
                     event_a = unit_all["s"].values
                     m = (event_t >= t_start) & (event_t <= t_end)
                     if np.any(m):
@@ -357,11 +361,11 @@ def create_unit_browser(
                         event_amps_gray = event_a[m]
 
             if (
-                "frame" in vis_data_above.columns
+                "frame_index" in vis_data_above.columns
                 and "s" in vis_data_above.columns
                 and not vis_data_above.empty
             ):
-                event_t = vis_data_above["frame"].values / neural_fps
+                event_t = vis_data_above["frame_index"].values / neural_fps
                 event_a = vis_data_above["s"].values
                 m = (event_t >= t_start) & (event_t <= t_end)
                 if np.any(m):
@@ -1002,8 +1006,12 @@ def create_unit_browser_1d(
 
             if df_all_events is not None:
                 unit_all = df_all_events[df_all_events["unit_id"] == uid]
-                if "frame" in unit_all.columns and "s" in unit_all.columns and not unit_all.empty:
-                    et = unit_all["frame"].values / neural_fps
+                if (
+                    "frame_index" in unit_all.columns
+                    and "s" in unit_all.columns
+                    and not unit_all.empty
+                ):
+                    et = unit_all["frame_index"].values / neural_fps
                     ea = unit_all["s"].values
                     m = (et >= t_start) & (et <= t_end)
                     if np.any(m):
@@ -1011,8 +1019,8 @@ def create_unit_browser_1d(
                         event_amps_gray = ea[m]
 
             vis = res.vis_data_above
-            if "frame" in vis.columns and "s" in vis.columns and not vis.empty:
-                et = vis["frame"].values / neural_fps
+            if "frame_index" in vis.columns and "s" in vis.columns and not vis.empty:
+                et = vis["frame_index"].values / neural_fps
                 ea = vis["s"].values
                 m = (et >= t_start) & (et <= t_end)
                 if np.any(m):

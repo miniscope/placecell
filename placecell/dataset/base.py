@@ -21,7 +21,7 @@ from placecell.config import (
 )
 from placecell.loaders import load_visualization_data
 from placecell.log import init_logger
-from placecell.neural import build_event_index_dataframe, load_calcium_traces, run_deconvolution
+from placecell.neural import load_calcium_traces, run_deconvolution
 
 logger = init_logger(__name__)
 
@@ -129,7 +129,7 @@ class BasePlaceCellDataset(abc.ABC):
         ds = BasePlaceCellDataset.from_yaml(config_path, data_path)
         ds.load()                            # traces, trajectory, footprints
         ds.preprocess_behavior()             # corrections + speed filter
-        ds.deconvolve(progress_bar=tqdm)     # good_unit_ids, S_list, event_index
+        ds.deconvolve(progress_bar=tqdm)     # good_unit_ids, S_list
         ds.match_events()                    # event_place
         ds.compute_occupancy()               # occupancy_time, valid_mask, edges
         ds.analyze_units(progress_bar=tqdm)  # unit_results
@@ -184,6 +184,10 @@ class BasePlaceCellDataset(abc.ABC):
         self.trajectory_raw: pd.DataFrame | None = None
         self.trajectory: pd.DataFrame | None = None
         self.trajectory_filtered: pd.DataFrame | None = None
+
+        # Canonical neural-rate table: one row per neural frame, columns
+        # frame_index, neural_time, x, y, speed, [pos_1d, ...], s_unit_<id>...
+        self.canonical: pd.DataFrame | None = None
 
         # Occupancy
         self.occupancy_time: np.ndarray | None = None
@@ -283,6 +287,75 @@ class BasePlaceCellDataset(abc.ABC):
         """Neural sampling rate in Hz."""
         return self.cfg.neural.fps
 
+    def _validate_neural_timestamps(self) -> None:
+        """Read and validate neural timestamps; log a quality report.
+
+        Called by :meth:`_load_neural_and_viz` so the user sees timestamp
+        quality immediately after ``load()``, before waiting for
+        deconvolution.  The validated timestamps and the keep-mask are
+        stored on ``self`` for later use by ``match_events()``.
+        """
+        ts_df = pd.read_csv(self.neural_timestamp_path)
+        if "timestamp_first" not in ts_df.columns:
+            raise ValueError(
+                "neural_timestamp CSV must contain a 'timestamp_first' column. "
+                f"Got: {list(ts_df.columns)}"
+            )
+        neural_time = ts_df["timestamp_first"].to_numpy()
+        n_total = len(neural_time)
+
+        if n_total < 2:
+            raise ValueError("neural_timestamp CSV must have at least 2 rows.")
+        if np.any(np.isnan(neural_time)):
+            n_nan = int(np.isnan(neural_time).sum())
+            raise ValueError(
+                f"neural_timestamp CSV contains {n_nan} NaN timestamp(s). " "Check the recording."
+            )
+
+        diffs = np.diff(neural_time)
+        pos_diffs = diffs[diffs > 0]
+        median_dt = float(np.median(pos_diffs)) if len(pos_diffs) else 1.0
+        inferred_fps = 1.0 / median_dt
+
+        # Hampel outlier count (same filter used in interpolation).
+        ts_series = pd.Series(neural_time)
+        hampel_window = 11
+        hampel_min_periods = hampel_window // 2 + 1
+        t_med = ts_series.rolling(
+            hampel_window, center=True, min_periods=hampel_min_periods
+        ).median()
+        deviation = (ts_series - t_med).abs()
+        mad = deviation.rolling(hampel_window, center=True, min_periods=hampel_min_periods).median()
+        n_outlier = int((deviation > 3.0 * 1.4826 * mad).fillna(False).sum())
+
+        gap_threshold = max(1.0, 10 * median_dt)
+        n_gap = int((diffs > gap_threshold).sum())
+
+        if n_outlier == 0 and n_gap == 0:
+            logger.info(
+                "Neural timestamps: %d frames, all monotonic, "
+                "inferred %.1f Hz (median dt=%.3fs)",
+                n_total,
+                inferred_fps,
+                median_dt,
+            )
+        else:
+            parts = []
+            if n_outlier:
+                parts.append(f"{n_outlier} outlier(s) will be excluded")
+            if n_gap:
+                max_gap = float(diffs[diffs > gap_threshold].max())
+                parts.append(f"{n_gap} forward gap(s) (max {max_gap:.1f}s, warned only)")
+            logger.warning(
+                "Neural timestamps: %d frames, %.1f Hz — %s",
+                n_total,
+                inferred_fps,
+                "; ".join(parts),
+            )
+
+        # Store for downstream use by match_events / detect_zones.
+        self._neural_time_raw = neural_time
+
     def _load_neural_and_viz(self) -> None:
         """Load neural traces and visualization assets (shared by all subclasses)."""
         ncfg = self.cfg.neural
@@ -294,6 +367,10 @@ class BasePlaceCellDataset(abc.ABC):
             self.traces.sizes["unit_id"],
             self.traces.sizes["frame"],
         )
+
+        # Neural timestamp quality check — runs early so the user sees
+        # warnings before waiting for deconvolution.
+        self._validate_neural_timestamps()
 
         # Visualization assets (max projection, footprints)
         self.traces, self.max_proj, self.footprints = load_visualization_data(
@@ -384,11 +461,7 @@ class BasePlaceCellDataset(abc.ABC):
             s_min=oasis.s_min,
             progress_bar=progress_bar,
         )
-
-        self.event_index = build_event_index_dataframe(self.good_unit_ids, self.S_list)
-        logger.info(
-            "Deconvolved %d units, %d events", len(self.good_unit_ids), len(self.event_index)
-        )
+        logger.info("Deconvolved %d units", len(self.good_unit_ids))
 
     @abc.abstractmethod
     def match_events(self) -> None:
@@ -524,8 +597,7 @@ class BasePlaceCellDataset(abc.ABC):
             ("trajectory_raw", self.trajectory_raw),
             ("trajectory", self.trajectory),
             ("trajectory_filtered", self.trajectory_filtered),
-            ("event_index", self.event_index),
-            ("event_place", self.event_place),
+            ("canonical", self.canonical),
         ]:
             if df is not None:
                 df.to_parquet(path / f"{name}.parquet")
@@ -722,13 +794,51 @@ class BasePlaceCellDataset(abc.ABC):
             "trajectory_raw",
             "trajectory",
             "trajectory_filtered",
-            "event_index",
-            "event_place",
+            "canonical",
         ]
         for name in df_names:
             pq = path / f"{name}.parquet"
             if pq.exists():
                 setattr(ds, name, pd.read_parquet(pq))
+
+        # Derive event_index/event_place from the canonical table so
+        # downstream consumers (notebook browser, regression tests) see
+        # the same DataFrames as a freshly-run pipeline.
+        if ds.canonical is not None:
+            from placecell.behavior import (
+                derive_event_place_from_canonical,
+                filter_canonical_by_speed,
+            )
+
+            speed_col = "speed_1d" if "speed_1d" in ds.canonical.columns else "speed"
+            unfiltered = filter_canonical_by_speed(
+                ds.canonical,
+                speed_column=speed_col,
+                speed_threshold=0.0,
+                drop_below_threshold=False,
+            )
+            ds.event_index = derive_event_place_from_canonical(
+                unfiltered,
+                position_columns=("x", "y"),
+                speed_column=speed_col,
+            )
+            speed_threshold = cfg.behavior.speed_threshold if cfg.behavior is not None else 0.0
+            extras = tuple(
+                c for c in ("pos_1d", "arm_index", "direction") if c in ds.canonical.columns
+            )
+            filtered = filter_canonical_by_speed(
+                ds.canonical,
+                speed_column=speed_col,
+                speed_threshold=speed_threshold,
+            )
+            if extras:
+                filtered = filtered.dropna(subset=["pos_1d"]).reset_index(drop=True)
+            ds.event_place = derive_event_place_from_canonical(
+                filtered,
+                position_columns=("x", "y"),
+                speed_column=speed_col,
+                extra_columns=extras,
+            )
 
         # Deconvolution data
         deconv_path = path / "deconv.npz"

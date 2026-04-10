@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import pandas as pd
 import xarray as xr
 
 from placecell.log import init_logger
@@ -126,33 +125,3 @@ def run_deconvolution(
             continue
 
     return good_unit_ids, S_list
-
-
-def build_event_index_dataframe(
-    unit_ids: list[int],
-    S_list: list[np.ndarray],
-) -> pd.DataFrame:
-    """Build event index DataFrame from spike trains.
-
-    Parameters
-    ----------
-    unit_ids : list[int]
-        Unit IDs corresponding to each spike train.
-    S_list : list[np.ndarray]
-        List of spike train arrays.
-
-    Returns
-    -------
-    pd.DataFrame
-        Event index with columns: unit_id, frame, s.
-    """
-    S_arr = np.stack(S_list, axis=0)
-    event_rows = []
-
-    for i, uid in enumerate(unit_ids):
-        s_vec = S_arr[i]
-        frames = np.nonzero(s_vec > 0)[0]
-        for fr in frames:
-            event_rows.append({"unit_id": uid, "frame": int(fr), "s": float(s_vec[fr])})
-
-    return pd.DataFrame(event_rows)

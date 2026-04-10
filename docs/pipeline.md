@@ -11,18 +11,20 @@ from_yaml(config, data_path)    # Parse configs, auto-select subclass based on b
   │
 load()                          # Load neural traces + behavior positions + visualization assets
   │
-preprocess_behavior()           # Approach-specific corrections + speed filter
+preprocess_behavior()           # Approach-specific corrections + speed
   │
-deconvolve()                    # OASIS AR(2) deconvolution → event_index
+deconvolve()                    # OASIS AR(2) deconvolution → S_list (per-unit traces at neural fps)
   │
-match_events()                  # Neural events → behavior positions → event_place
-  │
+match_events()                  # Build canonical neural-rate table
+  │                              # (interpolate behavior → stack S_list → derive views)
 compute_occupancy()             # Spatial occupancy map (2D histogram or 1D bins)
   │
 analyze_units()                 # Per-unit: rate map, SI + shuffle, stability + shuffle, place fields
   │
 save_bundle()                   # .pcellbundle directory with config, arrays, parquets, figures
 ```
+
+The **canonical neural-rate table** (`ds.canonical`) is the central artifact: one row per neural frame with columns `frame_index, neural_time, x, y, speed, [pos_1d, arm_index, ...], s_unit_<id>...`. Behavior is linearly interpolated onto neural timestamps inside `match_events()` (or, for the maze pipeline, inside `detect-zones`), so every analysis downstream operates on a single common clock. The long-format `event_place` table is derived from `canonical` for the per-unit spatial analysis functions.
 
 ## Data Files
 
@@ -37,20 +39,23 @@ save_bundle()                   # .pcellbundle directory with config, arrays, pa
 - `behavior_timestamp.csv`: behavior frame timestamps
 
 **Intermediate DataFrames** (generated during pipeline):
-- `event_index`: deconvolved neural events (frame, unit_id, amplitude `s`)
-- `event_place`: events matched to position with speed (unit_id, frame, s, x, y, speed) — only events above `speed_threshold`
+- `canonical`: per-neural-frame table with `x, y, speed, [pos_1d, ...], s_unit_<id>...`. Single source of truth for all downstream analysis.
+- `trajectory_filtered` / `trajectory_1d_filtered`: speed-filtered view of `canonical` (with `frame_index` aliased so existing analysis helpers consume it directly).
+- `event_place`: long-format event table (`unit_id, frame_index, x, y, s, speed, ...`) derived from the speed-filtered canonical view. Each row is one above-zero spike sample from one unit.
+- `event_index`: long-format event table over the **unfiltered** canonical view, used by the notebook browser.
 
 ## Processing Steps
 
 ### `ds.load()`
 
 - Load calcium traces from `{trace_name}.zarr`
-- Load behavior position and timestamps → compute raw speed (px/s)
+- Load behavior position and timestamps (speed is computed later at neural rate in `match_events`)
 - Load visualization assets (max_proj, footprints, behavior video frame)
+- For the maze pipeline, also auto-runs zone detection if the cached `zone_tracking` CSV is missing
 
 ### `ds.preprocess_behavior()`
 
-Saves a copy of the raw trajectory in `trajectory_raw`, then applies corrections and speed filtering. The exact steps depend on the dataset type.
+Saves a copy of the raw trajectory in `trajectory_raw`, then applies geometric corrections (Hampel, perspective, clipping, unit conversion). Speed is computed later at the neural sample rate inside `match_events()`.
 
 #### `ArenaDataset` (2D)
 
@@ -59,36 +64,46 @@ Saves a copy of the raw trajectory in `trajectory_raw`, then applies corrections
 1. **Hampel jump removal**: per-frame outlier detection on the (x, y) trajectory using a centered rolling-median centroid (window=`behavior.hampel_window_frames`) and the MAD-scaled deviation `behavior.hampel_n_sigmas * 1.4826 * MAD`. Flagged frames are linearly interpolated.
 2. **Perspective correction**: correct for camera angle using `camera_height_mm` and `tracking_height_mm`
 3. **Boundary clipping**: clip positions to `arena_bounds`
-4. **Recompute speed**: recalculate speed in mm/s from corrected positions
-5. **Speed filter**: apply `speed_threshold` → `trajectory_filtered`
+4. **Recompute speed**: recalculate speed in mm/s from corrected positions, using a centered window of `behavior.speed_window_seconds`
 
 **When `arena_bounds` is not configured** (fallback with warnings):
 
 - Spatial corrections are skipped (Hampel jump removal, perspective correction, boundary clipping)
 - Speed and position remain in pixels
-- Speed filter is still applied → `trajectory_filtered`
 
 #### `MazeDataset` (1D)
 
-`MazeDataset.load()` reads a `zone_tracking` CSV that maps each frame to a zone label and an arm-relative position. If the CSV is missing, `load()` runs [Zone Detection](#zone-detection-maze-only) automatically; pass `--force-redetect` to `placecell analysis` (or `force_redetect=True` to `MazeDataset.load()`) to refresh it.
+`MazeDataset.load()` reads a `zone_tracking` CSV that maps each **neural** frame to a zone label and an arm-relative position. If the CSV is missing, `load()` runs [Zone Detection](#zone-detection-maze-only) automatically; pass `--force-redetect` to `placecell analysis` (or `force_redetect=True` to `MazeDataset.load()`) to refresh it.
 
-`preprocess_behavior()` then:
+`preprocess_behavior()` then operates on the already-neural-rate trajectory and:
 
 1. **Serialize to 1D**: convert `(zone, arm_position)` into a single concatenated `pos_1d` axis using physical arm lengths from `behavior_graph.yaml`.
 2. **Optionally split by direction**: each contiguous arm traversal becomes `Arm_X_fwd` or `Arm_X_rev` based on its starting position (`split_by_direction`).
 3. **Optionally drop incomplete traversals**: keep only room-to-room arm crossings (`require_complete_traversal`).
-4. **Recompute 1D speed**: centered-window finite-difference on `pos_1d`, with a same-arm guard so cross-arm transitions never inflate the speed estimate.
-5. **Speed filter**: apply `speed_threshold` → `trajectory_1d_filtered`.
+4. **Compute 1D speed**: centered-window (`behavior.speed_window_seconds`) finite-difference on `pos_1d` at the neural sample rate, with a same-arm guard so cross-arm transitions never inflate the speed estimate.
+
+### `ds.match_events()`
+
+Builds the canonical neural-rate table:
+
+1. Load neural timestamps (`timestamp_first` per neural frame), validate with Hampel filter, exclude anomalous frames.
+2. **Arena**: linearly interpolate `(x, y)` from the behavior-rate trajectory onto neural timestamps, then compute speed at neural rate. **Maze**: the trajectory is already at neural rate (interpolation happened inside zone detection), so this step is a direct join.
+3. Stack the deconvolved per-unit spike trains (`S_list`) into `s_unit_<id>` columns.
+4. Drop neural frames with no behavior coverage (outside behavior time window).
+5. Derive the speed-filtered view (`trajectory_filtered` / `trajectory_1d_filtered`) and the long-format `event_place` / `event_index` tables.
+
+The hard-error guardrail in :func:`placecell.behavior.interpolate_behavior_onto_neural` refuses to upsample when `neural_fps > 5 * behavior_fps`, since per-frame jitter would dominate.
 
 ### Zone Detection (maze only)
 
-Zone detection projects raw DLC `(x, y)` onto the maze graph. It runs automatically from `MazeDataset.load()` when the `zone_tracking` CSV is missing, and can also be invoked directly via `placecell detect-zones -d data_paths.yaml` (which additionally exports a validation video).
+Zone detection projects raw DLC `(x, y)` onto the maze graph **at the neural sample rate**. It runs automatically from `MazeDataset.load()` when the `zone_tracking` CSV is missing, and can also be invoked directly via `placecell detect-zones -d data_paths.yaml` (which additionally exports a validation video).
 
 1. Load raw DLC `(x, y)` from `behavior_position.csv`.
-2. **Hampel jump removal** on the raw trajectory using `zone_detection.hampel_window_frames` and `zone_detection.hampel_n_sigmas`.
-3. Compute per-zone soft-membership probability and run a state machine (`min_confidence`, `min_frames_same`, `min_frames_forbidden`, graph adjacency) to assign a zone label per frame.
-4. For arm-zone frames, project the cleaned `(x, y)` onto the arm polyline to get `arm_position` (0–1) and pinned point `(x_pinned, y_pinned)`.
-5. Write the **raw** `x, y` plus `zone`, `arm_position`, `x_pinned`, `y_pinned` to the `zone_tracking` CSV. Hampel cleaning only affects the projection — the raw columns are preserved.
+2. **Hampel jump removal** on the raw trajectory at behavior rate, using `zone_detection.hampel_window_frames` and `zone_detection.hampel_n_sigmas`.
+3. **Linearly interpolate** the cleaned `(x, y)` onto the neural timestamp grid (`timestamp_first` from `neural_timestamp.csv`).
+4. Compute per-zone soft-membership probability and run a state machine at the neural sample rate (`min_confidence`, `min_seconds_same`, `min_seconds_forbidden`, graph adjacency) to assign a zone label per neural frame.
+5. For arm-zone frames, project the cleaned `(x, y)` onto the arm polyline to get `arm_position` (0–1) and pinned point `(x_pinned, y_pinned)`.
+6. Write the resulting per-neural-frame table to the `zone_tracking` CSV with columns `x, y, x_pinned, y_pinned, zone, arm_position, neural_time` indexed by neural frame.
 
 `zone_tracking` defaults to `zone_tracking_{data_path.stem}.csv` next to the data config when not set.
 
@@ -96,14 +111,7 @@ Zone detection projects raw DLC `(x, y)` onto the maze graph. It runs automatica
 
 - Run OASIS AR2 deconvolution on each unit's calcium trace
 - Parameters: `g` (AR coefficients), `baseline`, `penalty`, `s_min`
-- Output: `good_unit_ids`, spike trains (`S_list`), `event_index`
-
-### `ds.match_events()`
-
-- For each neural event, find the closest behavior frame by timestamp
-- Discard matches where timestamp difference exceeds 0.5 / `behavior_fps`
-- Filter out events where animal speed was below `speed_threshold`
-- Output: `event_place`
+- Output: `good_unit_ids`, per-unit spike trains (`S_list`)
 
 ### `ds.compute_occupancy()`
 
@@ -205,7 +213,7 @@ neural:
 behavior:
   type: arena
   speed_threshold: 10.0  # mm/s
-  speed_window_frames: 5
+  speed_window_seconds: 0.25
   hampel_window_frames: 7  # Centered window for raw-position Hampel filter (arena only)
   hampel_n_sigmas: 3.0  # MAD-scaled threshold (~99.7% Gaussian band)
   spatial_map_2d:
@@ -237,7 +245,7 @@ neural:
 behavior:
   type: maze
   speed_threshold: 25  # mm/s (note: maze Hampel lives in data config zone_detection block)
-  speed_window_frames: 5
+  speed_window_seconds: 0.25
   spatial_map_1d:
     bin_width_mm: 10
     min_occupancy: 0.025

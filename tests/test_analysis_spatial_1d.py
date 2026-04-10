@@ -107,7 +107,7 @@ class TestSpatialInformation1D:
         rng = np.random.RandomState(42)
         n_frames = 500
         traj = pd.DataFrame({
-            "beh_frame_index": np.arange(n_frames),
+            "frame_index": np.arange(n_frames),
             "pos_1d": rng.uniform(0, 4, n_frames),
         })
         occ, valid, edges = compute_occupancy_map_1d(
@@ -117,7 +117,7 @@ class TestSpatialInformation1D:
         events_conc = pd.DataFrame({
             "pos_1d": np.full(50, 1.5),
             "s": np.ones(50),
-            "beh_frame_index": rng.choice(n_frames, 50, replace=False),
+            "frame_index": rng.choice(n_frames, 50, replace=False),
         })
         si_conc, _, _ = compute_spatial_information_1d(
             events_conc, traj, occ, valid, edges, n_shuffles=10, random_seed=1
@@ -126,7 +126,7 @@ class TestSpatialInformation1D:
         events_spread = pd.DataFrame({
             "pos_1d": rng.uniform(0, 4, 50),
             "s": np.ones(50),
-            "beh_frame_index": rng.choice(n_frames, 50, replace=False),
+            "frame_index": rng.choice(n_frames, 50, replace=False),
         })
         si_spread, _, _ = compute_spatial_information_1d(
             events_spread, traj, occ, valid, edges, n_shuffles=10, random_seed=1

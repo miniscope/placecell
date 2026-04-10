@@ -11,7 +11,7 @@ neural:
 behavior:
   type: maze
   speed_threshold: 25.0
-  speed_window_frames: 5
+  speed_window_seconds: 0.25
   hampel_window_frames: 7
   hampel_n_sigmas: 3.0
   spatial_map_2d: null

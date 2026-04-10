@@ -171,15 +171,24 @@ class ZoneDetectionConfig(BaseModel):
         le=1.0,
         description="Minimum confidence for forbidden (non-adjacent) transitions.",
     )
-    min_frames_same: int = Field(
-        1,
-        ge=1,
-        description="Minimum frames in current zone before allowing transition.",
+    min_seconds_same: float = Field(
+        0.05,
+        gt=0.0,
+        description=(
+            "Minimum dwell time (seconds) in the current zone before "
+            "allowing a transition.  Converted to frames internally using "
+            "the projection sampling rate."
+        ),
     )
-    min_frames_forbidden: int = Field(
-        3,
-        ge=1,
-        description="Minimum consecutive frames for forbidden transition override.",
+    min_seconds_forbidden: float = Field(
+        0.15,
+        gt=0.0,
+        description=(
+            "Minimum dwell time (seconds) of consecutive forbidden-zone "
+            "evidence before the state machine accepts a forbidden "
+            "transition.  Converted to frames internally using the "
+            "projection sampling rate."
+        ),
     )
     room_decay_power: float = Field(
         2.0,
@@ -234,9 +243,14 @@ class BehaviorConfig(BaseModel):
         ...,
         description="Minimum running speed (mm/s).",
     )
-    speed_window_frames: int = Field(
-        5,
-        description="Frames for speed calculation window.",
+    speed_window_seconds: float = Field(
+        0.25,
+        gt=0.0,
+        description=(
+            "Centered window (seconds) for finite-difference speed "
+            "computation.  Converted to frames internally using the "
+            "trajectory sampling rate."
+        ),
     )
     hampel_window_frames: int = Field(
         7,

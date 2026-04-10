@@ -6,18 +6,16 @@ from placecell.loaders import load_behavior_data, load_visualization_data
 
 
 def test_load_behavior_data_shape(assets_dir: Path) -> None:
-    """load_behavior_data should return expected shapes from test data."""
-    trajectory_with_speed, trajectory_filtered = load_behavior_data(
+    """load_behavior_data should return the full behavior-rate trajectory."""
+    trajectory = load_behavior_data(
         behavior_position=assets_dir / "behavior" / "behavior_position.csv",
         behavior_timestamp=assets_dir / "behavior" / "behavior_timestamp.csv",
         bodypart="LED_clean",
-        speed_window_frames=5,
-        speed_threshold=50.0,
     )
 
-    # Reference shapes from test assets (speed_threshold=50 filters out slow movement)
-    assert len(trajectory_with_speed) == 1500
-    assert len(trajectory_filtered) == 783
+    # Reference shape from test assets.
+    assert len(trajectory) == 1500
+    assert {"frame_index", "x", "y", "unix_time"}.issubset(trajectory.columns)
 
 
 def test_load_visualization_data_shape(assets_dir: Path) -> None:

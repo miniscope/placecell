@@ -13,11 +13,13 @@ from placecell.analysis.spatial_2d import (
     compute_unit_analysis,
 )
 from placecell.behavior import (
-    build_event_place_dataframe,
+    build_canonical_table,
     clip_to_arena,
+    compute_speed_2d,
     correct_perspective,
-    filter_by_speed,
-    recompute_speed,
+    derive_event_place_from_canonical,
+    filter_canonical_by_speed,
+    interpolate_behavior_onto_neural,
     remove_position_jumps,
 )
 from placecell.config import BaseSpatialMapConfig
@@ -49,16 +51,13 @@ class ArenaDataset(BasePlaceCellDataset):
         """Load neural traces, arena behavior data, and visualization assets."""
         self._load_neural_and_viz()
 
-        bcfg = self.cfg.behavior
         dcfg = self.data_cfg
         if dcfg is None or dcfg.bodypart is None:
             raise RuntimeError("bodypart must be set in data config")
-        self.trajectory, _ = load_behavior_data(
+        self.trajectory = load_behavior_data(
             behavior_position=self.behavior_position_path,
             behavior_timestamp=self.behavior_timestamp_path,
             bodypart=dcfg.bodypart,
-            speed_window_frames=bcfg.speed_window_frames,
-            speed_threshold=0.0,
             x_col=dcfg.x_col,
             y_col=dcfg.y_col,
         )
@@ -87,16 +86,17 @@ class ArenaDataset(BasePlaceCellDataset):
         return (scale_x, scale_y)
 
     def preprocess_behavior(self) -> None:
-        """Apply data-integrity corrections, convert units, and speed-filter.
+        """Apply geometric corrections to the behavior trajectory.
 
         When ``arena_bounds`` is configured:
-            jump removal → perspective correction → boundary clipping
-            → recompute speed (mm/s) → speed filter.
+            jump removal → perspective correction → boundary clipping →
+            unit conversion (px → mm).
 
         When ``arena_bounds`` is **not** configured:
-            warnings are logged and speed filtering is applied in px/s.
+            warnings are logged and the trajectory remains in pixels.
 
-        Requires ``load()`` to have been called first.
+        Speed is computed later at the neural sample rate inside
+        :meth:`match_events`. Requires :meth:`load` to have been called.
         """
         if self.trajectory is None:
             raise RuntimeError("Call load() first.")
@@ -179,50 +179,93 @@ class ArenaDataset(BasePlaceCellDataset):
                 df["x"] = (df["x"] - x_min) * scale_x
                 df["y"] = (df["y"] - y_min) * scale_y
             self._preprocess_steps["Converted"] = self.trajectory[["x", "y"]].copy()
-
-            # 5. Recompute speed on mm-space positions (natively mm/s)
-            self.trajectory = recompute_speed(
-                self.trajectory, window_frames=bcfg.speed_window_frames
-            )
-            logger.info("Speed recomputed after coordinate correction (mm/s)")
-            speed_unit = "mm/s"
         else:
             logger.warning(
                 "No arena_bounds — skipping spatial corrections; "
                 "speed and position remain in pixels"
             )
-            speed_unit = "px/s"
 
-        # Speed filter (always applied)
-        self.trajectory_filtered = filter_by_speed(self.trajectory, bcfg.speed_threshold)
-        logger.info(
-            "Trajectory: %d frames (%d after speed filter at %.1f %s)",
-            len(self.trajectory),
-            len(self.trajectory_filtered),
-            bcfg.speed_threshold,
-            speed_unit,
-        )
+        logger.info("Trajectory ready: %d behavior-rate frames", len(self.trajectory))
 
     def match_events(self) -> None:
-        """Match neural events to behavior positions."""
-        if self.event_index is None:
+        """Build the canonical neural-rate table and derive analysis views.
+
+        After this call:
+            - ``self.canonical`` — one row per neural frame with columns
+              ``frame_index, neural_time, x, y, speed, s_unit_*``.
+            - ``self.trajectory_filtered`` — speed-filtered view of
+              ``canonical`` for occupancy and spatial analysis.
+            - ``self.event_place`` — long-format event table derived
+              from the speed-filtered view.
+        """
+        if not self.S_list:
             raise RuntimeError("Call deconvolve() first.")
         if self.trajectory is None:
             raise RuntimeError("Call load() first.")
 
         bcfg = self.cfg.behavior
+        # Use the timestamps already validated during load().
+        neural_time = self._neural_time_raw
 
-        self.event_place = build_event_place_dataframe(
-            event_index=self.event_index,
-            neural_timestamp_path=self.neural_timestamp_path,
-            behavior_with_speed=self.trajectory,
-            behavior_fps=self.data_cfg.behavior_fps,
+        n_neural = len(neural_time)
+        if any(len(s) != n_neural for s in self.S_list):
+            raise RuntimeError(
+                "Deconvolved trace length does not match neural-timestamp count "
+                f"({len(self.S_list[0])} vs {n_neural})."
+            )
+
+        # Interpolate (x, y) onto neural timestamps, then compute speed
+        # at the neural sample rate so the canonical table is internally
+        # consistent (one clock for everything).
+        behavior_at_neural = interpolate_behavior_onto_neural(
+            self.trajectory,
+            neural_time,
+            columns=["x", "y"],
+        )
+        behavior_at_neural = compute_speed_2d(
+            behavior_at_neural,
+            window_seconds=bcfg.speed_window_seconds,
+            sample_rate_hz=self.neural_fps,
+            time_column="neural_time",
+        )
+        traces = {int(uid): self.S_list[i] for i, uid in enumerate(self.good_unit_ids)}
+        self.canonical = build_canonical_table(behavior_at_neural, traces)
+        logger.info(
+            "Canonical neural-rate table: %d frames, %d units",
+            len(self.canonical),
+            len(self.good_unit_ids),
+        )
+
+        # Long-format event table over the *unfiltered* canonical, used by
+        # the notebook browser (which shows all events including low-speed).
+        self.event_index = derive_event_place_from_canonical(
+            filter_canonical_by_speed(
+                self.canonical,
+                speed_column="speed",
+                speed_threshold=0.0,
+                drop_below_threshold=False,
+            ),
+            position_columns=("x", "y"),
+            speed_column="speed",
+        )
+
+        self.trajectory_filtered = filter_canonical_by_speed(
+            self.canonical,
+            speed_column="speed",
             speed_threshold=bcfg.speed_threshold,
         )
+        self.event_place = derive_event_place_from_canonical(
+            self.trajectory_filtered,
+            position_columns=("x", "y"),
+            speed_column="speed",
+        )
         logger.info(
-            "Matched %d events (%d units)",
+            "Speed filter (%.1f mm/s): %d/%d frames; %d events across %d units",
+            bcfg.speed_threshold,
+            len(self.trajectory_filtered),
+            len(self.canonical),
             len(self.event_place),
-            self.event_place["unit_id"].nunique(),
+            self.event_place["unit_id"].nunique() if not self.event_place.empty else 0,
         )
 
     def compute_occupancy(self) -> None:
