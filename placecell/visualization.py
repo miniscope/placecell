@@ -389,6 +389,8 @@ def plot_behavior_preview(
     trajectory_filtered: pd.DataFrame,
     speed_threshold: float,
     speed_unit: str = "mm/s",
+    trajectory_alpha: float = 0.03,
+    trajectory_lw: float = 0.3,
 ) -> "Figure":
     """Raw vs filtered trajectory and speed histogram.
 
@@ -402,10 +404,17 @@ def plot_behavior_preview(
         Speed cutoff used for filtering.
     speed_unit:
         Label for speed axis (e.g. 'mm/s' or 'px/s').
+    trajectory_alpha:
+        Per-segment alpha for trajectory lines.
+    trajectory_lw:
+        Line width for trajectory lines.
     """
     fig, (ax_raw, ax_filt, ax_hist) = plt.subplots(1, 3, figsize=(10, 3.5))
 
-    ax_raw.plot(trajectory["x"], trajectory["y"], "k-", linewidth=0.3, alpha=0.5)
+    ax_raw.plot(
+        trajectory["x"], trajectory["y"], "k-",
+        linewidth=trajectory_lw, alpha=trajectory_alpha,
+    )
     ax_raw.set_title(f"All frames ({len(trajectory)})")
     ax_raw.set_aspect("equal")
     ax_raw.axis("off")
@@ -414,8 +423,8 @@ def plot_behavior_preview(
         trajectory_filtered["x"],
         trajectory_filtered["y"],
         "k-",
-        linewidth=0.3,
-        alpha=0.5,
+        linewidth=trajectory_lw,
+        alpha=trajectory_alpha,
     )
     ax_filt.set_title(f"Speed > {speed_threshold} {speed_unit} ({len(trajectory_filtered)})")
     ax_filt.set_aspect("equal")
@@ -455,8 +464,13 @@ def plot_occupancy_preview(
     behavior_fps: float = 20.0,
     n_split_blocks: int = 10,
     block_shift: float = 0.0,
+    trajectory_alpha: float = 0.03,
+    trajectory_lw: float = 0.3,
 ) -> "Figure":
     """Filtered trajectory, full occupancy, and split-half occupancy maps.
+
+    The trajectory panel uses low alpha so that repeatedly visited areas
+    appear darker, showing occupancy density directly.
 
     Parameters
     ----------
@@ -474,6 +488,11 @@ def plot_occupancy_preview(
         Number of interleaved blocks for the split (same as stability).
     block_shift:
         Block boundary shift fraction (same as stability).
+    trajectory_alpha:
+        Per-segment alpha for the trajectory line. Low values (~0.03)
+        let overlap accumulate to show density.
+    trajectory_lw:
+        Line width for the trajectory.
     """
     ext = [x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]]
 
@@ -516,13 +535,13 @@ def plot_occupancy_preview(
     fig, axes = plt.subplots(1, 4, figsize=(16, 3.5))
     ax_traj, ax_occ, ax_h1, ax_h2 = axes
 
-    # Trajectory
+    # Trajectory — low alpha lets line overlap show occupancy density
     ax_traj.plot(
         trajectory_filtered["x"],
         trajectory_filtered["y"],
         "k-",
-        alpha=0.5,
-        linewidth=0.3,
+        alpha=trajectory_alpha,
+        linewidth=trajectory_lw,
     )
     if np.any(valid_mask) and not np.all(valid_mask):
         ax_traj.contour(
