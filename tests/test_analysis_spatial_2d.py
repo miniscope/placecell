@@ -14,37 +14,9 @@ from placecell.analysis.spatial_2d import (
     compute_unit_analysis,
     gaussian_filter_normalized,
 )
+from placecell.temporal_alignment import compute_speed_2d
 from placecell.config import SpatialMap2DConfig
-from placecell.behavior import (
-    build_event_place_dataframe,
-    compute_behavior_speed,
-)
 from placecell.neural import load_calcium_traces
-
-
-def test_event_place_regression(assets_dir: Path) -> None:
-    """event_index → event_place should match reference output."""
-    from placecell.behavior import _load_behavior_xy
-
-    event_index = pd.read_csv(assets_dir / "reference_event_index.csv")
-    beh_pos = _load_behavior_xy(assets_dir / "behavior" / "behavior_position.csv", "LED_clean")
-    beh_ts = pd.read_csv(assets_dir / "behavior" / "behavior_timestamp.csv")
-    behavior_with_speed = compute_behavior_speed(beh_pos, beh_ts, window_frames=5)
-
-    result = build_event_place_dataframe(
-        event_index=event_index,
-        neural_timestamp_path=assets_dir / "neural_data" / "neural_timestamp.csv",
-        behavior_with_speed=behavior_with_speed,
-        behavior_fps=20.0,
-        speed_threshold=0.0,
-    )
-
-    reference = pd.read_csv(assets_dir / "reference_event_place.csv")
-
-    assert list(result.columns) == list(reference.columns)
-    assert len(result) == len(reference)
-
-    pd.testing.assert_frame_equal(result, reference, rtol=1e-5)
 
 
 def test_load_calcium_traces_shape(neural_path: Path) -> None:
@@ -65,24 +37,23 @@ def test_deconv_zarr_structure(assets_dir: Path) -> None:
     assert ds.attrs["fps"] == 20.0
 
 
-def test_compute_behavior_speed_shape(assets_dir: Path) -> None:
-    """compute_behavior_speed should return DataFrame with speed column."""
-    positions = pd.DataFrame({
-        "frame_index": [0, 1, 2, 3, 4],
+def test_compute_speed_2d_shape(assets_dir: Path) -> None:
+    """compute_speed_2d should add a speed column from a centered window."""
+    trajectory = pd.DataFrame({
         "x": [0.0, 10.0, 20.0, 30.0, 40.0],
         "y": [0.0, 0.0, 0.0, 0.0, 0.0],
-    })
-    timestamps = pd.DataFrame({
-        "frame_index": [0, 1, 2, 3, 4],
-        "unix_time": [0.0, 0.1, 0.2, 0.3, 0.4],
+        "neural_time": [0.0, 0.1, 0.2, 0.3, 0.4],
     })
 
-    result = compute_behavior_speed(positions, timestamps, window_frames=2)
+    # window_seconds=0.2 at 10 Hz → 2 frames (half=1).
+    result = compute_speed_2d(
+        trajectory, window_seconds=0.2, sample_rate_hz=10.0
+    )
 
     assert "speed" in result.columns
     assert len(result) == 5
     # Speed should be ~100 pixels/s (10 pixels / 0.1 s)
-    assert result["speed"].iloc[0] == pytest.approx(100.0, rel=0.01)
+    assert result["speed"].iloc[2] == pytest.approx(100.0, rel=0.01)
 
 
 def test_gaussian_filter_normalized(assets_dir: Path) -> None:
@@ -157,15 +128,15 @@ def test_compute_spatial_information(assets_dir: Path) -> None:
         "y": behavior_pos[(scorer, "LED_clean", "y")].values,
     })
     trajectory = trajectory.dropna()
-    trajectory["beh_frame_index"] = range(len(trajectory))
+    trajectory["frame_index"] = range(len(trajectory))
     
     # Load events
     event_place = pd.read_csv(assets_dir / "reference_event_place.csv")
     unit_id = event_place["unit_id"].iloc[0]
-    unit_events = event_place[event_place["unit_id"] == unit_id][["x", "y", "s", "beh_frame_index"]].dropna()
+    unit_events = event_place[event_place["unit_id"] == unit_id][["x", "y", "s", "frame_index"]].dropna()
     unit_events = unit_events[
-        (unit_events["beh_frame_index"] >= 0) & 
-        (unit_events["beh_frame_index"] < len(trajectory))
+        (unit_events["frame_index"] >= 0) & 
+        (unit_events["frame_index"] < len(trajectory))
     ]
 
     si, p_val, shuffled = compute_spatial_information(
@@ -192,16 +163,16 @@ def test_compute_unit_analysis(assets_dir: Path) -> None:
         "y": behavior_pos[(scorer, "LED_clean", "y")].values,
     })
     trajectory = trajectory.dropna()
-    trajectory["beh_frame_index"] = range(len(trajectory))
+    trajectory["frame_index"] = range(len(trajectory))
     
     # Load events - same filtering as reference generation
     event_place = pd.read_csv(assets_dir / "reference_event_place.csv")
     unit_id = int(event_place["unit_id"].iloc[0])
     
-    # Filter same way as reference: valid beh_frame_index range
+    # Filter same way as reference: valid frame_index range
     df_filtered = event_place[
-        (event_place["beh_frame_index"] >= 0) & 
-        (event_place["beh_frame_index"] < len(trajectory))
+        (event_place["frame_index"] >= 0) & 
+        (event_place["frame_index"] < len(trajectory))
     ].copy()
     
     # Also filter by spatial bounds (same as reference rate_map generation)

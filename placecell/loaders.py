@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from placecell.behavior import _load_behavior_xy, compute_behavior_speed, filter_by_speed
+from placecell.behavior import _load_behavior_xy
 from placecell.log import init_logger
 from placecell.neural import load_calcium_traces
 
@@ -69,13 +69,15 @@ def load_behavior_data(
     behavior_position: Path,
     behavior_timestamp: Path,
     bodypart: str,
-    speed_window_frames: int,
-    speed_threshold: float,
-    time_range: tuple[float, float] | None = None,
+    *,
     x_col: str = "x",
     y_col: str = "y",
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Load behavior data and compute speed-filtered trajectory.
+) -> pd.DataFrame:
+    """Load the raw behavior trajectory at behavior rate.
+
+    Returns ``frame_index, x, y, unix_time``. Speed is computed downstream
+    at the neural sample rate against the canonical neural-rate table, so
+    no speed column is attached here.
 
     Parameters
     ----------
@@ -85,23 +87,8 @@ def load_behavior_data(
         Path to behavior timestamp CSV file.
     bodypart:
         Body part name to use for trajectory.
-    speed_window_frames:
-        Window size for speed computation.
-    speed_threshold:
-        Minimum speed threshold.
-    time_range:
-        Optional (start_time, end_time) to restrict behavior data.
-        Use :func:`compute_overlap_time_range` to get this from neural/behavior timestamps.
-    x_col:
-        Coordinate column name for the x-axis in the behavior CSV.
-    y_col:
-        Coordinate column name for the y-axis in the behavior CSV.
-
-    Returns
-    -------
-    tuple[pd.DataFrame, pd.DataFrame]
-        (trajectory_with_speed, trajectory_filtered) - full trajectory with speed
-        and speed-filtered trajectory.
+    x_col, y_col:
+        Coordinate column names in the behavior CSV.
     """
     if not behavior_position.exists():
         raise FileNotFoundError(
@@ -118,27 +105,13 @@ def load_behavior_data(
         behavior_position, bodypart=bodypart, x_col=x_col, y_col=y_col
     )
     behavior_timestamps = pd.read_csv(behavior_timestamp)
-
-    trajectory_with_speed = compute_behavior_speed(
-        positions=full_trajectory,
-        timestamps=behavior_timestamps,
-        window_frames=speed_window_frames,
+    return (
+        full_trajectory.merge(
+            behavior_timestamps[["frame_index", "unix_time"]], on="frame_index", how="inner"
+        )
+        .sort_values("frame_index")
+        .reset_index(drop=True)
     )
-
-    if time_range is not None:
-        t_start, t_end = time_range
-        mask = (trajectory_with_speed["unix_time"] >= t_start) & (
-            trajectory_with_speed["unix_time"] <= t_end
-        )
-        n_before = len(trajectory_with_speed)
-        trajectory_with_speed = trajectory_with_speed[mask].reset_index(drop=True)
-        logger.info(
-            f"Trimmed behavior to overlap window: {len(trajectory_with_speed)}/{n_before} frames"
-        )
-
-    trajectory_filtered = filter_by_speed(trajectory_with_speed, speed_threshold)
-
-    return trajectory_with_speed, trajectory_filtered
 
 
 def load_visualization_data(

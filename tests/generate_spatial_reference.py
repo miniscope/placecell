@@ -37,15 +37,15 @@ occupancy, valid_mask, x_edges, y_edges = compute_occupancy_map(
 event_place = pd.read_csv(assets / "reference_event_place.csv")
 unit_id = event_place["unit_id"].iloc[0]
 
-# Create trajectory with beh_frame_index
+# Create trajectory with frame_index
 trajectory_si = trajectory.copy()
-trajectory_si["beh_frame_index"] = range(len(trajectory_si))
+trajectory_si["frame_index"] = range(len(trajectory_si))
 
 unit_events = event_place[event_place["unit_id"] == unit_id].copy()
-unit_events = unit_events[["x", "y", "s", "beh_frame_index"]].dropna()
+unit_events = unit_events[["x", "y", "s", "frame_index"]].dropna()
 unit_events = unit_events[
-    (unit_events["beh_frame_index"] >= 0) & 
-    (unit_events["beh_frame_index"] < len(trajectory_si))
+    (unit_events["frame_index"] >= 0) & 
+    (unit_events["frame_index"] < len(trajectory_si))
 ]
 # Also filter by spatial bounds
 unit_events = unit_events[

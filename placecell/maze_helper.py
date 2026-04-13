@@ -107,7 +107,15 @@ def serialize_arm_position(
         and ``arm_index``.
     """
     arm_set = set(arm_order)
-    tp = pd.to_numeric(trajectory[arm_position_column], errors="coerce")
+    tp_raw = trajectory[arm_position_column]
+    tp = pd.to_numeric(tp_raw, errors="coerce")
+    n_coerced = int(tp_raw.notna().sum() - tp.notna().sum())
+    if n_coerced:
+        logger.warning(
+            "%d non-numeric '%s' value(s) coerced to NaN.",
+            n_coerced,
+            arm_position_column,
+        )
     mask = trajectory[zone_column].isin(arm_set) & tp.notna()
     df = trajectory[mask].copy()
     df[arm_position_column] = tp[mask]
@@ -300,7 +308,9 @@ def filter_complete_traversals(
 
 def compute_speed_1d(
     trajectory: pd.DataFrame,
-    window_frames: int = 5,
+    *,
+    window_seconds: float,
+    sample_rate_hz: float,
 ) -> pd.DataFrame:
     """Compute 1D speed along the arm axis using a centered window.
 
@@ -316,14 +326,17 @@ def compute_speed_1d(
     trajectory:
         DataFrame with pos_1d, arm_index, unix_time, frame_index columns.
         Must be arm-only (output of ``serialize_arm_position``).
-    window_frames:
-        Total span of the speed window (half on each side) in *real*
-        frame numbers.
+    window_seconds:
+        Centered window span (seconds).
+    sample_rate_hz:
+        Trajectory sampling rate, used to convert ``window_seconds`` to
+        a frame count.
 
     Returns
     -------
     pd.DataFrame with ``speed_1d`` column added.
     """
+    window_frames = max(1, int(round(window_seconds * sample_rate_hz)))
     df = trajectory.sort_values("frame_index").copy()
     pos = df["pos_1d"].values
     t = df["unix_time"].values
@@ -354,26 +367,3 @@ def compute_speed_1d(
     speed[valid] = dpos[valid] / dt[valid]
     df["speed_1d"] = speed
     return df
-
-
-def filter_arm_by_speed(
-    trajectory: pd.DataFrame,
-    speed_threshold: float,
-) -> pd.DataFrame:
-    """Filter 1D trajectory to frames above speed threshold.
-
-    Parameters
-    ----------
-    trajectory:
-        DataFrame with speed_1d and frame_index columns.
-    speed_threshold:
-        Minimum 1D speed to keep.
-
-    Returns
-    -------
-    Filtered DataFrame with frame_index renamed to beh_frame_index.
-    """
-    filtered = trajectory[trajectory["speed_1d"] >= speed_threshold].copy()
-    filtered = filtered.sort_values("frame_index")
-    filtered = filtered.rename(columns={"frame_index": "beh_frame_index"})
-    return filtered

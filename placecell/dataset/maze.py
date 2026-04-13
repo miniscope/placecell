@@ -11,7 +11,6 @@ from placecell.analysis.spatial_1d import (
     compute_occupancy_map_1d,
     compute_unit_analysis_1d,
 )
-from placecell.behavior import build_event_place_dataframe
 from placecell.config import SpatialMap1DConfig, ZoneDetectionConfig
 from placecell.dataset.base import BasePlaceCellDataset, UnitResult
 from placecell.log import init_logger
@@ -19,10 +18,14 @@ from placecell.maze_helper import (
     assign_traversal_direction,
     compute_arm_lengths,
     compute_speed_1d,
-    filter_arm_by_speed,
     filter_complete_traversals,
     load_graph_polylines,
     serialize_arm_position,
+)
+from placecell.temporal_alignment import (
+    build_canonical_table,
+    derive_event_place_from_canonical,
+    filter_canonical_by_speed,
 )
 
 logger = init_logger(__name__)
@@ -90,12 +93,14 @@ class MazeDataset(BasePlaceCellDataset):
             input_csv=self.behavior_position_path,
             output_csv=zone_csv,
             zone_config_path=self.behavior_graph_path,
+            behavior_timestamp_csv=self.behavior_timestamp_path,
+            neural_timestamp_csv=self.neural_timestamp_path,
             bodypart=dcfg.bodypart,
             arm_max_distance=zd.arm_max_distance,
             min_confidence=zd.min_confidence,
             min_confidence_forbidden=zd.min_confidence_forbidden,
-            min_frames_same=zd.min_frames_same,
-            min_frames_forbidden=zd.min_frames_forbidden,
+            min_seconds_same=zd.min_seconds_same,
+            min_seconds_forbidden=zd.min_seconds_forbidden,
             room_decay_power=zd.room_decay_power,
             arm_decay_power=zd.arm_decay_power,
             soft_boundary=zd.soft_boundary,
@@ -140,29 +145,40 @@ class MazeDataset(BasePlaceCellDataset):
         zone_col = dcfg.zone_column
         tp_col = dcfg.arm_position_column
 
-        frame_index = df.iloc[:, 0].values
+        # zone_tracking is now indexed by frame_index (one row per neural
+        # frame) with x, y, zone, arm_position, neural_time columns derived
+        # from the Hampel-filtered raw trajectory interpolated onto neural
+        # timestamps inside detect_zones_from_csv.
+        frame_index = df.iloc[:, 0].values.astype(np.int64)
         x = df[(scorer, bp, "x")].values.astype(float)
         y = df[(scorer, bp, "y")].values.astype(float)
         zone = df[(scorer, bp, zone_col)].values
-        arm_pos = pd.to_numeric(df[(scorer, bp, tp_col)].values, errors="coerce")
-
-        # Merge with behavior timestamps for unix_time
-        timestamps = pd.read_csv(self.behavior_timestamp_path)
-        ts_lookup = timestamps.set_index("frame_index")["unix_time"]
-        unix_time = ts_lookup.reindex(frame_index).values
+        arm_pos_raw = df[(scorer, bp, tp_col)]
+        arm_pos = pd.to_numeric(arm_pos_raw.values, errors="coerce")
+        n_coerced = int(arm_pos_raw.notna().sum() - np.isfinite(arm_pos).sum())
+        if n_coerced:
+            logger.warning(
+                "%d non-numeric '%s' value(s) coerced to NaN in zone_tracking CSV.",
+                n_coerced,
+                tp_col,
+            )
+        neural_time = df[(scorer, bp, "neural_time")].values.astype(float)
 
         self.trajectory = pd.DataFrame(
             {
                 "frame_index": frame_index,
                 "x": x,
                 "y": y,
-                "unix_time": unix_time,
+                "unix_time": neural_time,
                 "speed": 0.0,  # placeholder; maze uses speed_1d instead
                 zone_col: zone,
                 tp_col: arm_pos,
             }
         )
-        logger.info("Loaded trajectory from zone_tracking: %d frames", len(self.trajectory))
+        logger.info(
+            "Loaded trajectory from zone_tracking: %d neural frames",
+            len(self.trajectory),
+        )
 
     def preprocess_behavior(self) -> None:
         """Serialize to 1D, compute speed, and filter.
@@ -220,16 +236,13 @@ class MazeDataset(BasePlaceCellDataset):
                 zone_column=dcfg.zone_column,
             )
 
-        # Compute 1D speed
+        # Compute 1D speed at the neural sample rate (the trajectory has
+        # already been interpolated onto neural timestamps inside
+        # detect_zones_from_csv).
         self.trajectory_1d = compute_speed_1d(
             self.trajectory_1d,
-            window_frames=bcfg.speed_window_frames,
-        )
-
-        # Speed filter
-        self.trajectory_1d_filtered = filter_arm_by_speed(
-            self.trajectory_1d,
-            speed_threshold=bcfg.speed_threshold,
+            window_seconds=bcfg.speed_window_seconds,
+            sample_rate_hz=self.neural_fps,
         )
 
         # Compute pos_range and arm_boundaries
@@ -251,10 +264,8 @@ class MazeDataset(BasePlaceCellDataset):
             self.arm_boundaries = [float(i) for i in range(n_segments + 1)]
 
         logger.info(
-            "1D trajectory: %d frames (%d after speed filter), %d segments%s, "
-            "pos_range=(%.1f, %.1f)",
+            "1D trajectory: %d frames, %d segments%s, pos_range=(%.1f, %.1f)",
             len(self.trajectory_1d),
-            len(self.trajectory_1d_filtered),
             n_segments,
             " (direction split)" if scfg.split_by_direction else "",
             self.pos_range[0],
@@ -262,43 +273,100 @@ class MazeDataset(BasePlaceCellDataset):
         )
 
     def match_events(self) -> None:
-        """Match neural events to behavior frames, then add 1D position.
+        """Build the canonical neural-rate table for the maze pipeline.
 
-        Unlike the parent, does NOT filter by 2D speed — the maze pipeline
-        filters by 1D arm speed in analyze_units() instead.
+        After this call:
+            - ``self.canonical`` holds one row per neural frame with
+              columns ``frame_index, neural_time, x, y, pos_1d,
+              arm_index, [direction], speed_1d, s_unit_*``.
+            - ``self.trajectory_1d_filtered`` is the speed-filtered
+              canonical view restricted to arm frames, with
+              ``frame_index`` aliased to ``frame_index``.
+            - ``self.event_place`` is the long-format event table
+              derived from the same speed-filtered view.
         """
-        if self.event_index is None:
+        if not self.S_list:
             raise RuntimeError("Call deconvolve() first.")
-        if self.trajectory is None:
-            raise RuntimeError("Call load() first.")
-
-        self.event_place = build_event_place_dataframe(
-            event_index=self.event_index,
-            neural_timestamp_path=self.neural_timestamp_path,
-            behavior_with_speed=self.trajectory,
-            behavior_fps=self.data_cfg.behavior_fps,
-            speed_threshold=0.0,  # no 2D speed filter; use speed_1d later
-        )
-
         if self.trajectory_1d is None:
             raise RuntimeError("Call preprocess_behavior() first.")
 
-        # Add pos_1d and speed_1d to event_place by joining on behavior frame
-        lookup_cols = ["frame_index", "pos_1d", "arm_index", "speed_1d"]
-        if "direction" in self.trajectory_1d.columns:
-            lookup_cols.append("direction")
-        pos_lookup = self.trajectory_1d[lookup_cols].rename(
-            columns={"frame_index": "beh_frame_index"}
-        )
-        self.event_place = self.event_place.merge(pos_lookup, on="beh_frame_index", how="left")
+        bcfg = self.cfg.behavior
 
-        # Drop events not in arms (pos_1d will be NaN)
-        n_before = len(self.event_place)
-        self.event_place = self.event_place.dropna(subset=["pos_1d"]).reset_index(drop=True)
+        # The 1D trajectory is already at neural rate (one row per
+        # arm-frame, indexed by frame_index). Build a behavior-at-neural
+        # table from it; non-arm frames are filled with NaN.
+        n_neural = len(self.S_list[0])
+        beh_cols = ["x", "y", "pos_1d", "arm_index", "speed_1d"]
+        if "direction" in self.trajectory_1d.columns:
+            beh_cols.append("direction")
+        behavior_at_neural = pd.DataFrame(
+            {
+                "frame_index": np.arange(n_neural, dtype=np.int64),
+                "neural_time": np.full(n_neural, np.nan, dtype=float),
+            }
+        )
+        for col in beh_cols:
+            behavior_at_neural[col] = np.nan if col != "direction" else None
+        # Fill in the arm-frame rows.
+        idx = self.trajectory_1d["frame_index"].to_numpy().astype(np.int64)
+        in_range = (idx >= 0) & (idx < n_neural)
+        idx = idx[in_range]
+        traj_arm = self.trajectory_1d.loc[in_range].reset_index(drop=True)
+        behavior_at_neural.loc[idx, "neural_time"] = traj_arm["unix_time"].to_numpy()
+        for col in beh_cols:
+            if col in traj_arm.columns:
+                behavior_at_neural.loc[idx, col] = traj_arm[col].to_numpy()
+
+        traces = {int(uid): self.S_list[i] for i, uid in enumerate(self.good_unit_ids)}
+        self.canonical = build_canonical_table(
+            behavior_at_neural,
+            traces,
+            drop_uncovered=False,
+        )
         logger.info(
-            "1D event matching: %d/%d events in arms",
+            "Canonical neural-rate table: %d frames (%d arm), %d units",
+            len(self.canonical),
+            int(self.canonical["pos_1d"].notna().sum()),
+            len(self.good_unit_ids),
+        )
+
+        # Long-format event table over the *unfiltered* canonical, used by
+        # the notebook browser (which shows all events including low-speed
+        # and non-arm frames).
+        self.event_index = derive_event_place_from_canonical(
+            filter_canonical_by_speed(
+                self.canonical,
+                speed_column="speed_1d",
+                speed_threshold=0.0,
+                drop_below_threshold=False,
+            ),
+            position_columns=("x", "y"),
+            speed_column="speed_1d",
+        )
+
+        # Speed-filtered view, restricted to arm frames.
+        arm_canonical = self.canonical.dropna(subset=["pos_1d"]).reset_index(drop=True)
+        self.trajectory_1d_filtered = filter_canonical_by_speed(
+            arm_canonical,
+            speed_column="speed_1d",
+            speed_threshold=bcfg.speed_threshold,
+        )
+
+        extras = ("pos_1d", "arm_index")
+        if "direction" in self.canonical.columns:
+            extras = (*extras, "direction")
+        self.event_place = derive_event_place_from_canonical(
+            self.trajectory_1d_filtered,
+            position_columns=("x", "y"),
+            speed_column="speed_1d",
+            extra_columns=extras,
+        )
+        logger.info(
+            "1D speed filter (%.1f mm/s): %d/%d arm frames; %d events",
+            bcfg.speed_threshold,
+            len(self.trajectory_1d_filtered),
+            len(arm_canonical),
             len(self.event_place),
-            n_before,
         )
 
     def compute_occupancy(self) -> None:

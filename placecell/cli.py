@@ -261,6 +261,8 @@ def detect_zones_cmd(
 
     input_csv = str(data_dir / data_cfg.behavior_position)
     zone_config = str(data_dir / data_cfg.behavior_graph)
+    behavior_ts = str(data_dir / data_cfg.behavior_timestamp)
+    neural_ts = str(data_dir / data_cfg.neural_timestamp)
 
     # Determine output path. The default mirrors the runtime default in
     # MazeDataset.from_yaml so the analysis pipeline will pick the same file
@@ -290,12 +292,14 @@ def detect_zones_cmd(
         input_csv=input_csv,
         output_csv=output_path,
         zone_config_path=zone_config,
+        behavior_timestamp_csv=behavior_ts,
+        neural_timestamp_csv=neural_ts,
         bodypart=data_cfg.bodypart,
         arm_max_distance=zd.arm_max_distance,
         min_confidence=zd.min_confidence,
         min_confidence_forbidden=zd.min_confidence_forbidden,
-        min_frames_same=zd.min_frames_same,
-        min_frames_forbidden=zd.min_frames_forbidden,
+        min_seconds_same=zd.min_seconds_same,
+        min_seconds_forbidden=zd.min_seconds_forbidden,
         room_decay_power=zd.room_decay_power,
         arm_decay_power=zd.arm_decay_power,
         soft_boundary=zd.soft_boundary,

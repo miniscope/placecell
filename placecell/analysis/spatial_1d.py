@@ -239,11 +239,11 @@ def compute_spatial_information_1d(
         actual_si = 0.0
 
     # Shuffling test
-    traj_frames = trajectory_df["beh_frame_index"].values
+    traj_frames = trajectory_df["frame_index"].values
     if si_weight_mode == "binary":
-        u_grouped = unit_events.groupby("beh_frame_index").size()
+        u_grouped = unit_events.groupby("frame_index").size()
     else:
-        u_grouped = unit_events.groupby("beh_frame_index")["s"].sum()
+        u_grouped = unit_events.groupby("frame_index")["s"].sum()
     aligned_events = u_grouped.reindex(traj_frames, fill_value=0).values.astype(float)
 
     n_frames = len(aligned_events)
@@ -326,7 +326,7 @@ def compute_stability_score_1d(
         unit_events["s"] = 1.0
 
     # Split trajectory into interleaved temporal blocks
-    all_frames = trajectory_df["beh_frame_index"].values
+    all_frames = trajectory_df["frame_index"].values
     frame_min = all_frames.min()
     frame_max = all_frames.max()
     span = frame_max - frame_min
@@ -341,7 +341,7 @@ def compute_stability_score_1d(
     traj_first_mask = traj_block_ids % 2 == 0
     traj_second_mask = ~traj_first_mask
 
-    event_frames = unit_events["beh_frame_index"].values
+    event_frames = unit_events["frame_index"].values
     event_block_ids = np.floor((event_frames - frame_min - offset) / block_width).astype(int)
     event_block_ids = np.clip(event_block_ids, 0, n_split_blocks - 1)
     events_first_mask = event_block_ids % 2 == 0
@@ -427,8 +427,8 @@ def compute_stability_score_1d(
         stab_seed = random_seed + 224737 if random_seed is not None else None
         rng = np.random.RandomState(stab_seed)
 
-        traj_frames = trajectory_df["beh_frame_index"].values
-        u_grouped = unit_events.groupby("beh_frame_index")["s"].sum()
+        traj_frames = trajectory_df["frame_index"].values
+        u_grouped = unit_events.groupby("frame_index")["s"].sum()
         aligned_events = u_grouped.reindex(traj_frames, fill_value=0).values.astype(float)
 
         traj_pos = trajectory_df[pos_column].values

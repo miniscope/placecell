@@ -10,7 +10,7 @@ neural:
 behavior:
   type: arena
   speed_threshold: 10.0  # mm/s
-  speed_window_frames: 5
+  speed_window_seconds: 0.25
   hampel_window_frames: 7  # Centered window for position outlier (Hampel) filter
   hampel_n_sigmas: 3.0  # MAD-scaled threshold (~99.7% Gaussian band)
   spatial_map_2d:

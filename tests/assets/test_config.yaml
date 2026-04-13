@@ -7,7 +7,7 @@ neural:
 behavior:
   type: arena
   speed_threshold: 50.0
-  speed_window_frames: 5
+  speed_window_seconds: 0.25
   spatial_map_2d:
     bins: 30
     min_occupancy: 0.1

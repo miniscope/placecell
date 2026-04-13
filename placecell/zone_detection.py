@@ -1,6 +1,5 @@
 """Zone detection from position tracking data."""
 
-import argparse
 import shutil
 from pathlib import Path
 
@@ -17,6 +16,7 @@ from placecell.geometry import (
     prepare_zone_geometry,
 )
 from placecell.log import init_logger
+from placecell.temporal_alignment import interpolate_behavior_onto_neural
 
 logger = init_logger(__name__)
 _EMPTY_TRANSITIONS: frozenset[str] = frozenset()
@@ -28,11 +28,12 @@ def detect_zones(
     zone_polygons: dict[str, np.ndarray],
     zone_types: dict[str, str],
     zone_graph: dict[str, list[str]],
+    sample_rate_hz: float,
     arm_max_distance: float = 60.0,
     min_confidence: float = 0.5,
     min_confidence_forbidden: float = 0.8,
-    min_frames_same: int = 1,
-    min_frames_forbidden: int = 3,
+    min_seconds_same: float = 0.05,
+    min_seconds_forbidden: float = 0.15,
     room_decay_power: float = 2.0,
     arm_decay_power: float = 0.5,
     soft_boundary: bool = True,
@@ -50,16 +51,21 @@ def detect_zones(
         Dict mapping zone name to "room" or "arm".
     zone_graph:
         Bidirectional adjacency dict (zone -> list of connected zones).
+    sample_rate_hz:
+        Sampling rate of ``x_coords``/``y_coords`` (Hz). Used to convert
+        ``min_seconds_*`` thresholds into frame counts internally.
     arm_max_distance:
         Maximum distance from arm centerline for classification.
     min_confidence:
         Minimum confidence for zone transitions.
     min_confidence_forbidden:
         Minimum confidence for forbidden (non-adjacent) transitions.
-    min_frames_same:
-        Minimum frames in current zone before allowing transition.
-    min_frames_forbidden:
-        Minimum consecutive frames for forbidden transition override.
+    min_seconds_same:
+        Minimum dwell time (seconds) in the current zone before allowing
+        a transition.
+    min_seconds_forbidden:
+        Minimum dwell time (seconds) of consecutive forbidden-zone
+        evidence before accepting a forbidden transition.
     room_decay_power:
         Exponent for room boundary probability decay.
     arm_decay_power:
@@ -71,6 +77,10 @@ def detect_zones(
     -------
     DataFrame with columns: zone, x_pinned, y_pinned, arm_position.
     """
+    if sample_rate_hz <= 0:
+        raise ValueError("sample_rate_hz must be positive.")
+    min_frames_same = max(1, int(round(min_seconds_same * sample_rate_hz)))
+    min_frames_forbidden = max(1, int(round(min_seconds_forbidden * sample_rate_hz)))
     prepared_geometry = prepare_zone_geometry(zone_polygons, zone_types)
     valid_transitions = {
         zone_name: {
@@ -400,12 +410,14 @@ def detect_zones_from_csv(
     input_csv: str | Path,
     output_csv: str | Path,
     zone_config_path: str | Path,
+    behavior_timestamp_csv: str | Path,
+    neural_timestamp_csv: str | Path,
     bodypart: str | None = None,
     arm_max_distance: float = 60.0,
     min_confidence: float = 0.5,
     min_confidence_forbidden: float = 0.8,
-    min_frames_same: int = 1,
-    min_frames_forbidden: int = 3,
+    min_seconds_same: float = 0.05,
+    min_seconds_forbidden: float = 0.15,
     room_decay_power: float = 2.0,
     arm_decay_power: float = 0.5,
     soft_boundary: bool = True,
@@ -420,81 +432,77 @@ def detect_zones_from_csv(
 ) -> None:
     """Detect zones from a DLC-format tracking CSV.
 
+    The pipeline is: read raw behavior → Hampel jump removal → linear
+    interpolation onto the neural timestamp grid → project the
+    interpolated coordinates onto the maze graph. The resulting CSV is
+    indexed by **neural frame** so that all downstream analysis lives on
+    a single common clock.
+
     Parameters
     ----------
     input_csv:
-        Input CSV with x, y coordinates (DLC multi-index format).
+        Input behavior CSV with x, y coordinates (DLC multi-index format).
     output_csv:
-        Output CSV with zone information added.
+        Output CSV with zone columns added (neural-rate).
     zone_config_path:
         Path to combined zone config YAML.
+    behavior_timestamp_csv:
+        CSV with ``frame_index, unix_time`` columns for the behavior CSV.
+    neural_timestamp_csv:
+        CSV with ``frame, timestamp_first, timestamp_last`` columns; the
+        midpoint of those two timestamps is used as the neural sample time.
     bodypart:
-        Body part name to use. If None, uses the first bodypart found.
+        Body part name to use. If ``None``, uses the first bodypart found.
     arm_max_distance:
-        Maximum distance from arm centerline for classification.
+        Maximum distance from arm centerline for arm classification.
     min_confidence:
         Minimum confidence for zone transitions.
     min_confidence_forbidden:
-        Minimum confidence for forbidden transitions.
-    min_frames_same:
-        Minimum frames in zone before allowing transition.
-    min_frames_forbidden:
-        Minimum consecutive frames for forbidden transition.
-    room_decay_power:
-        Exponent for room boundary probability decay.
-    arm_decay_power:
-        Exponent for arm boundary probability decay.
-    soft_boundary:
-        Use fuzzy distance-based boundaries.
+        Minimum confidence for forbidden (non-adjacent) transitions.
+    min_seconds_same:
+        Minimum dwell time (seconds) in the current zone before allowing
+        a transition. Converted to frames at the neural sample rate.
+    min_seconds_forbidden:
+        Minimum dwell time (seconds) of consecutive forbidden-zone
+        evidence before accepting a forbidden transition.
+    room_decay_power, arm_decay_power, soft_boundary:
+        Soft-boundary tuning for the per-zone probability function.
     hampel_window_frames:
-        Centered rolling window (frames) for the raw-position Hampel filter
-        applied before projection.  Must be >= 3.
+        Centered rolling window (frames at behavior rate) for the
+        raw-position Hampel filter applied before interpolation.
     hampel_n_sigmas:
         MAD-scaled threshold for the Hampel filter.
     zone_connections:
-        Zone adjacency graph (room → list of arms).  If provided,
-        overrides any connections in the zone config file.
-    video_path:
-        Path to behavior video. If provided, exports an annotated video.
-    video_output:
-        Output video path. Defaults to ``zone_detection.mp4`` next to output CSV.
-    interpolate:
-        Frame subsampling factor for video export (default 5).
-    playback_speed:
-        Playback speed multiplier for exported zone video.
+        Zone adjacency graph override.
+    video_path, video_output, interpolate, playback_speed:
+        Optional zone-detection validation video parameters.
     """
     logger.info("Loading position data from %s", input_csv)
 
-    # Read DLC-format CSV
+    # Read DLC-format behavior CSV
     df = pd.read_csv(input_csv, header=[0, 1, 2], index_col=0)
-
     scorer = df.columns.get_level_values(0)[0]
     if bodypart is None:
         bodypart = df.columns.get_level_values(1)[0]
-
     x_col = (scorer, bodypart, "x")
     y_col = (scorer, bodypart, "y")
-
     if x_col not in df.columns or y_col not in df.columns:
         raise ValueError(
             f"Could not find x, y columns for bodypart '{bodypart}'. "
             f"Available: {sorted(set(df.columns.get_level_values(1)))}"
         )
 
+    behavior_frame_index = df.index.to_numpy()
     x_raw = df[x_col].values.astype(float)
     y_raw = df[y_col].values.astype(float)
 
-    # Hampel-filter raw positions before projection so a single tracker glitch
-    # cannot bleed into the closest-arm classification or arm_position output.
-    # The raw (x, y) are preserved in the output CSV; only the projection
-    # operates on the cleaned coordinates.
+    # Hampel-filter the raw behavior trajectory at behavior rate, then
+    # linearly interpolate onto the neural timestamp grid.
     cleaned_xy, n_jumps = remove_position_jumps(
         pd.DataFrame({"x": x_raw, "y": y_raw}),
         window_frames=hampel_window_frames,
         n_sigmas=hampel_n_sigmas,
     )
-    x_coords = cleaned_xy["x"].to_numpy()
-    y_coords = cleaned_xy["y"].to_numpy()
     logger.info(
         "Hampel jump removal: %d frames interpolated (window=%d, n_sigmas=%.1f)",
         n_jumps,
@@ -502,9 +510,60 @@ def detect_zones_from_csv(
         hampel_n_sigmas,
     )
 
-    zone_polygons, zone_types, file_graph = load_zone_config(zone_config_path)
+    behavior_ts = pd.read_csv(behavior_timestamp_csv)
+    if "frame_index" not in behavior_ts.columns or "unix_time" not in behavior_ts.columns:
+        raise ValueError(
+            f"behavior_timestamp_csv must have 'frame_index' and 'unix_time' columns. "
+            f"Got: {list(behavior_ts.columns)}"
+        )
+    behavior_at_beh = pd.DataFrame(
+        {
+            "frame_index": behavior_frame_index,
+            "x": cleaned_xy["x"].to_numpy(),
+            "y": cleaned_xy["y"].to_numpy(),
+        }
+    ).merge(behavior_ts[["frame_index", "unix_time"]], on="frame_index", how="left")
 
-    # Data config connections override file connections
+    neural_ts = pd.read_csv(neural_timestamp_csv)
+    if not {"frame", "timestamp_first"}.issubset(neural_ts.columns):
+        raise ValueError(
+            f"neural_timestamp_csv must have 'frame' and 'timestamp_first' "
+            f"columns. Got: {list(neural_ts.columns)}"
+        )
+    # timestamp_first is the canonical neural sample time; timestamp_last
+    # is the end-of-exposure stamp and is occasionally noisy, so we ignore
+    # it here.
+    neural_time = neural_ts["timestamp_first"].to_numpy()
+
+    interpolated = interpolate_behavior_onto_neural(
+        behavior_at_beh,
+        neural_time,
+        columns=["x", "y"],
+    )
+    # After validation inside interpolate_behavior_onto_neural, frame_index
+    # contains the original neural frame numbers of surviving (non-excluded)
+    # frames, and neural_time is the corresponding monotonic timestamp array.
+    neural_time = interpolated["neural_time"].to_numpy()
+    kept_frame_idx = interpolated["frame_index"].to_numpy()
+    n_uncovered = int(interpolated[["x", "y"]].isna().any(axis=1).sum())
+    if n_uncovered:
+        logger.info(
+            "Interpolation: %d/%d neural frames have no behavior coverage",
+            n_uncovered,
+            len(interpolated),
+        )
+    x_all = interpolated["x"].to_numpy(copy=True)
+    y_all = interpolated["y"].to_numpy(copy=True)
+    n_all = len(x_all)
+
+    # Only run the state machine on frames that have valid (non-NaN)
+    # coordinates. Frames with no behavior coverage are left as
+    # Unknown / NaN in the output — no fabricated positions.
+    valid_mask = np.isfinite(x_all) & np.isfinite(y_all)
+    x_valid = x_all[valid_mask]
+    y_valid = y_all[valid_mask]
+
+    zone_polygons, zone_types, file_graph = load_zone_config(zone_config_path)
     if zone_connections is not None:
         from placecell.geometry import build_zone_graph
 
@@ -512,58 +571,82 @@ def detect_zones_from_csv(
     else:
         zone_graph = file_graph
 
-    logger.info("Loaded %d position samples, %d zones", len(x_coords), len(zone_polygons))
-    result = detect_zones(
-        x_coords,
-        y_coords,
+    valid_neural_time = neural_time[valid_mask]
+    sample_rate_hz = (
+        float(1.0 / np.median(np.diff(valid_neural_time))) if len(valid_neural_time) > 1 else 20.0
+    )
+    logger.info(
+        "Loaded %d neural samples (%d with behavior coverage, ~%.2f Hz), %d zones",
+        n_all,
+        len(x_valid),
+        sample_rate_hz,
+        len(zone_polygons),
+    )
+    result_valid = detect_zones(
+        x_valid,
+        y_valid,
         zone_polygons,
         zone_types,
         zone_graph,
+        sample_rate_hz=sample_rate_hz,
         arm_max_distance=arm_max_distance,
         min_confidence=min_confidence,
         min_confidence_forbidden=min_confidence_forbidden,
-        min_frames_same=min_frames_same,
-        min_frames_forbidden=min_frames_forbidden,
+        min_seconds_same=min_seconds_same,
+        min_seconds_forbidden=min_seconds_forbidden,
         room_decay_power=room_decay_power,
         arm_decay_power=arm_decay_power,
         soft_boundary=soft_boundary,
         progress_bar=progress_bar,
     )
 
+    # Expand valid-only results back to full length, filling gaps with
+    # NaN / "Unknown" so no data is fabricated for uncovered frames.
+    zone_out = np.full(n_all, "Unknown", dtype=object)
+    x_pinned_out = np.full(n_all, np.nan)
+    y_pinned_out = np.full(n_all, np.nan)
+    arm_pos_out = np.full(n_all, np.nan, dtype=object)
+    zone_out[valid_mask] = result_valid["zone"].to_numpy()
+    x_pinned_out[valid_mask] = result_valid["x_pinned"].to_numpy()
+    y_pinned_out[valid_mask] = result_valid["y_pinned"].to_numpy()
+    arm_pos_out[valid_mask] = result_valid["arm_position"].to_numpy()
+
     output_data = {
-        (scorer, bodypart, "x"): x_raw,
-        (scorer, bodypart, "y"): y_raw,
-        (scorer, bodypart, "x_pinned"): result["x_pinned"].values,
-        (scorer, bodypart, "y_pinned"): result["y_pinned"].values,
-        (scorer, bodypart, "zone"): result["zone"].values,
-        (scorer, bodypart, "arm_position"): result["arm_position"].values,
+        (scorer, bodypart, "x"): x_all,
+        (scorer, bodypart, "y"): y_all,
+        (scorer, bodypart, "x_pinned"): x_pinned_out,
+        (scorer, bodypart, "y_pinned"): y_pinned_out,
+        (scorer, bodypart, "zone"): zone_out,
+        (scorer, bodypart, "arm_position"): arm_pos_out,
+        (scorer, bodypart, "neural_time"): neural_time,
     }
-
-    # Include likelihood if it exists
-    likelihood_col = (scorer, bodypart, "likelihood")
-    if likelihood_col in df.columns:
-        output_data[likelihood_col] = df[likelihood_col].values
-
-    output_df = pd.DataFrame(output_data)
+    output_df = pd.DataFrame(output_data, index=kept_frame_idx)
     output_df.to_csv(output_csv)
     logger.info("Zone detection results saved to %s", output_csv)
 
-    # Print zone statistics
-    zone_counts = result["zone"].value_counts()
+    zone_counts = pd.Series(zone_out).value_counts()
     logger.info("Zone distribution:")
     for zone, count in zone_counts.items():
-        pct = 100 * count / len(result)
+        pct = 100 * count / len(zone_out)
         logger.info("  %s: %d frames (%.1f%%)", zone, count, pct)
 
-    # Export annotated video
     if video_path is not None:
         if video_output is None:
             video_output = Path(output_csv).parent / "zone_detection.mp4"
+        # Video export needs full-length arrays (one per neural frame).
+        result_full = pd.DataFrame(
+            {
+                "zone": zone_out,
+                "x_pinned": x_pinned_out,
+                "y_pinned": y_pinned_out,
+                "arm_position": arm_pos_out,
+            }
+        )
         export_zone_video(
             video_path=video_path,
-            x_coords=x_raw,
-            y_coords=y_raw,
-            result=result,
+            x_coords=x_all,
+            y_coords=y_all,
+            result=result_full,
             zone_polygons=zone_polygons,
             zone_types=zone_types,
             output_path=video_output,
@@ -571,46 +654,3 @@ def detect_zones_from_csv(
             playback_speed=playback_speed,
             progress_bar=progress_bar,
         )
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Detect zones from tracking CSV")
-    parser.add_argument("--input", "-i", required=True, help="Input tracking CSV")
-    parser.add_argument("--output", "-o", required=True, help="Output CSV")
-    parser.add_argument("--zone-config", "-z", required=True, help="Zone config YAML")
-    parser.add_argument("--bodypart", "-b", default=None, help="Body part name")
-    parser.add_argument(
-        "--arm-max-distance", type=float, default=60.0, help="Max arm distance (px)"
-    )
-    parser.add_argument(
-        "--min-confidence", type=float, default=0.5, help="Min transition confidence"
-    )
-    parser.add_argument(
-        "--min-confidence-forbidden",
-        type=float,
-        default=0.8,
-        help="Min forbidden transition confidence",
-    )
-    parser.add_argument(
-        "--min-frames-same", type=int, default=1, help="Min frames before transition"
-    )
-    parser.add_argument(
-        "--min-frames-forbidden",
-        type=int,
-        default=3,
-        help="Min consecutive frames for forbidden transition",
-    )
-
-    args = parser.parse_args()
-
-    detect_zones_from_csv(
-        input_csv=args.input,
-        output_csv=args.output,
-        zone_config_path=args.zone_config,
-        bodypart=args.bodypart,
-        arm_max_distance=args.arm_max_distance,
-        min_confidence=args.min_confidence,
-        min_confidence_forbidden=args.min_confidence_forbidden,
-        min_frames_same=args.min_frames_same,
-        min_frames_forbidden=args.min_frames_forbidden,
-    )

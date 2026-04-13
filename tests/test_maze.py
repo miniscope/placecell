@@ -6,9 +6,8 @@ import pytest
 
 from placecell.maze_helper import (
     assign_traversal_direction,
-    compute_speed_1d,
     compute_arm_lengths,
-    filter_arm_by_speed,
+    compute_speed_1d,
     serialize_arm_position,
 )
 
@@ -72,7 +71,7 @@ class TestComputeSpeed1D:
     def test_adds_speed_column(self):
         traj = _make_trajectory()
         traj_1d = serialize_arm_position(traj, arm_order=["Arm_1", "Arm_2", "Arm_3"])
-        result = compute_speed_1d(traj_1d, window_frames=3)
+        result = compute_speed_1d(traj_1d, window_seconds=0.15, sample_rate_hz=20.0)
         assert "speed_1d" in result.columns
 
     def test_cross_arm_speed_zero(self):
@@ -86,9 +85,10 @@ class TestComputeSpeed1D:
                 "unix_time": [0.0, 0.05, 0.10, 0.15, 0.20],
             }
         )
-        result = compute_speed_1d(df, window_frames=3)
-        # Centered window (half=1): frames whose window spans the arm
-        # boundary get speed=0 because the same-arm check fails.
+        # window_seconds=0.15 at 20 Hz → 3 frames (half=1).
+        result = compute_speed_1d(df, window_seconds=0.15, sample_rate_hz=20.0)
+        # Frames whose window spans the arm boundary get speed=0 because
+        # the same-arm check fails.
         # Frame 1: window [0,2], arm_index[2]=1 ≠ arm_index[1]=0 → speed=0
         # Frame 2: window [1,3], arm_index[1]=0 ≠ arm_index[2]=1 → speed=0
         assert result.iloc[1]["speed_1d"] == 0.0
@@ -210,23 +210,6 @@ class TestAssignTraversalDirection:
         n_before = len(traj_1d)
         result, _ = assign_traversal_direction(traj_1d, arm_order=arm_order)
         assert len(result) == n_before
-
-
-class TestFilterArmBySpeed:
-    def test_filters_by_threshold(self):
-        traj = _make_trajectory()
-        traj_1d = serialize_arm_position(traj, arm_order=["Arm_1", "Arm_2", "Arm_3"])
-        traj_1d = compute_speed_1d(traj_1d, window_frames=3)
-        result = filter_arm_by_speed(traj_1d, speed_threshold=0.5)
-        assert all(result["speed_1d"] >= 0.5)
-
-    def test_renames_frame_index(self):
-        traj = _make_trajectory()
-        traj_1d = serialize_arm_position(traj, arm_order=["Arm_1", "Arm_2", "Arm_3"])
-        traj_1d = compute_speed_1d(traj_1d, window_frames=3)
-        result = filter_arm_by_speed(traj_1d, speed_threshold=0.0)
-        assert "beh_frame_index" in result.columns
-        assert "frame_index" not in result.columns
 
 
 class TestComputeArmLengths:
