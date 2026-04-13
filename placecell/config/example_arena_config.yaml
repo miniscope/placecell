@@ -9,13 +9,13 @@ neural:
 
 behavior:
   type: arena
-  speed_threshold: 10.0  # mm/s
+  speed_threshold: 25.0  # mm/s
   speed_window_seconds: 0.25
-  hampel_window_frames: 7  # Centered window for position outlier (Hampel) filter
+  hampel_window_frames: 21  # Centered window for position outlier (Hampel) filter
   hampel_n_sigmas: 3.0  # MAD-scaled threshold (~99.7% Gaussian band)
   spatial_map_2d:
     bins: 50
-    min_occupancy: 0.025 # Minimum occupancy (in seconds) to include a bin in spatial map
+    min_occupancy: 0.05 # Minimum occupancy (in seconds) to include a bin in spatial map
     spatial_sigma: 3  # Gaussian smoothing (in bins) for occupancy and rate maps
     n_shuffles: 1000
     random_seed: 1

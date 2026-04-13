@@ -442,12 +442,16 @@ class ArenaDataset(BasePlaceCellDataset):
         with matplotlib.rc_context(rc):
             if self.trajectory_filtered is not None and self.occupancy_time is not None:
                 try:
+                    scfg = self.spatial
                     fig = plot_occupancy_preview(
                         self.trajectory_filtered,
                         self.occupancy_time,
                         self.valid_mask,
                         self.x_edges,
                         self.y_edges,
+                        behavior_fps=self.neural_fps,
+                        n_split_blocks=scfg.n_split_blocks,
+                        block_shift=scfg.block_shift,
                     )
                     fig.savefig(figures_dir / "occupancy.pdf", bbox_inches="tight")
                     _plt.close(fig)

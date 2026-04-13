@@ -91,11 +91,11 @@ class UnitResult:
     unit_data:
         Speed-filtered deconvolved events for this unit (subset of event_place).
     overall_rate:
-        Amplitude-weighted event rate in a.u./s (sum of deconvolved amplitudes / total time).
+        Activity rate in a.u./s (sum of deconvolved amplitudes / total time).
     event_count_rate:
-        Binary event count rate in 1/s (number of events / total time).
+        Event count rate in 1/s (number of events / total time).
     trace_data:
-        Raw calcium trace for this unit (None if traces unavailable).
+        Neural trace for this unit (None if traces unavailable).
     trace_times:
         Time axis in seconds corresponding to trace_data.
 

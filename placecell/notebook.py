@@ -716,7 +716,7 @@ def create_unit_browser_1d(
     Layout:
       Top-left:  Overlaid rate maps (1st half, 2nd half, full)
       Top-right: SI shuffle histogram (top) and stability shuffle histogram (bottom)
-      Bottom:    Calcium trace with event spikes
+      Bottom:    Neural trace with event spikes
 
     Parameters
     ----------

@@ -206,7 +206,7 @@ def plot_summary_scatter(
     ax2.set_ylim(lo, hi)
     ax2.set_aspect("equal")
 
-    # Panel 4: Amplitude rate (bars, left axis) + event count rate (line, right axis)
+    # Panel 4: Activity rate (bars, left axis) + event count rate (line, right axis)
     event_count_rates = np.array([unit_results[uid].event_count_rate for uid in unit_ids])
     has_rates = np.any(overall_rates > 0)
     if has_rates:
@@ -219,10 +219,10 @@ def plot_summary_scatter(
             edgecolor="none",
             width=1.0,
             alpha=0.6,
-            label="Amplitude rate",
+            label="Activity rate",
         )
         ax4.set_xlim(-0.5, len(sort_idx) - 0.5)
-        ax4.set_ylabel("Amplitude rate (a.u./s)", fontsize=10, color="steelblue")
+        ax4.set_ylabel("Activity rate (a.u./s)", fontsize=10, color="steelblue")
         ax4.tick_params(axis="y", labelcolor="steelblue")
 
         ax4r = ax4.twinx()
@@ -247,7 +247,7 @@ def plot_summary_scatter(
             fontsize=10,
             color="gray",
         )
-    ax4.set_xlabel("Unit (sorted by amplitude rate)", fontsize=10)
+    ax4.set_xlabel("Unit (sorted by activity rate)", fontsize=10)
 
     valid = np.isfinite(si_vals) & np.isfinite(fisher_z)
     si_v = si_vals[valid]
@@ -389,6 +389,8 @@ def plot_behavior_preview(
     trajectory_filtered: pd.DataFrame,
     speed_threshold: float,
     speed_unit: str = "mm/s",
+    trajectory_alpha: float = 0.03,
+    trajectory_lw: float = 0.3,
 ) -> "Figure":
     """Raw vs filtered trajectory and speed histogram.
 
@@ -402,10 +404,20 @@ def plot_behavior_preview(
         Speed cutoff used for filtering.
     speed_unit:
         Label for speed axis (e.g. 'mm/s' or 'px/s').
+    trajectory_alpha:
+        Per-segment alpha for trajectory lines.
+    trajectory_lw:
+        Line width for trajectory lines.
     """
     fig, (ax_raw, ax_filt, ax_hist) = plt.subplots(1, 3, figsize=(10, 3.5))
 
-    ax_raw.plot(trajectory["x"], trajectory["y"], "k-", linewidth=0.3, alpha=0.5)
+    ax_raw.plot(
+        trajectory["x"],
+        trajectory["y"],
+        "k-",
+        linewidth=trajectory_lw,
+        alpha=trajectory_alpha,
+    )
     ax_raw.set_title(f"All frames ({len(trajectory)})")
     ax_raw.set_aspect("equal")
     ax_raw.axis("off")
@@ -414,8 +426,8 @@ def plot_behavior_preview(
         trajectory_filtered["x"],
         trajectory_filtered["y"],
         "k-",
-        linewidth=0.3,
-        alpha=0.5,
+        linewidth=trajectory_lw,
+        alpha=trajectory_alpha,
     )
     ax_filt.set_title(f"Speed > {speed_threshold} {speed_unit} ({len(trajectory_filtered)})")
     ax_filt.set_aspect("equal")
@@ -452,29 +464,81 @@ def plot_occupancy_preview(
     valid_mask: np.ndarray,
     x_edges: np.ndarray,
     y_edges: np.ndarray,
+    behavior_fps: float = 20.0,
+    n_split_blocks: int = 10,
+    block_shift: float = 0.0,
+    trajectory_alpha: float = 0.03,
+    trajectory_lw: float = 0.3,
 ) -> "Figure":
-    """Filtered trajectory alongside occupancy heatmap.
+    """Filtered trajectory, full occupancy, and split-half occupancy maps.
+
+    The trajectory panel uses low alpha so that repeatedly visited areas
+    appear darker, showing occupancy density directly.
 
     Parameters
     ----------
     trajectory_filtered:
-        Speed-filtered trajectory.
+        Speed-filtered trajectory with ``x``, ``y``, ``frame_index``.
     occupancy_time:
-        Occupancy time map (bins x bins).
+        Full-session occupancy time map (bins × bins).
     valid_mask:
         Boolean mask of valid spatial bins.
     x_edges, y_edges:
         Spatial bin edges.
+    behavior_fps:
+        Sampling rate for the trajectory (used for split-half time).
+    n_split_blocks:
+        Number of interleaved blocks for the split (same as stability).
+    block_shift:
+        Block boundary shift fraction (same as stability).
+    trajectory_alpha:
+        Per-segment alpha for the trajectory line. Low values (~0.03)
+        let overlap accumulate to show density.
+    trajectory_lw:
+        Line width for the trajectory.
     """
     ext = [x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]]
-    fig, (ax_traj, ax_occ) = plt.subplots(1, 2, figsize=(8, 3.5))
 
+    # Compute split-half occupancy using the same interleaved-block scheme
+    # as the stability test so the occupancy preview matches.
+    frame_col = "frame_index"
+    if frame_col in trajectory_filtered.columns:
+        all_frames = trajectory_filtered[frame_col].values
+        frame_min = all_frames.min()
+        frame_max = all_frames.max()
+        span = frame_max - frame_min
+        if span > 0:
+            block_width = span / n_split_blocks
+            offset = block_shift * block_width
+            block_ids = np.floor((all_frames - frame_min - offset) / block_width).astype(int)
+            block_ids = np.clip(block_ids, 0, n_split_blocks - 1)
+            first_mask = block_ids % 2 == 0
+        else:
+            first_mask = np.ones(len(trajectory_filtered), dtype=bool)
+    else:
+        first_mask = np.ones(len(trajectory_filtered), dtype=bool)
+
+    time_per_frame = 1.0 / behavior_fps
+    traj_first = trajectory_filtered[first_mask]
+    traj_second = trajectory_filtered[~first_mask]
+
+    occ_first, _, _ = np.histogram2d(traj_first["x"], traj_first["y"], bins=[x_edges, y_edges])
+    occ_first *= time_per_frame
+    occ_second, _, _ = np.histogram2d(traj_second["x"], traj_second["y"], bins=[x_edges, y_edges])
+    occ_second *= time_per_frame
+
+    vmax = max(occupancy_time.max(), occ_first.max(), occ_second.max())
+
+    fig, axes = plt.subplots(1, 4, figsize=(16, 3.5))
+    ax_traj, ax_occ, ax_h1, ax_h2 = axes
+
+    # Trajectory — low alpha lets line overlap show occupancy density
     ax_traj.plot(
         trajectory_filtered["x"],
         trajectory_filtered["y"],
         "k-",
-        alpha=0.5,
-        linewidth=0.3,
+        alpha=trajectory_alpha,
+        linewidth=trajectory_lw,
     )
     if np.any(valid_mask) and not np.all(valid_mask):
         ax_traj.contour(
@@ -489,25 +553,46 @@ def plot_occupancy_preview(
     ax_traj.set_aspect("equal")
     ax_traj.axis("off")
 
+    # Full occupancy
     im = ax_occ.imshow(
         occupancy_time.T,
         origin="lower",
         extent=ext,
         cmap="inferno",
         aspect="equal",
+        vmin=0,
+        vmax=vmax,
     )
-    if np.any(valid_mask) and not np.all(valid_mask):
-        ax_occ.contour(
-            valid_mask.T.astype(float),
-            levels=[0.5],
-            colors="white",
-            linewidths=2,
-            extent=ext,
-            origin="lower",
-        )
-    ax_occ.set_title(f"Occupancy ({valid_mask.sum()}/{valid_mask.size} valid bins)")
-    plt.colorbar(im, ax=ax_occ, label="Time (s)")
+    ax_occ.set_title(f"Full ({valid_mask.sum()}/{valid_mask.size} valid)")
+    ax_occ.axis("off")
 
+    # 1st half occupancy
+    ax_h1.imshow(
+        occ_first.T,
+        origin="lower",
+        extent=ext,
+        cmap="inferno",
+        aspect="equal",
+        vmin=0,
+        vmax=vmax,
+    )
+    ax_h1.set_title(f"1st half ({len(traj_first)} frames)")
+    ax_h1.axis("off")
+
+    # 2nd half occupancy
+    ax_h2.imshow(
+        occ_second.T,
+        origin="lower",
+        extent=ext,
+        cmap="inferno",
+        aspect="equal",
+        vmin=0,
+        vmax=vmax,
+    )
+    ax_h2.set_title(f"2nd half ({len(traj_second)} frames)")
+    ax_h2.axis("off")
+
+    fig.colorbar(im, ax=axes.tolist(), label="Time (s)", shrink=0.8)
     fig.tight_layout()
     return fig
 
@@ -1018,7 +1103,7 @@ def plot_rate_map_1d(
             ax.text(mid, ax.get_ylim()[1] * 0.95, label_text, ha="center", fontsize=8, alpha=0.7)
 
     ax.set_xlabel("1D position")
-    ax.set_ylabel("Normalized rate")
+    ax.set_ylabel("Activity rate")
     ax.set_xlim(edges[0], edges[-1])
     if title:
         ax.set_title(title)
@@ -1118,7 +1203,7 @@ def plot_shuffle_test_1d(
     ax.set_ylabel("Cell number")
     ax.set_xticklabels([])
     ax.set_xticks([])
-    plt.colorbar(im, ax=ax, label="Normalized rate")
+    plt.colorbar(im, ax=ax, label="Activity rate")
 
     if compressed_boundaries:
         for b in compressed_boundaries:
