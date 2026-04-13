@@ -415,11 +415,9 @@ def compute_stability_score_1d(
     corr_clipped = np.clip(corr, -0.9999, 0.9999)
     fisher_z = np.arctanh(corr_clipped)
 
-    # Normalize split rate maps for display
-    for rm, mask in [(rate_map_first, valid_first), (rate_map_second, valid_second)]:
-        valid_vals = rm[mask]
-        if len(valid_vals) > 0 and np.nanmax(valid_vals) > 0:
-            rm[mask] = rm[mask] / np.nanmax(valid_vals)
+    # Half rate maps are returned unnormalized (in firing-rate units).
+    # Display code should normalize all three maps (first, second, full)
+    # to a shared scale for honest visual comparison.
 
     # Shuffle-based stability significance test
     if n_shuffles > 0:
@@ -580,6 +578,15 @@ def compute_unit_analysis_1d(
         pos_column=pos_column,
         segment_bins=segment_bins,
     )
+
+    # Normalize half rate maps to the full rate map's peak so all three
+    # are on the same 0-1 scale for display.
+    full_peak = float(np.nanmax(rate_map_raw[valid_mask])) if valid_mask.any() else 0.0
+    if full_peak > 0:
+        for rm_half in (rate_map_first, rate_map_second):
+            finite = np.isfinite(rm_half)
+            if finite.any():
+                rm_half[finite] = rm_half[finite] / full_peak
 
     return {
         "rate_map": rate_map,

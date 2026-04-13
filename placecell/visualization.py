@@ -206,7 +206,7 @@ def plot_summary_scatter(
     ax2.set_ylim(lo, hi)
     ax2.set_aspect("equal")
 
-    # Panel 4: Amplitude rate (bars, left axis) + event count rate (line, right axis)
+    # Panel 4: Activity rate (bars, left axis) + event count rate (line, right axis)
     event_count_rates = np.array([unit_results[uid].event_count_rate for uid in unit_ids])
     has_rates = np.any(overall_rates > 0)
     if has_rates:
@@ -219,10 +219,10 @@ def plot_summary_scatter(
             edgecolor="none",
             width=1.0,
             alpha=0.6,
-            label="Amplitude rate",
+            label="Activity rate",
         )
         ax4.set_xlim(-0.5, len(sort_idx) - 0.5)
-        ax4.set_ylabel("Amplitude rate (a.u./s)", fontsize=10, color="steelblue")
+        ax4.set_ylabel("Activity rate (a.u./s)", fontsize=10, color="steelblue")
         ax4.tick_params(axis="y", labelcolor="steelblue")
 
         ax4r = ax4.twinx()
@@ -247,7 +247,7 @@ def plot_summary_scatter(
             fontsize=10,
             color="gray",
         )
-    ax4.set_xlabel("Unit (sorted by amplitude rate)", fontsize=10)
+    ax4.set_xlabel("Unit (sorted by activity rate)", fontsize=10)
 
     valid = np.isfinite(si_vals) & np.isfinite(fisher_z)
     si_v = si_vals[valid]
@@ -1018,7 +1018,7 @@ def plot_rate_map_1d(
             ax.text(mid, ax.get_ylim()[1] * 0.95, label_text, ha="center", fontsize=8, alpha=0.7)
 
     ax.set_xlabel("1D position")
-    ax.set_ylabel("Normalized rate")
+    ax.set_ylabel("Activity rate")
     ax.set_xlim(edges[0], edges[-1])
     if title:
         ax.set_title(title)
@@ -1118,7 +1118,7 @@ def plot_shuffle_test_1d(
     ax.set_ylabel("Cell number")
     ax.set_xticklabels([])
     ax.set_xticks([])
-    plt.colorbar(im, ax=ax, label="Normalized rate")
+    plt.colorbar(im, ax=ax, label="Activity rate")
 
     if compressed_boundaries:
         for b in compressed_boundaries:
