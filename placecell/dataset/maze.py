@@ -11,11 +11,6 @@ from placecell.analysis.spatial_1d import (
     compute_occupancy_map_1d,
     compute_unit_analysis_1d,
 )
-from placecell.behavior import (
-    build_canonical_table,
-    derive_event_place_from_canonical,
-    filter_canonical_by_speed,
-)
 from placecell.config import SpatialMap1DConfig, ZoneDetectionConfig
 from placecell.dataset.base import BasePlaceCellDataset, UnitResult
 from placecell.log import init_logger
@@ -26,6 +21,11 @@ from placecell.maze_helper import (
     filter_complete_traversals,
     load_graph_polylines,
     serialize_arm_position,
+)
+from placecell.temporal_alignment import (
+    build_canonical_table,
+    derive_event_place_from_canonical,
+    filter_canonical_by_speed,
 )
 
 logger = init_logger(__name__)

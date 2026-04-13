@@ -14,7 +14,7 @@ from placecell.analysis.spatial_2d import (
     compute_unit_analysis,
     gaussian_filter_normalized,
 )
-from placecell.behavior import compute_speed_2d
+from placecell.temporal_alignment import compute_speed_2d
 from placecell.config import SpatialMap2DConfig
 from placecell.neural import load_calcium_traces
 

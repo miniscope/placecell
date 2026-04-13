@@ -12,20 +12,18 @@ from placecell.analysis.spatial_2d import (
     compute_occupancy_map,
     compute_unit_analysis,
 )
-from placecell.behavior import (
-    build_canonical_table,
-    clip_to_arena,
-    compute_speed_2d,
-    correct_perspective,
-    derive_event_place_from_canonical,
-    filter_canonical_by_speed,
-    interpolate_behavior_onto_neural,
-    remove_position_jumps,
-)
+from placecell.behavior import clip_to_arena, correct_perspective, remove_position_jumps
 from placecell.config import BaseSpatialMapConfig
 from placecell.dataset.base import BasePlaceCellDataset, UnitResult
 from placecell.loaders import load_behavior_data
 from placecell.log import init_logger
+from placecell.temporal_alignment import (
+    build_canonical_table,
+    compute_speed_2d,
+    derive_event_place_from_canonical,
+    filter_canonical_by_speed,
+    interpolate_behavior_onto_neural,
+)
 
 logger = init_logger(__name__)
 

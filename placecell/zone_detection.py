@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from placecell.behavior import interpolate_behavior_onto_neural, remove_position_jumps
+from placecell.behavior import remove_position_jumps
 from placecell.geometry import (
     closest_point_on_polyline_prepared,
     get_zone_probabilities,
@@ -16,6 +16,7 @@ from placecell.geometry import (
     prepare_zone_geometry,
 )
 from placecell.log import init_logger
+from placecell.temporal_alignment import interpolate_behavior_onto_neural
 
 logger = init_logger(__name__)
 _EMPTY_TRANSITIONS: frozenset[str] = frozenset()

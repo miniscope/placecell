@@ -292,9 +292,10 @@ class BasePlaceCellDataset(abc.ABC):
 
         Called by :meth:`_load_neural_and_viz` so the user sees timestamp
         quality immediately after ``load()``, before waiting for
-        deconvolution.  The validated timestamps and the keep-mask are
-        stored on ``self`` for later use by ``match_events()``.
+        deconvolution.
         """
+        from placecell.dataset_validation import infer_fps, validate_neural_timestamps
+
         ts_df = pd.read_csv(self.neural_timestamp_path)
         if "timestamp_first" not in ts_df.columns:
             raise ValueError(
@@ -302,58 +303,20 @@ class BasePlaceCellDataset(abc.ABC):
                 f"Got: {list(ts_df.columns)}"
             )
         neural_time = ts_df["timestamp_first"].to_numpy()
-        n_total = len(neural_time)
 
-        if n_total < 2:
-            raise ValueError("neural_timestamp CSV must have at least 2 rows.")
-        if np.any(np.isnan(neural_time)):
-            n_nan = int(np.isnan(neural_time).sum())
-            raise ValueError(
-                f"neural_timestamp CSV contains {n_nan} NaN timestamp(s). " "Check the recording."
-            )
-
-        diffs = np.diff(neural_time)
-        pos_diffs = diffs[diffs > 0]
-        median_dt = float(np.median(pos_diffs)) if len(pos_diffs) else 1.0
-        inferred_fps = 1.0 / median_dt
-
-        # Hampel outlier count (same filter used in interpolation).
-        ts_series = pd.Series(neural_time)
-        hampel_window = 11
-        hampel_min_periods = hampel_window // 2 + 1
-        t_med = ts_series.rolling(
-            hampel_window, center=True, min_periods=hampel_min_periods
-        ).median()
-        deviation = (ts_series - t_med).abs()
-        mad = deviation.rolling(hampel_window, center=True, min_periods=hampel_min_periods).median()
-        n_outlier = int((deviation > 3.0 * 1.4826 * mad).fillna(False).sum())
-
-        gap_threshold = max(1.0, 10 * median_dt)
-        n_gap = int((diffs > gap_threshold).sum())
-
-        if n_outlier == 0 and n_gap == 0:
+        # Run the same validation that match_events will run later;
+        # log results now so the user sees quality before deconvolution.
+        clean_time, _ = validate_neural_timestamps(neural_time)
+        fps = infer_fps(clean_time)
+        n_excluded = len(neural_time) - len(clean_time)
+        if n_excluded == 0:
             logger.info(
-                "Neural timestamps: %d frames, all monotonic, "
-                "inferred %.1f Hz (median dt=%.3fs)",
-                n_total,
-                inferred_fps,
-                median_dt,
-            )
-        else:
-            parts = []
-            if n_outlier:
-                parts.append(f"{n_outlier} outlier(s) will be excluded")
-            if n_gap:
-                max_gap = float(diffs[diffs > gap_threshold].max())
-                parts.append(f"{n_gap} forward gap(s) (max {max_gap:.1f}s, warned only)")
-            logger.warning(
-                "Neural timestamps: %d frames, %.1f Hz — %s",
-                n_total,
-                inferred_fps,
-                "; ".join(parts),
+                "Neural timestamps: %d frames, inferred %.1f Hz",
+                len(neural_time),
+                fps,
             )
 
-        # Store for downstream use by match_events / detect_zones.
+        # Store raw timestamps for downstream use by match_events.
         self._neural_time_raw = neural_time
 
     def _load_neural_and_viz(self) -> None:
@@ -805,7 +768,7 @@ class BasePlaceCellDataset(abc.ABC):
         # downstream consumers (notebook browser, regression tests) see
         # the same DataFrames as a freshly-run pipeline.
         if ds.canonical is not None:
-            from placecell.behavior import (
+            from placecell.temporal_alignment import (
                 derive_event_place_from_canonical,
                 filter_canonical_by_speed,
             )
