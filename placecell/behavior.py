@@ -31,15 +31,11 @@ def validate_neural_timestamps(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Validate neural timestamps and return the clean subset.
 
-    Checks (in order):
-
-    1. **NaN** — hard error.
-    2. **< 2 entries** — hard error.
-    3. **Hampel outliers** — frames whose timestamp deviates from the local
+    1. **Hampel outliers** — frames whose timestamp deviates from the local
        trend (rolling median, window=11, 3σ MAD) are excluded.
-    4. **Residual backward jumps** — any remaining non-monotonic frames
+    2. **Residual backward jumps** — any remaining non-monotonic frames
        after Hampel are excluded.
-    5. **Large forward gaps** — warned but NOT excluded (recording stalls
+    3. **Large forward gaps** — warned but NOT excluded (recording stalls
        have valid timestamps on both sides; only interpolated behavior
        within the gap is unreliable).
 
@@ -57,18 +53,13 @@ def validate_neural_timestamps(
     """
     neural_time = np.asarray(neural_time, dtype=float)
 
-    # 1. NaN check
+    # Sanity checks (corrupted CSV, not a real recording failure mode).
     if np.any(np.isnan(neural_time)):
-        n_nan = int(np.isnan(neural_time).sum())
-        raise ValueError(
-            f"neural_time contains {n_nan} NaN value(s). " "Inspect the neural_timestamp CSV."
-        )
-
-    # 2. Length check
+        raise ValueError("neural_time contains NaN — check the CSV file.")
     if len(neural_time) < 2:
         raise ValueError("neural_time must have at least 2 entries.")
 
-    # 3. Hampel filter on the timestamp signal
+    # 1. Hampel filter on the timestamp signal
     original_idx = np.arange(len(neural_time), dtype=np.int64)
     ts_series = pd.Series(neural_time)
     hampel_window = 11
@@ -78,7 +69,7 @@ def validate_neural_timestamps(
     mad = deviation.rolling(hampel_window, center=True, min_periods=min_periods).median()
     bad = (deviation > 3.0 * 1.4826 * mad).fillna(False).to_numpy().copy()
 
-    # 4. Residual backward jumps after Hampel
+    # 2. Residual backward jumps after Hampel
     clean_idx = np.where(~bad)[0]
     clean_t = neural_time[clean_idx]
     if len(clean_t) > 1:
@@ -98,7 +89,7 @@ def validate_neural_timestamps(
         neural_time = neural_time[~bad]
         original_idx = original_idx[~bad]
 
-    # 5. Large forward gaps — warn only
+    # 3. Large forward gaps — warn only
     diffs = np.diff(neural_time)
     median_dt = float(np.median(diffs[diffs > 0])) if (diffs > 0).any() else 1.0
     gap_threshold = max(1.0, 10 * median_dt)

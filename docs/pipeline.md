@@ -6,23 +6,14 @@ This document explains how the spatial neural activity analysis pipeline works.
 
 Both `ArenaDataset` (2D) and `MazeDataset` (1D) implement the same abstract pipeline defined by `BasePlaceCellDataset`. Each step depends on the previous one.
 
-```
-from_yaml(config, data_path)    # Parse configs, auto-select subclass based on behavior.type
-  │
-load()                          # Load neural traces + behavior positions + visualization assets
-  │
-preprocess_behavior()           # Approach-specific corrections + speed
-  │
-deconvolve()                    # OASIS AR(2) deconvolution → S_list (per-unit traces at neural fps)
-  │
-match_events()                  # Build canonical neural-rate table
-  │                              # (interpolate behavior → stack S_list → derive views)
-compute_occupancy()             # Spatial occupancy map (2D histogram or 1D bins)
-  │
-analyze_units()                 # Per-unit: rate map, SI + shuffle, stability + shuffle, place fields
-  │
-save_bundle()                   # .pcellbundle directory with config, arrays, parquets, figures
-```
+1. `from_yaml(config, data_path)` — parse configs, auto-select ArenaDataset or MazeDataset
+2. `load()` — load neural traces, behavior positions, visualization assets
+3. `preprocess_behavior()` — geometric corrections (Hampel, perspective, clipping, unit conversion)
+4. `deconvolve()` — OASIS AR(2) deconvolution → per-unit spike trains at neural fps
+5. `match_events()` — interpolate behavior onto neural timestamps, compute speed, build canonical table
+6. `compute_occupancy()` — spatial occupancy map (2D histogram or 1D bins)
+7. `analyze_units()` — per-unit rate map, spatial information, stability, place fields
+8. `save_bundle()` — write `.pcellbundle` directory with config, arrays, parquets, figures
 
 The **canonical neural-rate table** (`ds.canonical`) is the central artifact: one row per neural frame with columns `frame_index, neural_time, x, y, speed, [pos_1d, arm_index, ...], s_unit_<id>...`. Behavior is linearly interpolated onto neural timestamps inside `match_events()` (or, for the maze pipeline, inside `detect-zones`), so every analysis downstream operates on a single common clock. The long-format `event_place` table is derived from `canonical` for the per-unit spatial analysis functions.
 
@@ -139,6 +130,39 @@ Four independent computations from the same inputs (events, filtered trajectory,
 - **Coverage map**: sum of place field masks across place cells
 - **Coverage curve**: cells sorted by field size (largest first), cumulative fraction of environment covered
 - **Interactive browser**: max projection overlay, trajectory with events, rate map with place field contour, SI histogram, stability maps, trace view
+
+## Data Integrity
+
+The pipeline flags and excludes problematic data rather than silently repairing it. Every exclusion is logged with a count.
+
+**Timestamp validation** (neural timestamps):
+- Outliers from the local trend (Hampel filter, window=11, 3σ) → excluded
+- Residual backward jumps after Hampel → excluded
+- Large forward gaps (recording stalls, >1s or >10× median dt) → warned, NOT excluded (valid timestamps; interpolated positions within the gap may be unreliable)
+- Only `timestamp_first` is used; `timestamp_last` is ignored (occasionally noisy)
+
+**Temporal alignment** (behavior ↔ neural):
+- Zero overlap between recordings → hard error
+- Partial overlap (neural starts before or ends after behavior) → logged, uncovered frames dropped
+- Neural fps > 5× behavior fps → hard error (upsampled jitter would dominate)
+
+**Position filtering** (behavior trajectory):
+- Hampel filter on raw (x, y) at behavior rate → outliers interpolated
+- Out-of-arena positions → clipped to boundary (intentional for arena calibration)
+- Non-numeric values in data columns → logged if any coerced to NaN
+
+**Speed filtering**:
+- Computed at neural rate via centered window (`speed_window_seconds`)
+- Zero-dt frames (from timestamp exclusion) → NaN speed, not zero
+- NaN speeds → logged and dropped by the speed threshold
+
+**Analysis methods**:
+- Rate maps: independent numerator/denominator Gaussian smoothing (Skaggs et al. 1996)
+- Spatial information: Skaggs et al. 1993, with +1-corrected rank p-value (Phipson & Smyth 2010)
+- Shuffle null: circular shift excluding zero-shift, independent RNG seeds for SI/stability/percentile
+- Stability: interleaved split-half blocks, Fisher z-transform, separate shuffle stream
+- Place field detection: Guo et al. 2023 seed-and-grow algorithm
+- Place cell classification: dual criterion (SI p < threshold AND stability p < threshold)
 
 ## Key Parameters
 
