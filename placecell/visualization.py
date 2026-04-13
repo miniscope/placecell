@@ -452,23 +452,71 @@ def plot_occupancy_preview(
     valid_mask: np.ndarray,
     x_edges: np.ndarray,
     y_edges: np.ndarray,
+    behavior_fps: float = 20.0,
+    n_split_blocks: int = 10,
+    block_shift: float = 0.0,
 ) -> "Figure":
-    """Filtered trajectory alongside occupancy heatmap.
+    """Filtered trajectory, full occupancy, and split-half occupancy maps.
 
     Parameters
     ----------
     trajectory_filtered:
-        Speed-filtered trajectory.
+        Speed-filtered trajectory with ``x``, ``y``, ``frame_index``.
     occupancy_time:
-        Occupancy time map (bins x bins).
+        Full-session occupancy time map (bins × bins).
     valid_mask:
         Boolean mask of valid spatial bins.
     x_edges, y_edges:
         Spatial bin edges.
+    behavior_fps:
+        Sampling rate for the trajectory (used for split-half time).
+    n_split_blocks:
+        Number of interleaved blocks for the split (same as stability).
+    block_shift:
+        Block boundary shift fraction (same as stability).
     """
     ext = [x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]]
-    fig, (ax_traj, ax_occ) = plt.subplots(1, 2, figsize=(8, 3.5))
 
+    # Compute split-half occupancy using the same interleaved-block scheme
+    # as the stability test so the occupancy preview matches.
+    frame_col = "frame_index"
+    if frame_col in trajectory_filtered.columns:
+        all_frames = trajectory_filtered[frame_col].values
+        frame_min = all_frames.min()
+        frame_max = all_frames.max()
+        span = frame_max - frame_min
+        if span > 0:
+            block_width = span / n_split_blocks
+            offset = block_shift * block_width
+            block_ids = np.floor(
+                (all_frames - frame_min - offset) / block_width
+            ).astype(int)
+            block_ids = np.clip(block_ids, 0, n_split_blocks - 1)
+            first_mask = block_ids % 2 == 0
+        else:
+            first_mask = np.ones(len(trajectory_filtered), dtype=bool)
+    else:
+        first_mask = np.ones(len(trajectory_filtered), dtype=bool)
+
+    time_per_frame = 1.0 / behavior_fps
+    traj_first = trajectory_filtered[first_mask]
+    traj_second = trajectory_filtered[~first_mask]
+
+    occ_first, _, _ = np.histogram2d(
+        traj_first["x"], traj_first["y"], bins=[x_edges, y_edges]
+    )
+    occ_first *= time_per_frame
+    occ_second, _, _ = np.histogram2d(
+        traj_second["x"], traj_second["y"], bins=[x_edges, y_edges]
+    )
+    occ_second *= time_per_frame
+
+    vmax = max(occupancy_time.max(), occ_first.max(), occ_second.max())
+
+    fig, axes = plt.subplots(1, 4, figsize=(16, 3.5))
+    ax_traj, ax_occ, ax_h1, ax_h2 = axes
+
+    # Trajectory
     ax_traj.plot(
         trajectory_filtered["x"],
         trajectory_filtered["y"],
@@ -489,25 +537,46 @@ def plot_occupancy_preview(
     ax_traj.set_aspect("equal")
     ax_traj.axis("off")
 
+    # Full occupancy
     im = ax_occ.imshow(
         occupancy_time.T,
         origin="lower",
         extent=ext,
         cmap="inferno",
         aspect="equal",
+        vmin=0,
+        vmax=vmax,
     )
-    if np.any(valid_mask) and not np.all(valid_mask):
-        ax_occ.contour(
-            valid_mask.T.astype(float),
-            levels=[0.5],
-            colors="white",
-            linewidths=2,
-            extent=ext,
-            origin="lower",
-        )
-    ax_occ.set_title(f"Occupancy ({valid_mask.sum()}/{valid_mask.size} valid bins)")
-    plt.colorbar(im, ax=ax_occ, label="Time (s)")
+    ax_occ.set_title(f"Full ({valid_mask.sum()}/{valid_mask.size} valid)")
+    ax_occ.axis("off")
 
+    # 1st half occupancy
+    ax_h1.imshow(
+        occ_first.T,
+        origin="lower",
+        extent=ext,
+        cmap="inferno",
+        aspect="equal",
+        vmin=0,
+        vmax=vmax,
+    )
+    ax_h1.set_title(f"1st half ({len(traj_first)} frames)")
+    ax_h1.axis("off")
+
+    # 2nd half occupancy
+    ax_h2.imshow(
+        occ_second.T,
+        origin="lower",
+        extent=ext,
+        cmap="inferno",
+        aspect="equal",
+        vmin=0,
+        vmax=vmax,
+    )
+    ax_h2.set_title(f"2nd half ({len(traj_second)} frames)")
+    ax_h2.axis("off")
+
+    fig.colorbar(im, ax=axes.tolist(), label="Time (s)", shrink=0.8)
     fig.tight_layout()
     return fig
 
