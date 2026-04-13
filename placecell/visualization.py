@@ -412,8 +412,11 @@ def plot_behavior_preview(
     fig, (ax_raw, ax_filt, ax_hist) = plt.subplots(1, 3, figsize=(10, 3.5))
 
     ax_raw.plot(
-        trajectory["x"], trajectory["y"], "k-",
-        linewidth=trajectory_lw, alpha=trajectory_alpha,
+        trajectory["x"],
+        trajectory["y"],
+        "k-",
+        linewidth=trajectory_lw,
+        alpha=trajectory_alpha,
     )
     ax_raw.set_title(f"All frames ({len(trajectory)})")
     ax_raw.set_aspect("equal")
@@ -507,9 +510,7 @@ def plot_occupancy_preview(
         if span > 0:
             block_width = span / n_split_blocks
             offset = block_shift * block_width
-            block_ids = np.floor(
-                (all_frames - frame_min - offset) / block_width
-            ).astype(int)
+            block_ids = np.floor((all_frames - frame_min - offset) / block_width).astype(int)
             block_ids = np.clip(block_ids, 0, n_split_blocks - 1)
             first_mask = block_ids % 2 == 0
         else:
@@ -521,13 +522,9 @@ def plot_occupancy_preview(
     traj_first = trajectory_filtered[first_mask]
     traj_second = trajectory_filtered[~first_mask]
 
-    occ_first, _, _ = np.histogram2d(
-        traj_first["x"], traj_first["y"], bins=[x_edges, y_edges]
-    )
+    occ_first, _, _ = np.histogram2d(traj_first["x"], traj_first["y"], bins=[x_edges, y_edges])
     occ_first *= time_per_frame
-    occ_second, _, _ = np.histogram2d(
-        traj_second["x"], traj_second["y"], bins=[x_edges, y_edges]
-    )
+    occ_second, _, _ = np.histogram2d(traj_second["x"], traj_second["y"], bins=[x_edges, y_edges])
     occ_second *= time_per_frame
 
     vmax = max(occupancy_time.max(), occ_first.max(), occ_second.max())
