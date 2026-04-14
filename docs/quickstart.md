@@ -129,9 +129,11 @@ behavior:
 
 ### 3. Run the analysis
 
-For arena sessions, open `notebook/workflow_2D.ipynb` in Jupyter Lab, set `CONFIG_PATH` and `DATA_PATH`, and run all cells.
+```bash
+placecell analysis -c config.yaml -d data_paths.yaml
+```
 
-For maze sessions, use the CLI or the Python API:
+Or via Python:
 
 ```python
 from placecell.dataset import BasePlaceCellDataset
@@ -143,23 +145,22 @@ ds.deconvolve()
 ds.match_events()
 ds.compute_occupancy()
 ds.analyze_units()
+ds.save_bundle("output/session_name")
 ```
 
-Or: `placecell analysis -c config.yaml -d data_paths.yaml`.
+For batch processing, see `examples/batch_analysis.py`.
 
 ## Output
 
-The workflow displays an occupancy preview:
+The pipeline saves a `.pcellbundle` directory containing all results and summary figures. Key outputs:
 
-![Occupancy Preview](assets/Figure_1.png)
+- `canonical.parquet` — per-neural-frame table with position, speed, and deconvolved activity per unit
+- `figures/occupancy.pdf` — trajectory density and occupancy with split-half comparison
+- `figures/behavior_preview.pdf` — trajectory and speed distribution
+- `figures/diagnostics.pdf` — SI and stability distributions
+- `figures/summary_scatter.pdf` — SI vs stability with place cell classification
+- `figures/speed_traces.pdf` — speed and place cell traces over time
 
-Then displays the stability vs significance plot:
+To browse results interactively, open `notebook/view_results_arena.ipynb` or `notebook/view_results_maze.ipynb` in Jupyter Lab.
 
-![Stability vs Significance](assets/Figure_2.png)
-
-And finally launches the interactive place cell viewer:
-
-![Place Cell Viewer](assets/Figure_3.png)
-
-## Next Steps
-- See [Pipeline Details](pipeline.md) for how the analysis works
+See [Pipeline Details](pipeline.md) for the full list of summary figures and how the analysis works.

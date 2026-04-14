@@ -454,13 +454,14 @@ class BasePlaceCellDataset(abc.ABC):
             out[uid] = res
         return out
 
-    def summary(self) -> dict[str, int]:
-        """Compute summary counts of significant and stable units.
+    def summary(self) -> dict:
+        """Compute summary counts and percentages of significant and stable units.
 
         Returns
         -------
         dict
-            Keys: ``n_total``, ``n_sig``, ``n_stable``, ``n_place_cells``.
+            Keys: ``n_total``, ``n_sig``, ``n_stable``, ``n_place_cells``,
+            ``pct_sig``, ``pct_stable``, ``pct_place_cells``.
         """
         p_thresh = self.p_value_threshold
 
@@ -479,11 +480,19 @@ class BasePlaceCellDataset(abc.ABC):
             if is_sig and is_stable:
                 n_place_cells += 1
 
+        n_total = len(self.unit_results)
+
+        def pct(k: int) -> float:
+            return round(100 * k / n_total, 1) if n_total else 0.0
+
         return {
-            "n_total": len(self.unit_results),
+            "n_total": n_total,
             "n_sig": n_sig,
+            "pct_sig": pct(n_sig),
             "n_stable": n_stable,
+            "pct_stable": pct(n_stable),
             "n_place_cells": n_place_cells,
+            "pct_place_cells": pct(n_place_cells),
         }
 
     def save_bundle(self, path: str | Path, *, save_figures: bool = True) -> Path:
