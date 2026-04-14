@@ -183,10 +183,16 @@ def assign_traversal_direction(
     """
     df = trajectory.sort_values("frame_index").copy()
 
-    # Detect traversal boundaries: zone changes or frame_index gaps > 1
+    # Detect traversal boundaries. In the arm-only trajectory, consecutive
+    # rows with the same zone could be separate traversals if the animal
+    # visited a room in between (those room frames were removed by
+    # serialize_arm_position). We detect room visits via gaps in the
+    # original DataFrame index (which preserves the full-trajectory row
+    # numbers). A gap > 2 rows indicates room frames were removed; gaps
+    # of 1-2 are from timestamp exclusion and don't break traversals.
     zone_changed = df[zone_column] != df[zone_column].shift(1)
-    frame_gap = df["frame_index"].diff() > 1
-    boundary = zone_changed | frame_gap
+    idx_gap = pd.Series(df.index, index=df.index).diff() > 2
+    boundary = zone_changed | idx_gap
     boundary.iloc[0] = True
     df["traversal_id"] = boundary.cumsum()
 
@@ -268,8 +274,8 @@ def filter_complete_traversals(
     # Assign traversal_id if not already present
     if "traversal_id" not in df.columns:
         zone_changed = df[zone_column] != df[zone_column].shift(1)
-        frame_gap = df["frame_index"].diff() > 1
-        boundary = zone_changed | frame_gap
+        idx_gap = pd.Series(df.index, index=df.index).diff() > 2
+        boundary = zone_changed | idx_gap
         boundary.iloc[0] = True
         df["traversal_id"] = boundary.cumsum()
 

@@ -130,13 +130,19 @@ def plot_summary_scatter(
     n_stab_only = int(np.sum(~is_sig & is_stable))
     n_neither = int(np.sum(~is_sig & ~is_stable))
 
-    # Log summary
+    # Log summary with percentages
+    def _pct(k: int) -> str:
+        return f"{100 * k / n_total:.0f}%" if n_total else "0%"
+
     logger.info(
-        "Total: %d | SI pass: %d | Stability pass: %d | Both: %d | Neither: %d",
+        "Total: %d | SI pass: %d (%s) | Stability pass: %d (%s) | Both: %d (%s) | Neither: %d",
         n_total,
         int(is_sig.sum()),
+        _pct(int(is_sig.sum())),
         int(is_stable.sum()),
+        _pct(int(is_stable.sum())),
         n_both,
+        _pct(n_both),
         n_neither,
     )
     if n_shuffles is not None or min_shift_seconds is not None:
@@ -384,12 +390,61 @@ def plot_diagnostics(
     return fig
 
 
+def plot_speed_histogram(
+    speeds: np.ndarray,
+    speed_threshold: float,
+    speed_unit: str = "mm/s",
+    n_filtered: int | None = None,
+    n_total: int | None = None,
+) -> "Figure":
+    """Speed distribution histogram with threshold line.
+
+    Parameters
+    ----------
+    speeds:
+        All speed values (before filtering).
+    speed_threshold:
+        Minimum speed for inclusion.
+    speed_unit:
+        Label for the x-axis.
+    n_filtered, n_total:
+        Frame counts for the title annotation.
+    """
+    fig, ax = plt.subplots(figsize=(5, 3))
+    speeds = speeds[np.isfinite(speeds)]
+    speed_max = float(np.percentile(speeds, 99)) if len(speeds) else 1.0
+    ax.hist(
+        np.clip(speeds, 0, speed_max),
+        bins=50,
+        color="gray",
+        edgecolor="black",
+        alpha=0.7,
+    )
+    ax.axvline(
+        speed_threshold,
+        color="red",
+        linestyle="--",
+        linewidth=2,
+        label=f"Threshold: {speed_threshold}",
+    )
+    ax.set_xlabel(f"Speed ({speed_unit})")
+    ax.set_ylabel("Count")
+    title = "Speed distribution"
+    if n_filtered is not None and n_total is not None:
+        title += f" ({n_filtered}/{n_total} above threshold)"
+    ax.set_title(title)
+    ax.legend()
+    fig.tight_layout()
+    return fig
+
+
 def plot_behavior_preview(
     trajectory: pd.DataFrame,
     trajectory_filtered: pd.DataFrame,
     speed_threshold: float,
     speed_unit: str = "mm/s",
-    trajectory_alpha: float = 0.03,
+    speed_column: str = "speed",
+    trajectory_alpha: float = 0.1,
     trajectory_lw: float = 0.3,
 ) -> "Figure":
     """Raw vs filtered trajectory and speed histogram.
@@ -397,43 +452,54 @@ def plot_behavior_preview(
     Parameters
     ----------
     trajectory:
-        Full trajectory with columns x, y, speed.
+        Full trajectory with columns x, y, and a speed column.
     trajectory_filtered:
         Speed-filtered trajectory.
     speed_threshold:
         Speed cutoff used for filtering.
     speed_unit:
         Label for speed axis (e.g. 'mm/s' or 'px/s').
+    speed_column:
+        Name of the speed column (default 'speed', use 'speed_1d' for maze).
     trajectory_alpha:
         Per-segment alpha for trajectory lines.
     trajectory_lw:
         Line width for trajectory lines.
     """
+    from matplotlib.collections import LineCollection
+
+    def _trajectory_lc(ax: "Axes", x: np.ndarray, y: np.ndarray) -> None:
+        points = np.column_stack([x, y]).reshape(-1, 1, 2)
+        segs = np.concatenate([points[:-1], points[1:]], axis=1)
+        lc = LineCollection(
+            segs,
+            colors=[(0, 0, 0, trajectory_alpha)] * len(segs),
+            linewidths=trajectory_lw,
+        )
+        ax.add_collection(lc)
+        ax.autoscale_view()
+
     fig, (ax_raw, ax_filt, ax_hist) = plt.subplots(1, 3, figsize=(10, 3.5))
 
-    ax_raw.plot(
-        trajectory["x"],
-        trajectory["y"],
-        "k-",
-        linewidth=trajectory_lw,
-        alpha=trajectory_alpha,
-    )
+    _trajectory_lc(ax_raw, trajectory["x"].to_numpy(), trajectory["y"].to_numpy())
     ax_raw.set_title(f"All frames ({len(trajectory)})")
     ax_raw.set_aspect("equal")
     ax_raw.axis("off")
 
-    ax_filt.plot(
-        trajectory_filtered["x"],
-        trajectory_filtered["y"],
-        "k-",
-        linewidth=trajectory_lw,
-        alpha=trajectory_alpha,
+    _trajectory_lc(
+        ax_filt,
+        trajectory_filtered["x"].to_numpy(),
+        trajectory_filtered["y"].to_numpy(),
     )
     ax_filt.set_title(f"Speed > {speed_threshold} {speed_unit} ({len(trajectory_filtered)})")
     ax_filt.set_aspect("equal")
     ax_filt.axis("off")
 
-    all_speeds = trajectory["speed"].dropna()
+    all_speeds = (
+        trajectory[speed_column].dropna()
+        if speed_column in trajectory.columns
+        else pd.Series(dtype=float)
+    )
     speed_max = np.percentile(all_speeds, 99)
     ax_hist.hist(
         all_speeds.clip(upper=speed_max),
@@ -467,7 +533,7 @@ def plot_occupancy_preview(
     behavior_fps: float = 20.0,
     n_split_blocks: int = 10,
     block_shift: float = 0.0,
-    trajectory_alpha: float = 0.03,
+    trajectory_alpha: float = 0.1,
     trajectory_lw: float = 0.3,
 ) -> "Figure":
     """Filtered trajectory, full occupancy, and split-half occupancy maps.
@@ -532,23 +598,22 @@ def plot_occupancy_preview(
     fig, axes = plt.subplots(1, 4, figsize=(16, 3.5))
     ax_traj, ax_occ, ax_h1, ax_h2 = axes
 
-    # Trajectory — low alpha lets line overlap show occupancy density
-    ax_traj.plot(
-        trajectory_filtered["x"],
-        trajectory_filtered["y"],
-        "k-",
-        alpha=trajectory_alpha,
-        linewidth=trajectory_lw,
+    # Trajectory with additive alpha — each segment is drawn separately
+    # so overlapping paths accumulate opacity to show density.
+    from matplotlib.collections import LineCollection
+
+    x_arr = trajectory_filtered["x"].to_numpy()
+    y_arr = trajectory_filtered["y"].to_numpy()
+    points = np.column_stack([x_arr, y_arr]).reshape(-1, 1, 2)
+    segments = np.concatenate([points[:-1], points[1:]], axis=1)
+    lc = LineCollection(
+        segments,
+        colors=[(0, 0, 0, trajectory_alpha)] * len(segments),
+        linewidths=trajectory_lw,
     )
-    if np.any(valid_mask) and not np.all(valid_mask):
-        ax_traj.contour(
-            valid_mask.T.astype(float),
-            levels=[0.5],
-            colors="white",
-            linewidths=2,
-            extent=ext,
-            origin="lower",
-        )
+    ax_traj.add_collection(lc)
+    ax_traj.set_xlim(ext[0], ext[1])
+    ax_traj.set_ylim(ext[2], ext[3])
     ax_traj.set_title("Trajectory (filtered)")
     ax_traj.set_aspect("equal")
     ax_traj.axis("off")
@@ -592,8 +657,9 @@ def plot_occupancy_preview(
     ax_h2.set_title(f"2nd half ({len(traj_second)} frames)")
     ax_h2.axis("off")
 
-    fig.colorbar(im, ax=axes.tolist(), label="Time (s)", shrink=0.8)
-    fig.tight_layout()
+    fig.tight_layout(rect=[0, 0, 0.92, 1])
+    cax = fig.add_axes([0.93, 0.15, 0.015, 0.7])
+    fig.colorbar(im, cax=cax, label="Time (s)")
     return fig
 
 
@@ -1268,54 +1334,68 @@ def plot_occupancy_preview_1d(
 
     # Left: position vs time
     pos_col = "pos_1d"
-    time_col = "unix_time"
+
+    def _get_time(df: "pd.DataFrame") -> "np.ndarray | None":
+        """Extract time array from whichever column exists."""
+        for col in ("unix_time", "neural_time"):
+            if col in df.columns:
+                return df[col].to_numpy()
+        return None
 
     # Determine t0 from the earliest available data
-    t0 = None
+    t0 = 0.0
     for src in [trajectory_1d_all, trajectory_1d, trajectory_1d_filtered]:
-        if src is not None and time_col in src.columns and len(src) > 0:
-            t0 = src[time_col].iloc[0]
-            break
+        if src is not None:
+            t_arr = _get_time(src)
+            if t_arr is not None and len(t_arr) > 0:
+                t0 = float(t_arr[0])
+                break
 
-    # Layer 1: incomplete traversals (from trajectory_1d_all minus trajectory_1d)
-    if (
+    # Layer 1: incomplete traversals (only when complete-traversal filter was applied)
+    has_filter = (
         trajectory_1d_all is not None
         and trajectory_1d is not None
-        and time_col in trajectory_1d_all.columns
-    ):
-        complete_frames = set(trajectory_1d["frame_index"].values)
-        incomplete_mask = ~trajectory_1d_all["frame_index"].isin(complete_frames)
-        incomplete = trajectory_1d_all[incomplete_mask]
-        if len(incomplete) > 0:
-            t_inc = incomplete[time_col] - t0
+        and len(trajectory_1d_all) != len(trajectory_1d)
+    )
+    if has_filter:
+        t_arr = _get_time(trajectory_1d_all)
+        if t_arr is not None:
+            complete_frames = set(trajectory_1d["frame_index"].values)
+            incomplete_mask = ~trajectory_1d_all["frame_index"].isin(complete_frames)
+            incomplete = trajectory_1d_all[incomplete_mask]
+            if len(incomplete) > 0:
+                t_inc = _get_time(incomplete)
+                ax_traj.scatter(
+                    t_inc - t0,
+                    incomplete[pos_col],
+                    s=0.5,
+                    alpha=0.15,
+                    color="lightcoral",
+                    label=f"Incomplete ({len(incomplete)})",
+                    rasterized=True,
+                )
+
+    # Layer 2: all traversals used for analysis (before speed filter)
+    if trajectory_1d is not None:
+        t_arr = _get_time(trajectory_1d)
+        if t_arr is not None:
+            n = len(trajectory_1d)
+            label = f"Complete ({n})" if has_filter else f"All ({n})"
             ax_traj.scatter(
-                t_inc,
-                incomplete[pos_col],
+                t_arr - t0,
+                trajectory_1d[pos_col],
                 s=0.5,
                 alpha=0.15,
-                color="lightcoral",
-                label=f"Incomplete ({len(incomplete)})",
+                color="goldenrod",
+                label=label,
                 rasterized=True,
             )
 
-    # Layer 2: all complete traversals (before speed filter)
-    if trajectory_1d is not None and time_col in trajectory_1d.columns:
-        t_all = trajectory_1d[time_col] - t0
-        ax_traj.scatter(
-            t_all,
-            trajectory_1d[pos_col],
-            s=0.5,
-            alpha=0.15,
-            color="goldenrod",
-            label=f"Complete ({len(trajectory_1d)})",
-            rasterized=True,
-        )
-
     # Layer 3: speed-filtered on top
-    if time_col in trajectory_1d_filtered.columns:
-        t = trajectory_1d_filtered[time_col] - t0
+    t_filt = _get_time(trajectory_1d_filtered)
+    if t_filt is not None:
         ax_traj.scatter(
-            t,
+            t_filt - t0,
             trajectory_1d_filtered[pos_col],
             s=0.5,
             alpha=0.3,
@@ -1323,16 +1403,7 @@ def plot_occupancy_preview_1d(
             label=f"Speed-filtered ({len(trajectory_1d_filtered)})",
             rasterized=True,
         )
-        ax_traj.set_xlabel("Time (s)")
-    else:
-        ax_traj.scatter(
-            range(len(trajectory_1d_filtered)),
-            trajectory_1d_filtered[pos_col],
-            s=0.5,
-            alpha=0.3,
-            color="steelblue",
-        )
-        ax_traj.set_xlabel("Frame")
+    ax_traj.set_xlabel("Time (s)")
     ax_traj.set_ylabel("1D position")
     ax_traj.legend(markerscale=8, fontsize=7, loc="upper right")
     ax_traj.set_title("Arm trajectory")
@@ -1433,12 +1504,14 @@ def plot_position_and_traces_1d(
     time_scale = 60.0 if time_unit == "min" else 1.0
     time_label = "Time (min)" if time_unit == "min" else "Time (s)"
 
-    time_col = "unix_time"
-    if time_col in trajectory_1d.columns:
-        t0 = trajectory_1d[time_col].iloc[0]
-        beh_time = (trajectory_1d[time_col] - t0).values / time_scale
-    else:
-        beh_time = trajectory_1d["frame_index"].values / behavior_fps / time_scale
+    def _time(df: "pd.DataFrame") -> np.ndarray:
+        for col in ("unix_time", "neural_time"):
+            if col in df.columns:
+                return df[col].to_numpy()
+        return df["frame_index"].to_numpy() / behavior_fps
+
+    t0 = float(_time(trajectory_1d)[0])
+    beh_time = (_time(trajectory_1d) - t0) / time_scale
 
     # Unfiltered background
     ax_pos.scatter(
@@ -1453,10 +1526,7 @@ def plot_position_and_traces_1d(
 
     # Speed-filtered overlay
     if trajectory_1d_filtered is not None:
-        if time_col in trajectory_1d_filtered.columns:
-            filt_time = (trajectory_1d_filtered[time_col] - t0).values / time_scale
-        else:
-            filt_time = trajectory_1d_filtered["frame_index"].values / behavior_fps / time_scale
+        filt_time = (_time(trajectory_1d_filtered) - t0) / time_scale
         ax_pos.scatter(
             filt_time,
             trajectory_1d_filtered["pos_1d"].values,

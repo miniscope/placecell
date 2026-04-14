@@ -131,6 +131,29 @@ Four independent computations from the same inputs (events, filtered trajectory,
 - **Coverage curve**: cells sorted by field size (largest first), cumulative fraction of environment covered
 - **Interactive browser**: max projection overlay, trajectory with events, rate map with place field contour, SI histogram, stability maps, trace view
 
+### Summary Figures
+
+`save_bundle()` exports these PDFs to the `figures/` directory inside the bundle. Both arena and maze pipelines produce a consistent set.
+
+**Shared (both pipelines):**
+- `diagnostics.pdf` — SI and stability distributions across all units
+- `summary_scatter.pdf` — SI vs stability scatter plot with place cell classification
+- `footprints.pdf` — spatial footprints of all recorded units
+- `behavior_preview.pdf` — 2D trajectory density (additive alpha), speed-filtered trajectory, and speed histogram
+- `speed_traces.pdf` — animal speed over time with place cell neural traces (top 20 by SI)
+- `occupancy.pdf` — full-session occupancy map with split-half comparison (same split as stability test)
+
+**Arena only:**
+- `arena_calibration.pdf` — raw trajectory overlaid on arena bounds and video frame
+- `preprocess_steps.pdf` — trajectory at each correction stage (Hampel, perspective, clipping)
+- `coverage.pdf` — place field coverage map and coverage curve
+
+**Maze only:**
+- `speed_histogram.pdf` — 1D arm speed distribution with threshold line
+- `graph_overlay.pdf` — maze graph polylines on behavior video frame
+- `population_rate_map.pdf` — all unit 1D rate maps tiled
+- `global_pvo_matrix.pdf` — population vector overlap matrix across arms
+
 ## Data Integrity
 
 The pipeline flags and excludes problematic data rather than silently repairing it. Every exclusion is logged with a count.
