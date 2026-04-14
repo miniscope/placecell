@@ -428,8 +428,10 @@ class ArenaDataset(BasePlaceCellDataset):
 
         from placecell.visualization import (
             plot_arena_calibration,
+            plot_behavior_preview,
             plot_coverage,
             plot_occupancy_preview,
+            plot_position_and_traces_2d,
             plot_preprocess_steps,
         )
 
@@ -493,7 +495,40 @@ class ArenaDataset(BasePlaceCellDataset):
                 except Exception:
                     logger.warning("Failed to save preprocess_steps.pdf", exc_info=True)
 
+            # Speed distribution (behavior preview with speed histogram)
+            if self.canonical is not None and self.trajectory_filtered is not None:
+                try:
+                    fig = plot_behavior_preview(
+                        self.canonical,
+                        self.trajectory_filtered,
+                        self.cfg.behavior.speed_threshold,
+                        speed_unit="mm/s" if self.mm_per_px else "px/s",
+                    )
+                    fig.savefig(figures_dir / "behavior_preview.pdf", bbox_inches="tight")
+                    _plt.close(fig)
+                    saved.append("behavior_preview.pdf")
+                except Exception:
+                    logger.warning("Failed to save behavior_preview.pdf", exc_info=True)
+
             place_cell_results = self.place_cells()
+
+            # Speed + place cell traces
+            if place_cell_results and self.canonical is not None:
+                try:
+                    fig = plot_position_and_traces_2d(
+                        self.canonical,
+                        place_cell_results,
+                        behavior_fps=self.neural_fps,
+                        speed_threshold=self.cfg.behavior.speed_threshold,
+                        trajectory_filtered=self.trajectory_filtered,
+                        speed_unit="mm/s" if self.mm_per_px else "px/s",
+                    )
+                    fig.savefig(figures_dir / "speed_traces.pdf", bbox_inches="tight")
+                    _plt.close(fig)
+                    saved.append("speed_traces.pdf")
+                except Exception:
+                    logger.warning("Failed to save speed_traces.pdf", exc_info=True)
+
             if place_cell_results:
                 try:
                     coverage_map, _, _ = self.coverage()

@@ -526,10 +526,12 @@ class MazeDataset(BasePlaceCellDataset):
 
         from placecell.analysis.pvo_1d import compute_dataset_arm_pvo, plot_arm_pvo_grid
         from placecell.visualization import (
+            plot_behavior_preview,
             plot_graph_overlay,
             plot_occupancy_preview_1d,
             plot_position_and_traces_1d,
             plot_shuffle_test_1d,
+            plot_speed_histogram,
         )
 
         rc = {
@@ -556,6 +558,51 @@ class MazeDataset(BasePlaceCellDataset):
                     saved.append("occupancy.pdf")
                 except Exception:
                     logger.warning("Failed to save occupancy.pdf", exc_info=True)
+
+            # 2D behavior preview (trajectory density + speed histogram)
+            if (
+                self.canonical is not None
+                and self.trajectory_1d_filtered is not None
+                and "x" in self.canonical.columns
+            ):
+                try:
+                    fig = plot_behavior_preview(
+                        self.canonical,
+                        self.trajectory_1d_filtered,
+                        self.cfg.behavior.speed_threshold,
+                        speed_unit="mm/s",
+                        speed_column="speed_1d",
+                    )
+                    fig.savefig(
+                        figures_dir / "behavior_preview.pdf",
+                        bbox_inches="tight",
+                    )
+                    _plt.close(fig)
+                    saved.append("behavior_preview.pdf")
+                except Exception:
+                    logger.warning("Failed to save behavior_preview.pdf", exc_info=True)
+
+            # Speed histogram (1D arm speed)
+            if self.trajectory_1d is not None and "speed_1d" in self.trajectory_1d.columns:
+                try:
+                    speeds = self.trajectory_1d["speed_1d"].to_numpy()
+                    n_filt = (
+                        len(self.trajectory_1d_filtered)
+                        if self.trajectory_1d_filtered is not None
+                        else 0
+                    )
+                    fig = plot_speed_histogram(
+                        speeds,
+                        self.cfg.behavior.speed_threshold,
+                        speed_unit="mm/s",
+                        n_filtered=n_filt,
+                        n_total=len(self.trajectory_1d),
+                    )
+                    fig.savefig(figures_dir / "speed_histogram.pdf", bbox_inches="tight")
+                    _plt.close(fig)
+                    saved.append("speed_histogram.pdf")
+                except Exception:
+                    logger.warning("Failed to save speed_histogram.pdf", exc_info=True)
 
             if self.unit_results and self.edges_1d is not None:
                 try:
@@ -597,11 +644,11 @@ class MazeDataset(BasePlaceCellDataset):
                         arm_boundaries=self.arm_boundaries,
                         arm_labels=self.effective_arm_order,
                     )
-                    fig.savefig(figures_dir / "position_traces.pdf", bbox_inches="tight")
+                    fig.savefig(figures_dir / "speed_traces.pdf", bbox_inches="tight")
                     _plt.close(fig)
-                    saved.append("position_traces.pdf")
+                    saved.append("speed_traces.pdf")
                 except Exception:
-                    logger.warning("Failed to save position_traces.pdf", exc_info=True)
+                    logger.warning("Failed to save speed_traces.pdf", exc_info=True)
 
             if self.graph_polylines is not None:
                 try:
