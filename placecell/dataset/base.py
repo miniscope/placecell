@@ -613,6 +613,7 @@ class BasePlaceCellDataset(abc.ABC):
             plot_diagnostics,
             plot_footprints_filled,
             plot_summary_scatter,
+            plot_timestamp_diagnostics,
         )
 
         saved: list[str] = []
@@ -648,6 +649,14 @@ class BasePlaceCellDataset(abc.ABC):
                         saved.append(name)
                     except Exception:
                         logger.warning("Failed to save %s", name, exc_info=True)
+
+            try:
+                fig = plot_timestamp_diagnostics(self.trajectory_raw, self.canonical)
+                fig.savefig(figures_dir / "timestamp_diagnostics.pdf", bbox_inches="tight")
+                _plt.close(fig)
+                saved.append("timestamp_diagnostics.pdf")
+            except Exception:
+                logger.warning("Failed to save timestamp_diagnostics.pdf", exc_info=True)
 
             if self.max_proj is not None and self.footprints is not None:
                 try:
