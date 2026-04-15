@@ -86,7 +86,13 @@ def plot_timestamp_diagnostics(
 
     fig, axes = plt.subplots(1, 2, figsize=(11, 4))
 
-    def _panel(ax, frame_index, ts, title, color):
+    def _panel(
+        ax: "Axes",
+        frame_index: "np.ndarray | pd.Series | None",
+        ts: "np.ndarray | None",
+        title: str,
+        color: str,
+    ) -> None:
         if frame_index is None or ts is None or len(ts) == 0:
             ax.text(0.5, 0.5, "no data", ha="center", va="center", transform=ax.transAxes)
             ax.set_title(title)
