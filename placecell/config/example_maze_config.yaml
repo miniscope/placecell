@@ -13,7 +13,7 @@ behavior:
   speed_window_seconds: 0.25
   spatial_map_1d:
     bin_width_mm: 10
-    min_occupancy: 0.025
+    min_occupancy: 0.05
     spatial_sigma: 2
     n_shuffles: 1000
     random_seed: 42

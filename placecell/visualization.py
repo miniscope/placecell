@@ -70,6 +70,69 @@ def plot_session_summary(summary_df: "pd.DataFrame") -> "Figure":
     return fig
 
 
+def plot_timestamp_diagnostics(
+    trajectory_raw: "pd.DataFrame | None",
+    canonical: "pd.DataFrame | None",
+) -> "Figure":
+    """Plot data index vs. unix timestamp for behavior and neural streams.
+
+    A healthy recording produces a near-linear ramp with no flat segments
+    (duplicate timestamps), no backward jumps (non-monotonic), and similar
+    slopes (sample rates) between the two panels. Deviations here can
+    explain downstream alignment artefacts.
+    """
+    if plt is None:
+        raise ImportError("matplotlib is required for plotting.")
+
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4))
+
+    def _panel(
+        ax: "Axes",
+        frame_index: "np.ndarray | pd.Series | None",
+        ts: "np.ndarray | None",
+        title: str,
+        color: str,
+    ) -> None:
+        if frame_index is None or ts is None or len(ts) == 0:
+            ax.text(0.5, 0.5, "no data", ha="center", va="center", transform=ax.transAxes)
+            ax.set_title(title)
+            return
+        ax.plot(frame_index, ts, "-", color=color, lw=0.8)
+        diffs = np.diff(ts)
+        n_dup = int((diffs == 0).sum())
+        n_back = int((diffs < 0).sum())
+        if n_back:
+            back_mask = np.concatenate([[False], diffs < 0])
+            ax.plot(
+                np.asarray(frame_index)[back_mask],
+                np.asarray(ts)[back_mask],
+                "rx",
+                ms=5,
+                label=f"backward ({n_back})",
+            )
+        fps = float(1.0 / np.median(diffs[diffs > 0])) if (diffs > 0).any() else float("nan")
+        ax.set_xlabel("frame index")
+        ax.set_ylabel("unix time (s)")
+        ax.set_title(f"{title}\nN={len(ts)}, ~{fps:.2f} Hz, dup={n_dup}, back={n_back}")
+        if n_back:
+            ax.legend(fontsize=8, loc="lower right")
+
+    beh_idx = beh_ts = None
+    if trajectory_raw is not None and "unix_time" in trajectory_raw.columns:
+        beh_idx = trajectory_raw.get("frame_index", pd.Series(np.arange(len(trajectory_raw))))
+        beh_ts = trajectory_raw["unix_time"].to_numpy()
+    _panel(axes[0], beh_idx, beh_ts, "Behavior timestamps", "tab:blue")
+
+    neu_idx = neu_ts = None
+    if canonical is not None and "neural_time" in canonical.columns:
+        neu_idx = canonical.get("frame_index", pd.Series(np.arange(len(canonical))))
+        neu_ts = canonical["neural_time"].to_numpy()
+    _panel(axes[1], neu_idx, neu_ts, "Neural timestamps (post-validation)", "tab:green")
+
+    fig.tight_layout()
+    return fig
+
+
 def plot_summary_scatter(
     unit_results: dict,
     p_value_threshold: float = 0.05,
