@@ -234,6 +234,16 @@ class ArenaDataset(BasePlaceCellDataset):
             len(self.good_unit_ids),
         )
 
+        self._refresh_views_from_canonical()
+
+    def _refresh_views_from_canonical(self) -> None:
+        """Rebuild ``event_index``, ``trajectory_filtered``, ``event_place`` from ``canonical``.
+
+        Shared by :meth:`match_events` and :meth:`apply_time_window` so the two
+        paths stay in lockstep.
+        """
+        bcfg = self.cfg.behavior
+
         # Long-format event table over the *unfiltered* canonical, used by
         # the notebook browser (which shows all events including low-speed).
         self.event_index = derive_event_place_from_canonical(
@@ -265,6 +275,35 @@ class ArenaDataset(BasePlaceCellDataset):
             len(self.event_place),
             self.event_place["unit_id"].nunique() if not self.event_place.empty else 0,
         )
+
+    def apply_time_window(self, start_s: float, end_s: float) -> None:
+        """Restrict the canonical table to ``[start_s, end_s)`` relative to the first neural frame.
+
+        Call after :meth:`match_events`. The first call snapshots the full
+        canonical table; subsequent calls always re-slice from that snapshot,
+        so iterating windows is idempotent. Re-runs the view derivations but
+        not deconvolution — the caller should rerun :meth:`compute_occupancy`
+        and :meth:`analyze_units` to complete the analysis for the new window.
+        """
+        if self.canonical is None:
+            raise RuntimeError("Call match_events() first.")
+
+        if not hasattr(self, "_canonical_full") or self._canonical_full is None:
+            self._canonical_full = self.canonical.copy()
+
+        full = self._canonical_full
+        t0 = float(full["neural_time"].iloc[0])
+        rel = full["neural_time"].to_numpy() - t0
+        mask = (rel >= start_s) & (rel < end_s)
+        self.canonical = full.loc[mask].reset_index(drop=True)
+        logger.info(
+            "Time window [%.1f, %.1f)s: %d/%d frames",
+            start_s,
+            end_s,
+            len(self.canonical),
+            len(full),
+        )
+        self._refresh_views_from_canonical()
 
     def compute_occupancy(self) -> None:
         """Compute 2D occupancy map from speed-filtered trajectory."""
