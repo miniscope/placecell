@@ -7,14 +7,38 @@ between the per-session maze viewer and cross-session analyses.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
-from typing import Any
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+if TYPE_CHECKING:
+    from placecell.dataset import BasePlaceCellDataset
+
 UNKNOWN_LABELS = {"unknown", "Unknown", "UNKNOWN"}
+
+
+@dataclass
+class ViewConfig:
+    """3D view orientation knobs."""
+
+    elev: float = 15.0
+    azim: float = -60.0
+    box_aspect: tuple[float, float, float] = (1.0, 1.0, 2.0)
+    invert_y: bool = True
+
+
+@dataclass
+class ProjectionConfig:
+    """Flat 2D-projection-beneath-3D knobs. ``z=None`` disables the projection."""
+
+    z: float | None = None
+    box: bool = True
+    dot_alpha: float = 0.5
+    dot_size_frac: float = 0.6
 
 # Saturated palette from ColorBrewer Dark2 (gray + too-green index dropped) +
 # Set1 (gray dropped). 14 distinct colors that read on white.
@@ -28,7 +52,7 @@ DEFAULT_PALETTE: list[Any] = (
 ROOM_COLOR = "0.6"
 
 
-def _resolve_arm_lists(ds) -> tuple[list[str], list[str]]:
+def _resolve_arm_lists(ds: BasePlaceCellDataset) -> tuple[list[str], list[str]]:
     """Return (raw_arms, effective_arm_order)."""
     raw_arms = list(
         (ds.data_cfg.arm_order if ds.data_cfg and ds.data_cfg.arm_order else []) or []
@@ -37,10 +61,9 @@ def _resolve_arm_lists(ds) -> tuple[list[str], list[str]]:
     return raw_arms, arm_order
 
 
-def arm_color_map(arm_order: Sequence[str], palette: Sequence[Any] | None = None) -> dict[str, Any]:
-    """Stable arm → color mapping using ``palette`` (cycles if shorter)."""
-    palette = list(palette) if palette is not None else DEFAULT_PALETTE
-    return {name: palette[i % len(palette)] for i, name in enumerate(arm_order)}
+def arm_color_map(arm_order: Sequence[str]) -> dict[str, Any]:
+    """Stable arm → color mapping from :data:`DEFAULT_PALETTE` (cycles)."""
+    return {name: DEFAULT_PALETTE[i % len(DEFAULT_PALETTE)] for i, name in enumerate(arm_order)}
 
 
 # ---------------------------------------------------------------------------
@@ -48,7 +71,7 @@ def arm_color_map(arm_order: Sequence[str], palette: Sequence[Any] | None = None
 # ---------------------------------------------------------------------------
 
 
-def compute_zone_occupancy(ds) -> tuple[pd.Series, pd.Series, float]:
+def compute_zone_occupancy(ds: BasePlaceCellDataset) -> tuple[pd.Series, pd.Series, float]:
     """Return ``(arm_seconds, room_seconds, unknown_seconds)`` for ``ds``.
 
     Arm frames are labeled ``{zone}_{direction}`` when the canonical table
@@ -103,10 +126,9 @@ def compute_zone_occupancy(ds) -> tuple[pd.Series, pd.Series, float]:
 
 
 def plot_zone_occupancy(
-    ds,
+    ds: BasePlaceCellDataset,
     *,
     proportion: bool = False,
-    arm_colors: dict[str, Any] | None = None,
     title: str | None = None,
     ax: plt.Axes | None = None,
 ) -> plt.Figure:
@@ -127,7 +149,7 @@ def plot_zone_occupancy(
         ylabel = "time (s)"
         label_fmt = lambda v: f"{v:.0f}s"  # noqa: E731
 
-    arm_colors = arm_colors or arm_color_map(arm_s.index)
+    arm_colors = arm_color_map(arm_s.index)
     labels = list(arm_v.index) + list(room_v.index)
     values = list(arm_v.values) + list(room_v.values)
     bar_colors = (
@@ -160,9 +182,8 @@ def plot_zone_occupancy(
 
 
 def plot_cross_session_occupancy(
-    datasets: dict[str, Any],
+    datasets: dict[str, BasePlaceCellDataset],
     *,
-    arm_colors: dict[str, Any] | None = None,
     title: str | None = None,
 ) -> plt.Figure:
     """Mean ± SD proportional zone occupancy across multiple datasets."""
@@ -198,7 +219,7 @@ def plot_cross_session_occupancy(
     mean = arr.mean(axis=0)
     sd = arr.std(axis=0, ddof=1) if arr.shape[0] > 1 else np.zeros_like(mean)
 
-    arm_colors = arm_colors or arm_color_map(all_arms)
+    arm_colors = arm_color_map(all_arms)
     labels = all_arms + all_rooms
     bar_colors = (
         [arm_colors.get(a, DEFAULT_PALETTE[0]) for a in all_arms]
@@ -224,14 +245,14 @@ def plot_cross_session_occupancy(
 # ---------------------------------------------------------------------------
 
 
-def select_top_place_cells(ds, n: int) -> list[int]:
+def select_top_place_cells(ds: BasePlaceCellDataset, n: int) -> list[int]:
     """Top-N place cell unit_ids ranked by SI."""
     pcs = ds.place_cells()
     return [uid for uid, _ in sorted(pcs.items(), key=lambda kv: -kv[1].si)[:n]]
 
 
 def gather_events(
-    ds,
+    ds: BasePlaceCellDataset,
     unit_ids: Sequence[int],
     *,
     event_percentile: float = 0.0,
@@ -260,7 +281,7 @@ def _arm_masked_canonical(canonical: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def _strip_3d_background(ax) -> None:
+def _strip_3d_background(ax: Any) -> None:
     """Transparent panes, no grid; hide x/y axes (keep z/time)."""
     for pane in (ax.xaxis.pane, ax.yaxis.pane, ax.zaxis.pane):
         pane.set_facecolor((1, 1, 1, 0))
@@ -281,7 +302,7 @@ def _directions_in(canonical: pd.DataFrame) -> list[Any]:
 
 
 def plot_event_overlay_2d(
-    ds,
+    ds: BasePlaceCellDataset,
     unit_ids: Sequence[int],
     *,
     events_by_cell: dict[int, pd.DataFrame] | None = None,
@@ -344,143 +365,40 @@ def plot_event_overlay_2d(
     return fig
 
 
-def plot_event_trajectories_3d(
-    ds,
-    unit_ids: Sequence[int],
-    *,
-    event_percentile: float = 95.0,
-    event_abs_min: float = 0.0,
-    invert_y: bool = True,
-    box_aspect: tuple[float, float, float] = (1, 1, 2),
-    view_elev: float = 15,
-    view_azim: float = -60,
-    graph_z: float | None = -20.0,
-    line_color: Any = "C0",
-    line_width: float = 0.8,
-    title: str | None = None,
-) -> plt.Figure:
-    """3D (x, y, time) plot showing trajectory only at frames with high-amplitude events.
-
-    Events from all ``unit_ids`` are pooled and thresholded at the
-    ``event_percentile`` of the pooled amplitudes (``s`` column) and at
-    ``event_abs_min``; the union of the surviving frames defines which
-    trajectory rows are drawn. One subplot per direction.
-    """
-    canonical = ds.canonical
-    arm_canonical = _arm_masked_canonical(canonical)
-    directions = _directions_in(arm_canonical)
-
-    traj = arm_canonical.copy()
-    t0_series = traj["neural_time"].dropna()
-    if t0_series.empty:
-        raise ValueError("canonical has no neural_time values")
-    t0 = float(t0_series.iloc[0])
-    traj["t_min"] = (traj["neural_time"] - t0) / 60.0
-
-    pooled = ds.event_place[ds.event_place["unit_id"].isin(unit_ids)]
-    if pooled.empty or "s" not in pooled.columns:
-        raise ValueError("No events found for the requested unit_ids.")
-    thr = event_abs_min
-    if event_percentile > 0:
-        thr = max(thr, float(np.percentile(pooled["s"].to_numpy(), event_percentile)))
-    kept = pooled[pooled["s"] >= thr] if thr > 0 else pooled
-    event_frames = set(kept["frame_index"].astype(int).tolist())
-
-    frame_index = (
-        traj["frame_index"].astype(int).to_numpy()
-        if "frame_index" in traj.columns else np.arange(len(traj))
-    )
-    base_mask = np.array([f in event_frames for f in frame_index])
-
-    x_arr = traj["x"].to_numpy()
-    y_arr = traj["y"].to_numpy()
-    t_arr = traj["t_min"].to_numpy()
-    dir_arr = (
-        traj["direction"].to_numpy()
-        if "direction" in traj.columns else np.array([None] * len(traj))
-    )
-
-    graph_polylines = getattr(ds, "graph_polylines", None)
-
-    fig = plt.figure(figsize=(4.5 * len(directions), 5))
-    for i, direction in enumerate(directions):
-        ax = fig.add_subplot(
-            1, len(directions), i + 1, projection="3d", computed_zorder=False,
-        )
-        _strip_3d_background(ax)
-        ax.set_box_aspect(box_aspect)
-        ax.view_init(elev=view_elev, azim=view_azim)
-
-        if graph_polylines and graph_z is not None:
-            for waypoints in graph_polylines.values():
-                pts = np.asarray(waypoints, dtype=float)
-                ax.plot(pts[:, 0], pts[:, 1], np.full(len(pts), graph_z),
-                        color="0.5", lw=0.8, zorder=0)
-
-        mask = base_mask.copy()
-        if direction is not None:
-            mask &= (dir_arr == direction)
-        xs = np.where(mask, x_arr, np.nan)
-        ys = np.where(mask, y_arr, np.nan)
-        ts = np.where(mask, t_arr, np.nan)
-        ax.plot(xs, ys, ts, color=line_color, lw=line_width, alpha=0.9, zorder=10)
-
-        if invert_y:
-            ax.invert_yaxis()
-        t_max = float(traj["t_min"].max())
-        z_lo = graph_z if graph_z is not None else 0.0
-        ax.set_zlim(z_lo, t_max * 1.02)
-        zticks = [t for t in ax.get_zticks() if t >= 0]
-        ax.set_zticks(zticks)
-        ax.set_zlabel("time (min)")
-        ax.set_title(
-            f"{direction if direction is not None else 'All'} "
-            f"({int(mask.sum())} frames)"
-        )
-
-    fig.suptitle(
-        title or
-        f"event-frame trajectory (top {100 - event_percentile:.0f}% of pooled events, "
-        f"thr={thr:.3f})"
-    )
-    fig.tight_layout()
-    return fig
-
-
 def plot_event_overlay_3d(
-    ds,
+    ds: BasePlaceCellDataset,
     unit_ids: Sequence[int],
     *,
     events_by_cell: dict[int, pd.DataFrame] | None = None,
     cell_colors: dict[int, Any] | None = None,
     dot_size: int = 16,
     dot_alpha: float = 1.0,
-    invert_y: bool = True,
-    box_aspect: tuple[float, float, float] = (1, 1, 2),
-    view_elev: float = 15,
-    view_azim: float = -60,
+    view: ViewConfig | None = None,
+    projection: ProjectionConfig | None = None,
     graph_z: float | None = -20.0,
-    trajectory_frames: Iterable[int] | None = None,
     traversal_subset: bool = False,
     show_trajectory: bool = True,
-    projection_z: float | None = None,
-    projection_box: bool = True,
-    projection_dot_alpha: float = 0.5,
-    projection_dot_size_frac: float = 0.6,
     title: str | None = None,
 ) -> plt.Figure:
     """3D (x, y, time) overlay with all selected cells on shared axes per direction.
 
     Parameters
     ----------
-    show_trajectory:
-        Draw the trajectory line (possibly subset). Set to False to suppress.
-    projection_z:
-        If a float, draw a flat 2D event overlay at that fixed z-plane beneath
-        the 3D plot. ``None`` (default) disables.
+    view:
+        Camera orientation knobs; see :class:`ViewConfig`.
+    projection:
+        Flat 2D-beneath-3D event projection; see :class:`ProjectionConfig`.
+        ``projection.z is None`` (the default) disables the projection.
     graph_z:
-        z-plane for the maze-graph polyline overlay (or ``None`` to disable).
+        z-plane for the maze-graph polyline overlay (``None`` to disable).
+    show_trajectory:
+        Draw the trajectory line (possibly subset).
+    traversal_subset:
+        If True, restrict the trajectory (and dots) to arm traversals that
+        contain at least one event from ``events_by_cell``.
     """
+    view = view or ViewConfig()
+    projection = projection or ProjectionConfig()
     canonical = ds.canonical
     arm_canonical = _arm_masked_canonical(canonical)
     directions = _directions_in(arm_canonical)
@@ -519,7 +437,8 @@ def plot_event_overlay_3d(
     # by a traversal in the subset view — no extra percentile filter applied
     # here; ``gather_events`` is the single source of truth for which events
     # are "kept".
-    if trajectory_frames is None and traversal_subset:
+    traj_frame_set: set[int] | None = None
+    if traversal_subset:
         pooled_parts = [
             ev for ev in events_by_cell.values()
             if not ev.empty and "frame_index" in ev.columns
@@ -542,17 +461,13 @@ def plot_event_overlay_3d(
 
                 event_rows = np.array([i for i, f in enumerate(cf) if int(f) in event_frames])
                 if event_rows.size:
-                    hit_traversals = set(int(t) for t in traversal_id[event_rows] if t >= 0)
+                    hit_traversals = {int(t) for t in traversal_id[event_rows] if t >= 0}
                     keep_rows = np.isin(traversal_id, list(hit_traversals))
-                    trajectory_frames = set(int(f) for f in cf[keep_rows])
+                    traj_frame_set = {int(f) for f in cf[keep_rows]}
                 else:
-                    trajectory_frames = set()
+                    traj_frame_set = set()
             else:
-                trajectory_frames = event_frames
-    traj_frame_set = (
-        set(int(f) for f in trajectory_frames)
-        if trajectory_frames is not None else None
-    )
+                traj_frame_set = event_frames
 
     fig = plt.figure(figsize=(4.5 * len(directions), 5))
     for i, direction in enumerate(directions):
@@ -560,8 +475,8 @@ def plot_event_overlay_3d(
             1, len(directions), i + 1, projection="3d", computed_zorder=False,
         )
         _strip_3d_background(ax)
-        ax.set_box_aspect(box_aspect)
-        ax.view_init(elev=view_elev, azim=view_azim)
+        ax.set_box_aspect(view.box_aspect)
+        ax.view_init(elev=view.elev, azim=view.azim)
 
         sub = traj if direction is None else traj.copy()
         if direction is not None:
@@ -580,7 +495,7 @@ def plot_event_overlay_3d(
                         color="0.5", lw=0.8, zorder=0)
 
         # Optional flat 2D projection of events at a fixed z plane.
-        if projection_z is not None:
+        if projection.z is not None:
             for uid in unit_ids:
                 ev = events_by_cell.get(uid, pd.DataFrame())
                 if direction is not None and "direction" in ev.columns:
@@ -591,12 +506,12 @@ def plot_event_overlay_3d(
                     continue
                 ax.scatter(
                     ev["x"].to_numpy(), ev["y"].to_numpy(),
-                    np.full(len(ev), projection_z),
-                    s=dot_size * projection_dot_size_frac, c=[cell_colors[uid]],
-                    edgecolors="none", alpha=projection_dot_alpha,
+                    np.full(len(ev), projection.z),
+                    s=dot_size * projection.dot_size_frac, c=[cell_colors[uid]],
+                    edgecolors="none", alpha=projection.dot_alpha,
                     depthshade=False, zorder=2,
                 )
-            if projection_box:
+            if projection.box:
                 # Bounding box from projected event points + 5% margin.
                 proj_xs, proj_ys = [], []
                 for uid in unit_ids:
@@ -615,14 +530,19 @@ def plot_event_overlay_3d(
                     ymin, ymax = float(np.nanmin(all_y)), float(np.nanmax(all_y))
                     mx = (xmax - xmin) * 0.05
                     my = (ymax - ymin) * 0.05
-                    xmin -= mx; xmax += mx
-                    ymin -= my; ymax += my
-                    pz = projection_z
-                    corners_x = [xmin, xmax, xmax, xmin, xmin]
-                    corners_y = [ymin, ymin, ymax, ymax, ymin]
-                    corners_z = [pz] * 5
-                    ax.plot(corners_x, corners_y, corners_z,
-                            color="0.6", lw=0.6, ls="--", zorder=0)
+                    xmin -= mx
+                    xmax += mx
+                    ymin -= my
+                    ymax += my
+                    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+                    pz = projection.z
+                    quad = [[
+                        (xmin, ymin, pz), (xmax, ymin, pz),
+                        (xmax, ymax, pz), (xmin, ymax, pz),
+                    ]]
+                    ax.add_collection3d(Poly3DCollection(
+                        quad, facecolor="0.85", edgecolor="none", zorder=0,
+                    ))
 
         for uid in unit_ids:
             ev = events_by_cell.get(uid, pd.DataFrame())
@@ -643,11 +563,11 @@ def plot_event_overlay_3d(
                 alpha=dot_alpha, depthshade=False, zorder=10, label=f"cell {uid}",
             )
 
-        if invert_y:
+        if view.invert_y:
             ax.invert_yaxis()
         # Start time axis at 0; projection lives in negative z space.
         t_max = float(traj["t_min"].max())
-        z_lo = projection_z if projection_z is not None else 0.0
+        z_lo = projection.z if projection.z is not None else 0.0
         ax.set_zlim(z_lo, t_max * 1.02)
         zticks = [t for t in ax.get_zticks() if t >= 0]
         ax.set_zticks(zticks)
