@@ -8,7 +8,6 @@ between the per-session maze viewer and cross-session analyses.
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from pathlib import Path
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -288,6 +287,7 @@ def plot_event_overlay_2d(
     events_by_cell: dict[int, pd.DataFrame] | None = None,
     cell_colors: dict[int, Any] | None = None,
     dot_size: int = 16,
+    dot_alpha: float = 0.85,
     invert_y: bool = True,
     title: str | None = None,
 ) -> plt.Figure:
@@ -329,7 +329,7 @@ def plot_event_overlay_2d(
                 continue
             ax.scatter(
                 ev["x"], ev["y"], s=dot_size, c=[cell_colors[uid]],
-                edgecolors="none", alpha=0.85, label=f"cell {uid}", zorder=2,
+                edgecolors="none", alpha=dot_alpha, label=f"cell {uid}", zorder=2,
             )
         ax.set_aspect("equal")
         ax.set_xlabel("x (px)")
@@ -344,21 +344,28 @@ def plot_event_overlay_2d(
     return fig
 
 
-def plot_event_overlay_3d(
+def plot_event_trajectories_3d(
     ds,
     unit_ids: Sequence[int],
     *,
-    events_by_cell: dict[int, pd.DataFrame] | None = None,
-    cell_colors: dict[int, Any] | None = None,
-    dot_size: int = 16,
+    event_percentile: float = 95.0,
+    event_abs_min: float = 0.0,
     invert_y: bool = True,
     box_aspect: tuple[float, float, float] = (1, 1, 2),
     view_elev: float = 15,
     view_azim: float = -60,
-    graph_z: float = -20.0,
+    graph_z: float | None = -20.0,
+    line_color: Any = "C0",
+    line_width: float = 0.8,
     title: str | None = None,
 ) -> plt.Figure:
-    """3D (x, y, time) overlay with all selected cells on shared axes per direction."""
+    """3D (x, y, time) plot showing trajectory only at frames with high-amplitude events.
+
+    Events from all ``unit_ids`` are pooled and thresholded at the
+    ``event_percentile`` of the pooled amplitudes (``s`` column) and at
+    ``event_abs_min``; the union of the surviving frames defines which
+    trajectory rows are drawn. One subplot per direction.
+    """
     canonical = ds.canonical
     arm_canonical = _arm_masked_canonical(canonical)
     directions = _directions_in(arm_canonical)
@@ -369,14 +376,183 @@ def plot_event_overlay_3d(
         raise ValueError("canonical has no neural_time values")
     t0 = float(t0_series.iloc[0])
     traj["t_min"] = (traj["neural_time"] - t0) / 60.0
+
+    pooled = ds.event_place[ds.event_place["unit_id"].isin(unit_ids)]
+    if pooled.empty or "s" not in pooled.columns:
+        raise ValueError("No events found for the requested unit_ids.")
+    thr = event_abs_min
+    if event_percentile > 0:
+        thr = max(thr, float(np.percentile(pooled["s"].to_numpy(), event_percentile)))
+    kept = pooled[pooled["s"] >= thr] if thr > 0 else pooled
+    event_frames = set(kept["frame_index"].astype(int).tolist())
+
+    frame_index = (
+        traj["frame_index"].astype(int).to_numpy()
+        if "frame_index" in traj.columns else np.arange(len(traj))
+    )
+    base_mask = np.array([f in event_frames for f in frame_index])
+
+    x_arr = traj["x"].to_numpy()
+    y_arr = traj["y"].to_numpy()
+    t_arr = traj["t_min"].to_numpy()
+    dir_arr = (
+        traj["direction"].to_numpy()
+        if "direction" in traj.columns else np.array([None] * len(traj))
+    )
+
+    graph_polylines = getattr(ds, "graph_polylines", None)
+
+    fig = plt.figure(figsize=(4.5 * len(directions), 5))
+    for i, direction in enumerate(directions):
+        ax = fig.add_subplot(
+            1, len(directions), i + 1, projection="3d", computed_zorder=False,
+        )
+        _strip_3d_background(ax)
+        ax.set_box_aspect(box_aspect)
+        ax.view_init(elev=view_elev, azim=view_azim)
+
+        if graph_polylines and graph_z is not None:
+            for waypoints in graph_polylines.values():
+                pts = np.asarray(waypoints, dtype=float)
+                ax.plot(pts[:, 0], pts[:, 1], np.full(len(pts), graph_z),
+                        color="0.5", lw=0.8, zorder=0)
+
+        mask = base_mask.copy()
+        if direction is not None:
+            mask &= (dir_arr == direction)
+        xs = np.where(mask, x_arr, np.nan)
+        ys = np.where(mask, y_arr, np.nan)
+        ts = np.where(mask, t_arr, np.nan)
+        ax.plot(xs, ys, ts, color=line_color, lw=line_width, alpha=0.9, zorder=10)
+
+        if invert_y:
+            ax.invert_yaxis()
+        t_max = float(traj["t_min"].max())
+        z_lo = graph_z if graph_z is not None else 0.0
+        ax.set_zlim(z_lo, t_max * 1.02)
+        zticks = [t for t in ax.get_zticks() if t >= 0]
+        ax.set_zticks(zticks)
+        ax.set_zlabel("time (min)")
+        ax.set_title(
+            f"{direction if direction is not None else 'All'} "
+            f"({int(mask.sum())} frames)"
+        )
+
+    fig.suptitle(
+        title or
+        f"event-frame trajectory (top {100 - event_percentile:.0f}% of pooled events, "
+        f"thr={thr:.3f})"
+    )
+    fig.tight_layout()
+    return fig
+
+
+def plot_event_overlay_3d(
+    ds,
+    unit_ids: Sequence[int],
+    *,
+    events_by_cell: dict[int, pd.DataFrame] | None = None,
+    cell_colors: dict[int, Any] | None = None,
+    dot_size: int = 16,
+    dot_alpha: float = 1.0,
+    invert_y: bool = True,
+    box_aspect: tuple[float, float, float] = (1, 1, 2),
+    view_elev: float = 15,
+    view_azim: float = -60,
+    graph_z: float | None = -20.0,
+    trajectory_frames: Iterable[int] | None = None,
+    traversal_subset: bool = False,
+    show_trajectory: bool = True,
+    projection_z: float | None = None,
+    projection_box: bool = True,
+    projection_dot_alpha: float = 0.5,
+    projection_dot_size_frac: float = 0.6,
+    title: str | None = None,
+) -> plt.Figure:
+    """3D (x, y, time) overlay with all selected cells on shared axes per direction.
+
+    Parameters
+    ----------
+    show_trajectory:
+        Draw the trajectory line (possibly subset). Set to False to suppress.
+    projection_z:
+        If a float, draw a flat 2D event overlay at that fixed z-plane beneath
+        the 3D plot. ``None`` (default) disables.
+    graph_z:
+        z-plane for the maze-graph polyline overlay (or ``None`` to disable).
+    """
+    canonical = ds.canonical
+    arm_canonical = _arm_masked_canonical(canonical)
+    directions = _directions_in(arm_canonical)
+
+    traj = arm_canonical.copy()
+    t0_series = traj["neural_time"].dropna()
+    if t0_series.empty:
+        raise ValueError("canonical has no neural_time values")
+    t0 = float(t0_series.iloc[0])
+    traj["t_min"] = (traj["neural_time"] - t0) / 60.0
+
     frame_to_time = canonical.set_index("frame_index")["neural_time"]
 
     events_by_cell = events_by_cell or gather_events(ds, unit_ids)
+
+    # Restrict events to arm frames (consistent with the arm-masked trajectory).
+    if "pos_1d" in canonical.columns:
+        _arm_frames = set(
+            canonical.loc[canonical["pos_1d"].notna(), "frame_index"].astype(int).tolist()
+        )
+        events_by_cell = {
+            uid: ev[ev["frame_index"].astype(int).isin(_arm_frames)]
+            if "frame_index" in ev.columns and not ev.empty else ev
+            for uid, ev in events_by_cell.items()
+        }
+
     cmap = plt.get_cmap("tab10")
     cell_colors = cell_colors or {
         uid: cmap(i % cmap.N) for i, uid in enumerate(unit_ids)
     }
     graph_polylines = getattr(ds, "graph_polylines", None)
+
+    # Optional trajectory subset: expand each event frame in ``events_by_cell``
+    # to its full arm traversal (maximal contiguous run on the same arm_index
+    # in the canonical table). This keeps every dot shown in the overlay backed
+    # by a traversal in the subset view — no extra percentile filter applied
+    # here; ``gather_events`` is the single source of truth for which events
+    # are "kept".
+    if trajectory_frames is None and traversal_subset:
+        pooled_parts = [
+            ev for ev in events_by_cell.values()
+            if not ev.empty and "frame_index" in ev.columns
+        ]
+        if pooled_parts:
+            pooled = pd.concat(pooled_parts, ignore_index=True)
+            event_frames = set(pooled["frame_index"].astype(int).tolist())
+
+            # Build traversal IDs per row in canonical: each maximal contiguous
+            # block of equal non-NaN arm_index is one traversal.
+            if "arm_index" in canonical.columns and "frame_index" in canonical.columns:
+                cf = canonical["frame_index"].astype(int).to_numpy()
+                arm = canonical["arm_index"].to_numpy()
+                arm_s = pd.to_numeric(pd.Series(arm), errors="coerce")
+                arm_isna = arm_s.isna().to_numpy()
+                arm_filled = arm_s.fillna(-1).to_numpy()
+                changes = np.concatenate([[True], arm_filled[1:] != arm_filled[:-1]])
+                traversal_id = np.cumsum(changes) - 1
+                traversal_id[arm_isna] = -1
+
+                event_rows = np.array([i for i, f in enumerate(cf) if int(f) in event_frames])
+                if event_rows.size:
+                    hit_traversals = set(int(t) for t in traversal_id[event_rows] if t >= 0)
+                    keep_rows = np.isin(traversal_id, list(hit_traversals))
+                    trajectory_frames = set(int(f) for f in cf[keep_rows])
+                else:
+                    trajectory_frames = set()
+            else:
+                trajectory_frames = event_frames
+    traj_frame_set = (
+        set(int(f) for f in trajectory_frames)
+        if trajectory_frames is not None else None
+    )
 
     fig = plt.figure(figsize=(4.5 * len(directions), 5))
     for i, direction in enumerate(directions):
@@ -390,18 +566,70 @@ def plot_event_overlay_3d(
         sub = traj if direction is None else traj.copy()
         if direction is not None:
             sub.loc[sub["direction"] != direction, ["x", "y", "t_min"]] = np.nan
-        ax.plot(sub["x"], sub["y"], sub["t_min"], color="0", lw=0.3, zorder=1)
+        if show_trajectory:
+            if traj_frame_set is not None and "frame_index" in sub.columns:
+                sub = sub.copy()
+                keep_mask = sub["frame_index"].astype(int).isin(traj_frame_set)
+                sub.loc[~keep_mask, ["x", "y", "t_min"]] = np.nan
+            ax.plot(sub["x"], sub["y"], sub["t_min"], color="0", lw=0.3, zorder=1)
 
-        if graph_polylines:
+        if graph_polylines and graph_z is not None:
             for waypoints in graph_polylines.values():
                 pts = np.asarray(waypoints, dtype=float)
                 ax.plot(pts[:, 0], pts[:, 1], np.full(len(pts), graph_z),
                         color="0.5", lw=0.8, zorder=0)
 
+        # Optional flat 2D projection of events at a fixed z plane.
+        if projection_z is not None:
+            for uid in unit_ids:
+                ev = events_by_cell.get(uid, pd.DataFrame())
+                if direction is not None and "direction" in ev.columns:
+                    ev = ev[ev["direction"] == direction]
+                if traj_frame_set is not None and "frame_index" in ev.columns:
+                    ev = ev[ev["frame_index"].astype(int).isin(traj_frame_set)]
+                if ev.empty:
+                    continue
+                ax.scatter(
+                    ev["x"].to_numpy(), ev["y"].to_numpy(),
+                    np.full(len(ev), projection_z),
+                    s=dot_size * projection_dot_size_frac, c=[cell_colors[uid]],
+                    edgecolors="none", alpha=projection_dot_alpha,
+                    depthshade=False, zorder=2,
+                )
+            if projection_box:
+                # Bounding box from projected event points + 5% margin.
+                proj_xs, proj_ys = [], []
+                for uid in unit_ids:
+                    ev = events_by_cell.get(uid, pd.DataFrame())
+                    if direction is not None and "direction" in ev.columns:
+                        ev = ev[ev["direction"] == direction]
+                    if traj_frame_set is not None and "frame_index" in ev.columns:
+                        ev = ev[ev["frame_index"].astype(int).isin(traj_frame_set)]
+                    if not ev.empty:
+                        proj_xs.append(ev["x"].to_numpy())
+                        proj_ys.append(ev["y"].to_numpy())
+                if proj_xs:
+                    all_x = np.concatenate(proj_xs)
+                    all_y = np.concatenate(proj_ys)
+                    xmin, xmax = float(np.nanmin(all_x)), float(np.nanmax(all_x))
+                    ymin, ymax = float(np.nanmin(all_y)), float(np.nanmax(all_y))
+                    mx = (xmax - xmin) * 0.05
+                    my = (ymax - ymin) * 0.05
+                    xmin -= mx; xmax += mx
+                    ymin -= my; ymax += my
+                    pz = projection_z
+                    corners_x = [xmin, xmax, xmax, xmin, xmin]
+                    corners_y = [ymin, ymin, ymax, ymax, ymin]
+                    corners_z = [pz] * 5
+                    ax.plot(corners_x, corners_y, corners_z,
+                            color="0.6", lw=0.6, ls="--", zorder=0)
+
         for uid in unit_ids:
             ev = events_by_cell.get(uid, pd.DataFrame())
             if direction is not None and "direction" in ev.columns:
                 ev = ev[ev["direction"] == direction]
+            if traj_frame_set is not None and "frame_index" in ev.columns:
+                ev = ev[ev["frame_index"].astype(int).isin(traj_frame_set)]
             if ev.empty:
                 continue
             ev_time = frame_to_time.reindex(ev["frame_index"]).to_numpy()
@@ -412,11 +640,17 @@ def plot_event_overlay_3d(
             ax.scatter(
                 ev["x"].to_numpy()[keep], ev["y"].to_numpy()[keep], t_ev,
                 s=dot_size, c=[cell_colors[uid]], edgecolors="none",
-                alpha=1.0, depthshade=False, zorder=10, label=f"cell {uid}",
+                alpha=dot_alpha, depthshade=False, zorder=10, label=f"cell {uid}",
             )
 
         if invert_y:
             ax.invert_yaxis()
+        # Start time axis at 0; projection lives in negative z space.
+        t_max = float(traj["t_min"].max())
+        z_lo = projection_z if projection_z is not None else 0.0
+        ax.set_zlim(z_lo, t_max * 1.02)
+        zticks = [t for t in ax.get_zticks() if t >= 0]
+        ax.set_zticks(zticks)
         ax.set_zlabel("time (min)")
         ax.set_title(str(direction) if direction is not None else "All")
         if i == 0:
