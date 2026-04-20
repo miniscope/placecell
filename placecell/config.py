@@ -89,12 +89,29 @@ class BaseSpatialMapConfig(BaseModel):
         ...,
         description="'amplitude' uses event amplitudes, 'binary' uses event counts.",
     )
-    n_split_blocks: int = Field(
-        10,
-        ge=2,
-        le=100,
-        description="Number of temporal blocks for interleaved stability splitting.",
+    stability_splits: list[int] = Field(
+        default_factory=lambda: [2, 10],
+        min_length=1,
+        description=(
+            "Block counts for interleaved stability tests. One shuffle test is "
+            "run per entry; a cell is 'stable' only if every test passes "
+            "(p < p_value_threshold). Default [2, 10] runs first/second half "
+            "plus a 10-block interleaved split."
+        ),
     )
+
+    @model_validator(mode="after")
+    def _validate_stability_splits(self) -> "BaseSpatialMapConfig":
+        bad = [n for n in self.stability_splits if n < 2 or n > 100]
+        if bad:
+            raise ValueError(
+                f"stability_splits entries must be in [2, 100]; got {bad}."
+            )
+        if len(set(self.stability_splits)) != len(self.stability_splits):
+            raise ValueError(
+                f"stability_splits must be unique; got {self.stability_splits}."
+            )
+        return self
     block_shift: float = Field(
         0.0,
         ge=0.0,

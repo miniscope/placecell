@@ -25,7 +25,7 @@ from placecell.neural import load_calcium_traces, run_deconvolution
 
 logger = init_logger(__name__)
 
-_BUNDLE_VERSION = 1
+_BUNDLE_VERSION = 2
 
 
 def unique_bundle_path(bundle_dir: str | Path, stem: str) -> Path:
@@ -56,6 +56,38 @@ def unique_bundle_path(bundle_dir: str | Path, stem: str) -> Path:
 
 
 @dataclass
+class StabilitySplitResult:
+    """Result of one stability shuffle test at a given ``n_split_blocks``.
+
+    Parameters
+    ----------
+    n_split_blocks:
+        Number of interleaved temporal blocks used to split the session
+        (2 = classic first/second half).
+    corr:
+        Pearson correlation between first-half and second-half rate maps.
+    fisher_z:
+        Fisher z-transform of ``corr``.
+    p_val:
+        Shuffle-based p-value (NaN if ``n_shuffles == 0``).
+    shuffled_corrs:
+        Correlations from shuffled data (used for significance).
+    rate_map_first:
+        Rate map for the first half of the split (smoothed).
+    rate_map_second:
+        Rate map for the second half of the split (smoothed).
+    """
+
+    n_split_blocks: int
+    corr: float
+    fisher_z: float
+    p_val: float
+    shuffled_corrs: np.ndarray
+    rate_map_first: np.ndarray
+    rate_map_second: np.ndarray
+
+
+@dataclass
 class UnitResult:
     """Analysis results for a single unit.
 
@@ -73,18 +105,10 @@ class UnitResult:
         Spatial information values from shuffled data (for significance test).
     shuffled_rate_p95:
         95th percentile of shuffled rate maps (for place field thresholding).
-    stability_corr:
-        Correlation between rate maps from first vs. second half of session.
-    stability_z:
-        Fisher z-score corresponding to stability_corr.
-    stability_p_val:
-        P-value from stability significance test.
-    shuffled_stability:
-        Stability correlations from shuffled data (for significance test).
-    rate_map_first:
-        Rate map for first half of session.
-    rate_map_second:
-        Rate map for second half of session.
+    stability_splits:
+        One :class:`StabilitySplitResult` per entry in
+        ``spatial_map.stability_splits``. A cell is considered stable only if
+        every split's ``p_val`` is below the threshold.
     vis_data_above:
         Subset of unit_data where event amplitude exceeds the threshold
         (used for plotting event dots on rate maps).
@@ -107,18 +131,22 @@ class UnitResult:
     p_val: float
     shuffled_sis: np.ndarray
     shuffled_rate_p95: np.ndarray
-    stability_corr: float
-    stability_z: float
-    stability_p_val: float
-    shuffled_stability: np.ndarray
-    rate_map_first: np.ndarray
-    rate_map_second: np.ndarray
+    stability_splits: list[StabilitySplitResult]
     vis_data_above: pd.DataFrame
     unit_data: pd.DataFrame
     overall_rate: float
     event_count_rate: float
     trace_data: np.ndarray | None
     trace_times: np.ndarray | None
+
+    def is_stable(self, p_threshold: float) -> bool:
+        """True iff every stability split's p-value is below ``p_threshold``."""
+        if not self.stability_splits:
+            return False
+        return all(
+            not np.isnan(s.p_val) and s.p_val < p_threshold
+            for s in self.stability_splits
+        )
 
 
 class BasePlaceCellDataset(abc.ABC):
@@ -442,14 +470,14 @@ class BasePlaceCellDataset(abc.ABC):
         ...
 
     def place_cells(self) -> dict[int, UnitResult]:
-        """Return units passing both significance and stability tests."""
+        """Return units passing both significance and all stability tests."""
         p_thresh = self.p_value_threshold
 
         out: dict[int, UnitResult] = {}
         for uid, res in self.unit_results.items():
             if res.p_val >= p_thresh:
                 continue
-            if np.isnan(res.stability_p_val) or res.stability_p_val >= p_thresh:
+            if not res.is_stable(p_thresh):
                 continue
             out[uid] = res
         return out
@@ -471,7 +499,7 @@ class BasePlaceCellDataset(abc.ABC):
 
         for res in self.unit_results.values():
             is_sig = res.p_val < p_thresh
-            is_stable = not np.isnan(res.stability_p_val) and res.stability_p_val < p_thresh
+            is_stable = res.is_stable(p_thresh)
 
             if is_sig:
                 n_sig += 1
@@ -612,6 +640,7 @@ class BasePlaceCellDataset(abc.ABC):
         from placecell.visualization import (
             plot_diagnostics,
             plot_footprints_filled,
+            plot_stability_splits_summary,
             plot_summary_scatter,
             plot_timestamp_diagnostics,
         )
@@ -639,6 +668,13 @@ class BasePlaceCellDataset(abc.ABC):
                             p_value_threshold=self.p_value_threshold,
                             n_shuffles=self._shuffle_n,
                             min_shift_seconds=self._shuffle_shift,
+                        ),
+                    ),
+                    (
+                        "stability_splits.pdf",
+                        lambda: plot_stability_splits_summary(
+                            self.unit_results,
+                            p_value_threshold=self.p_value_threshold,
                         ),
                     ),
                 ]:
@@ -670,28 +706,33 @@ class BasePlaceCellDataset(abc.ABC):
         return saved
 
     def _save_unit_results(self, ur_dir: Path) -> None:
-        """Serialize unit_results into *ur_dir*."""
+        """Serialize unit_results into *ur_dir*.
+
+        Scalar per-unit fields go to ``scalars.csv``.
+        Shared arrays (rate_map, shuffled_sis, etc.) go to ``arrays.npz``.
+        Per-split stability results (corr, p_val, shuffled_corrs, half maps)
+        go to ``stability_scalars.csv`` + ``stability_arrays.npz`` keyed by
+        ``{uid}_{split_index}_{field}``. ``stability_scalars.csv`` also
+        records ``split_index`` and ``n_split_blocks`` so order and split
+        identity survive round-trip.
+        """
         scalar_fields = [
             "si",
             "p_val",
             "overall_rate",
             "event_count_rate",
-            "stability_corr",
-            "stability_z",
-            "stability_p_val",
         ]
         array_fields = [
             "rate_map",
             "rate_map_raw",
             "shuffled_sis",
             "shuffled_rate_p95",
-            "shuffled_stability",
-            "rate_map_first",
-            "rate_map_second",
             "trace_data",
             "trace_times",
         ]
         df_fields = ["vis_data_above", "unit_data"]
+        split_scalar_fields = ["n_split_blocks", "corr", "fisher_z", "p_val"]
+        split_array_fields = ["shuffled_corrs", "rate_map_first", "rate_map_second"]
 
         # Scalars → CSV
         rows = []
@@ -711,6 +752,24 @@ class BasePlaceCellDataset(abc.ABC):
                     arrays[f"{uid}_{f}"] = val
         if arrays:
             np.savez_compressed(ur_dir / "arrays.npz", **arrays)
+
+        # Stability splits: scalars CSV + arrays NPZ
+        stab_rows = []
+        stab_arrays: dict[str, np.ndarray] = {}
+        for uid, res in self.unit_results.items():
+            for i, s in enumerate(res.stability_splits):
+                row = {"unit_id": uid, "split_index": i}
+                for f in split_scalar_fields:
+                    row[f] = getattr(s, f)
+                stab_rows.append(row)
+                for f in split_array_fields:
+                    val = getattr(s, f)
+                    if val is not None:
+                        stab_arrays[f"{uid}_{i}_{f}"] = val
+        if stab_rows:
+            pd.DataFrame(stab_rows).to_csv(ur_dir / "stability_scalars.csv", index=False)
+        if stab_arrays:
+            np.savez_compressed(ur_dir / "stability_arrays.npz", **stab_arrays)
 
         # DataFrames → single parquet (concatenated with identifiers)
         parts = []
@@ -738,9 +797,11 @@ class BasePlaceCellDataset(abc.ABC):
 
         # Metadata
         meta = json.loads((path / "metadata.json").read_text())
-        if meta["version"] > _BUNDLE_VERSION:
+        if meta["version"] != _BUNDLE_VERSION:
             raise ValueError(
-                f"Bundle version {meta['version']} is newer than supported ({_BUNDLE_VERSION})"
+                f"Bundle version {meta['version']} is not supported "
+                f"(expected {_BUNDLE_VERSION}). Legacy bundles must be rerun "
+                f"through the pipeline to upgrade."
             )
 
         # Config
@@ -886,9 +947,6 @@ class BasePlaceCellDataset(abc.ABC):
             "p_val",
             "overall_rate",
             "event_count_rate",
-            "stability_corr",
-            "stability_z",
-            "stability_p_val",
         ]
         # Read scalars
         scalars_df = pd.read_csv(ur_dir / "scalars.csv")
@@ -911,6 +969,38 @@ class BasePlaceCellDataset(abc.ABC):
                 field = parts[1]
                 if uid in arrays_by_uid:
                     arrays_by_uid[uid][field] = arrays_npz[key]
+
+        # Read stability splits (one row per (uid, split_index)).
+        stab_arrays_by_key: dict[tuple[int, int, str], np.ndarray] = {}
+        stab_arrays_path = ur_dir / "stability_arrays.npz"
+        if stab_arrays_path.exists():
+            stab_npz = np.load(stab_arrays_path)
+            for key in stab_npz.files:
+                uid_str, idx_str, field = key.split("_", 2)
+                stab_arrays_by_key[(int(uid_str), int(idx_str), field)] = stab_npz[key]
+
+        stability_by_uid: dict[int, list[StabilitySplitResult]] = {uid: [] for uid in unit_ids}
+        stab_csv = ur_dir / "stability_scalars.csv"
+        if stab_csv.exists():
+            stab_df = pd.read_csv(stab_csv).sort_values(["unit_id", "split_index"])
+            for _, row in stab_df.iterrows():
+                uid = int(row["unit_id"])
+                idx = int(row["split_index"])
+                stability_by_uid[uid].append(StabilitySplitResult(
+                    n_split_blocks=int(row["n_split_blocks"]),
+                    corr=float(row["corr"]),
+                    fisher_z=float(row["fisher_z"]),
+                    p_val=float(row["p_val"]),
+                    shuffled_corrs=stab_arrays_by_key.get(
+                        (uid, idx, "shuffled_corrs"), np.array([])
+                    ),
+                    rate_map_first=stab_arrays_by_key.get(
+                        (uid, idx, "rate_map_first"), np.array([])
+                    ),
+                    rate_map_second=stab_arrays_by_key.get(
+                        (uid, idx, "rate_map_second"), np.array([])
+                    ),
+                ))
 
         # Read events
         events_by_uid: dict[int, dict] = {uid: {} for uid in unit_ids}
@@ -939,12 +1029,7 @@ class BasePlaceCellDataset(abc.ABC):
                 event_count_rate=float(sc["event_count_rate"]),
                 shuffled_sis=ar.get("shuffled_sis", np.array([])),
                 shuffled_rate_p95=ar.get("shuffled_rate_p95", np.array([])),
-                stability_corr=float(sc["stability_corr"]),
-                stability_z=float(sc["stability_z"]),
-                stability_p_val=float(sc["stability_p_val"]),
-                shuffled_stability=ar.get("shuffled_stability", np.array([])),
-                rate_map_first=ar.get("rate_map_first", np.array([])),
-                rate_map_second=ar.get("rate_map_second", np.array([])),
+                stability_splits=stability_by_uid.get(uid, []),
                 vis_data_above=ev.get("vis_data_above", pd.DataFrame()),
                 unit_data=ev.get("unit_data", pd.DataFrame()),
                 trace_data=ar.get("trace_data"),

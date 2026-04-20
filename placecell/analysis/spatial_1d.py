@@ -552,41 +552,49 @@ def compute_unit_analysis_1d(
     events_above = unit_data
     vis_threshold = 0.0
 
-    # Stability test
-    (
-        stability_corr,
-        stability_z,
-        stability_p_val,
-        rate_map_first,
-        rate_map_second,
-        shuffled_stability,
-    ) = compute_stability_score_1d(
-        unit_data,
-        trajectory_df,
-        occupancy_time,
-        valid_mask,
-        edges,
-        spatial_sigma=scfg.spatial_sigma,
-        behavior_fps=behavior_fps,
-        min_occupancy=scfg.min_occupancy,
-        n_split_blocks=scfg.n_split_blocks,
-        block_shift=scfg.block_shift,
-        n_shuffles=scfg.n_shuffles,
-        random_seed=random_seed,
-        min_shift_seconds=scfg.min_shift_seconds,
-        si_weight_mode=scfg.si_weight_mode,
-        pos_column=pos_column,
-        segment_bins=segment_bins,
-    )
-
-    # Normalize half rate maps to the full rate map's peak so all three
-    # are on the same 0-1 scale for display.
+    # Stability tests — one per configured split.
+    stability_splits: list[dict] = []
     full_peak = float(np.nanmax(rate_map_raw[valid_mask])) if valid_mask.any() else 0.0
-    if full_peak > 0:
-        for rm_half in (rate_map_first, rate_map_second):
-            finite = np.isfinite(rm_half)
-            if finite.any():
-                rm_half[finite] = rm_half[finite] / full_peak
+    for n_splits in scfg.stability_splits:
+        (
+            s_corr,
+            s_z,
+            s_p,
+            rm_first,
+            rm_second,
+            shuffled_s,
+        ) = compute_stability_score_1d(
+            unit_data,
+            trajectory_df,
+            occupancy_time,
+            valid_mask,
+            edges,
+            spatial_sigma=scfg.spatial_sigma,
+            behavior_fps=behavior_fps,
+            min_occupancy=scfg.min_occupancy,
+            n_split_blocks=n_splits,
+            block_shift=scfg.block_shift,
+            n_shuffles=scfg.n_shuffles,
+            random_seed=random_seed,
+            min_shift_seconds=scfg.min_shift_seconds,
+            si_weight_mode=scfg.si_weight_mode,
+            pos_column=pos_column,
+            segment_bins=segment_bins,
+        )
+        if full_peak > 0:
+            for rm_half in (rm_first, rm_second):
+                finite = np.isfinite(rm_half)
+                if finite.any():
+                    rm_half[finite] = rm_half[finite] / full_peak
+        stability_splits.append({
+            "n_split_blocks": n_splits,
+            "corr": s_corr,
+            "fisher_z": s_z,
+            "p_val": s_p,
+            "shuffled_corrs": shuffled_s,
+            "rate_map_first": rm_first,
+            "rate_map_second": rm_second,
+        })
 
     return {
         "rate_map": rate_map,
@@ -599,10 +607,5 @@ def compute_unit_analysis_1d(
         "events_above_threshold": events_above,
         "vis_threshold": vis_threshold,
         "unit_data": unit_data,
-        "stability_corr": stability_corr,
-        "stability_z": stability_z,
-        "stability_p_val": stability_p_val,
-        "rate_map_first": rate_map_first,
-        "rate_map_second": rate_map_second,
-        "shuffled_stability": shuffled_stability,
+        "stability_splits": stability_splits,
     }

@@ -166,14 +166,25 @@ def plot_summary_scatter(
 
     unit_ids = list(unit_results.keys())
     p_vals = np.array([unit_results[uid].p_val for uid in unit_ids])
-    stab_pvals = np.array([unit_results[uid].stability_p_val for uid in unit_ids])
-    fisher_z = np.array([unit_results[uid].stability_z for uid in unit_ids])
+    # Worst-case (max) p-value across splits so scatter rewards cells that pass
+    # every configured stability test. Correlation shown is from split #0.
+    stab_pvals = np.array([
+        max((s.p_val for s in unit_results[uid].stability_splits), default=np.nan)
+        for uid in unit_ids
+    ])
+    fisher_z = np.array([
+        unit_results[uid].stability_splits[0].fisher_z
+        if unit_results[uid].stability_splits else np.nan
+        for uid in unit_ids
+    ])
     si_vals = np.array([unit_results[uid].si for uid in unit_ids])
     overall_rates = np.array([unit_results[uid].overall_rate for uid in unit_ids])
 
-    # Classify units
+    # Classify units — stability requires ALL splits p < threshold.
     is_sig = p_vals < p_value_threshold
-    is_stable = np.array([not np.isnan(sp) and sp < p_value_threshold for sp in stab_pvals])
+    is_stable = np.array([
+        unit_results[uid].is_stable(p_value_threshold) for uid in unit_ids
+    ])
     is_place_cell = is_sig & is_stable
 
     colors = []
@@ -450,6 +461,76 @@ def plot_diagnostics(
         max(n_events),
     )
 
+    return fig
+
+
+def plot_stability_splits_summary(
+    unit_results: dict,
+    p_value_threshold: float = 0.05,
+) -> "Figure":
+    """One-row-per-split summary of stability tests across units.
+
+    For each configured split, plots:
+    - Histogram of per-unit stability ``corr`` (observed).
+    - Histogram of per-unit stability ``p_val`` with threshold line.
+
+    Scales automatically to the number of splits.
+    """
+    if plt is None:
+        raise ImportError("matplotlib is required for plotting.")
+
+    uids = list(unit_results.keys())
+    if not uids:
+        fig, ax = plt.subplots(figsize=(5, 2))
+        ax.text(0.5, 0.5, "No units", ha="center", va="center")
+        ax.axis("off")
+        return fig
+
+    n_splits = len(unit_results[uids[0]].stability_splits)
+    if n_splits == 0:
+        fig, ax = plt.subplots(figsize=(5, 2))
+        ax.text(0.5, 0.5, "No stability splits", ha="center", va="center")
+        ax.axis("off")
+        return fig
+
+    fig, axes = plt.subplots(
+        n_splits, 2, figsize=(9, 2.6 * n_splits), squeeze=False,
+    )
+
+    for i in range(n_splits):
+        corrs = np.array([
+            r.stability_splits[i].corr for r in unit_results.values()
+            if len(r.stability_splits) > i
+        ])
+        pvals = np.array([
+            r.stability_splits[i].p_val for r in unit_results.values()
+            if len(r.stability_splits) > i
+        ])
+        n_split_blocks = unit_results[uids[0]].stability_splits[i].n_split_blocks
+        n_pass = int(np.nansum(pvals < p_value_threshold))
+
+        ax_corr, ax_p = axes[i]
+        ax_corr.hist(
+            corrs[np.isfinite(corrs)], bins=30, color="steelblue",
+            edgecolor="black", alpha=0.7,
+        )
+        ax_corr.set_xlabel("stability corr (r)")
+        ax_corr.set_ylabel("units")
+        ax_corr.set_title(f"split #{i} — {n_split_blocks} blocks")
+
+        ax_p.hist(
+            pvals[np.isfinite(pvals)], bins=30, color="darkorange",
+            edgecolor="black", alpha=0.7,
+        )
+        ax_p.axvline(
+            p_value_threshold, color="red", linestyle="--", linewidth=1.2,
+            label=f"p={p_value_threshold} ({n_pass}/{len(pvals)} pass)",
+        )
+        ax_p.set_xlabel("stability p_val")
+        ax_p.set_ylabel("units")
+        ax_p.legend(fontsize=8)
+
+    fig.tight_layout()
     return fig
 
 
@@ -1269,13 +1350,11 @@ def plot_shuffle_test_1d(
     if plt is None:
         raise ImportError("matplotlib is required for plotting.")
 
-    # Identify place cells: significant SI AND stable
-    place_cell_ids = []
-    for uid, res in unit_results.items():
-        is_sig = res.p_val < p_value_threshold
-        is_stable = not np.isnan(res.stability_p_val) and res.stability_p_val < p_value_threshold
-        if is_sig and is_stable:
-            place_cell_ids.append(uid)
+    # Identify place cells: significant SI AND all stability splits pass.
+    place_cell_ids = [
+        uid for uid, res in unit_results.items()
+        if res.p_val < p_value_threshold and res.is_stable(p_value_threshold)
+    ]
 
     if not place_cell_ids:
         fig, ax = plt.subplots(1, 1, figsize=(8, 2))

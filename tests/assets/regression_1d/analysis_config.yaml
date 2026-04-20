@@ -22,6 +22,6 @@ behavior:
     p_value_threshold: 0.05
     min_shift_seconds: 20.0
     si_weight_mode: amplitude
-    n_split_blocks: 10
+    stability_splits: [2, 10]
     block_shift: 0.0
     split_by_direction: true
