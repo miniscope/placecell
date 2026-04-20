@@ -40,23 +40,21 @@ class ProjectionConfig:
     dot_alpha: float = 0.5
     dot_size_frac: float = 0.6
 
+
 # Saturated palette from ColorBrewer Dark2 (gray + too-green index dropped) +
 # Set1 (gray dropped). 14 distinct colors that read on white.
 _DARK2 = plt.get_cmap("Dark2")
 _SET1 = plt.get_cmap("Set1")
 _SKIP_DARK2 = {4, 7}
-DEFAULT_PALETTE: list[Any] = (
-    [_DARK2(i) for i in range(8) if i not in _SKIP_DARK2]
-    + [_SET1(i) for i in range(8)]
-)
+DEFAULT_PALETTE: list[Any] = [_DARK2(i) for i in range(8) if i not in _SKIP_DARK2] + [
+    _SET1(i) for i in range(8)
+]
 ROOM_COLOR = "0.6"
 
 
 def _resolve_arm_lists(ds: BasePlaceCellDataset) -> tuple[list[str], list[str]]:
     """Return (raw_arms, effective_arm_order)."""
-    raw_arms = list(
-        (ds.data_cfg.arm_order if ds.data_cfg and ds.data_cfg.arm_order else []) or []
-    )
+    raw_arms = list((ds.data_cfg.arm_order if ds.data_cfg and ds.data_cfg.arm_order else []) or [])
     arm_order = list(getattr(ds, "effective_arm_order", []) or raw_arms)
     return raw_arms, arm_order
 
@@ -112,8 +110,7 @@ def compute_zone_occupancy(ds: BasePlaceCellDataset) -> tuple[pd.Series, pd.Seri
     is_arm = np.array([z in raw_arms for z in zone_array]) & valid
 
     labels = [
-        f"{z}_{d}" if d is not None else z
-        for z, d in zip(zone_array[is_arm], traj_dir[is_arm])
+        f"{z}_{d}" if d is not None else z for z, d in zip(zone_array[is_arm], traj_dir[is_arm])
     ]
     arm_counts = pd.Series(labels).value_counts() if labels else pd.Series(dtype=int)
     arm_s = (arm_counts / fps).reindex(arm_order).fillna(0.0)
@@ -152,9 +149,8 @@ def plot_zone_occupancy(
     arm_colors = arm_color_map(arm_s.index)
     labels = list(arm_v.index) + list(room_v.index)
     values = list(arm_v.values) + list(room_v.values)
-    bar_colors = (
-        [arm_colors.get(a, DEFAULT_PALETTE[0]) for a in arm_v.index]
-        + [ROOM_COLOR] * len(room_v)
+    bar_colors = [arm_colors.get(a, DEFAULT_PALETTE[0]) for a in arm_v.index] + [ROOM_COLOR] * len(
+        room_v
     )
 
     if ax is None:
@@ -173,8 +169,7 @@ def plot_zone_occupancy(
         ax.text(xi, v, label_fmt(v), ha="center", va="bottom", fontsize=8)
 
     suffix = (
-        f"(arms {arm_s.sum():.0f} s, rooms {room_s.sum():.0f} s, "
-        f"unknown {unknown_s:.0f} s)"
+        f"(arms {arm_s.sum():.0f} s, rooms {room_s.sum():.0f} s, " f"unknown {unknown_s:.0f} s)"
     )
     ax.set_title(title or f"zone occupancy {suffix}")
     fig.tight_layout()
@@ -209,21 +204,28 @@ def plot_cross_session_occupancy(
     if not all_arms and not all_rooms:
         raise ValueError("No zone data found across sessions.")
 
-    rows_arms = np.stack([
-        s["arms_prop"].reindex(all_arms).fillna(0.0).to_numpy() for s in sessions.values()
-    ]) if all_arms else np.empty((len(sessions), 0))
-    rows_rooms = np.stack([
-        s["rooms_prop"].reindex(all_rooms).fillna(0.0).to_numpy() for s in sessions.values()
-    ]) if all_rooms else np.empty((len(sessions), 0))
+    rows_arms = (
+        np.stack(
+            [s["arms_prop"].reindex(all_arms).fillna(0.0).to_numpy() for s in sessions.values()]
+        )
+        if all_arms
+        else np.empty((len(sessions), 0))
+    )
+    rows_rooms = (
+        np.stack(
+            [s["rooms_prop"].reindex(all_rooms).fillna(0.0).to_numpy() for s in sessions.values()]
+        )
+        if all_rooms
+        else np.empty((len(sessions), 0))
+    )
     arr = np.concatenate([rows_arms, rows_rooms], axis=1)
     mean = arr.mean(axis=0)
     sd = arr.std(axis=0, ddof=1) if arr.shape[0] > 1 else np.zeros_like(mean)
 
     arm_colors = arm_color_map(all_arms)
     labels = all_arms + all_rooms
-    bar_colors = (
-        [arm_colors.get(a, DEFAULT_PALETTE[0]) for a in all_arms]
-        + [ROOM_COLOR] * len(all_rooms)
+    bar_colors = [arm_colors.get(a, DEFAULT_PALETTE[0]) for a in all_arms] + [ROOM_COLOR] * len(
+        all_rooms
     )
 
     fig, ax = plt.subplots(figsize=(max(5, 0.5 * len(labels) + 2), 4.0))
@@ -319,12 +321,11 @@ def plot_event_overlay_2d(
 
     events_by_cell = events_by_cell or gather_events(ds, unit_ids)
     cmap = plt.get_cmap("tab10")
-    cell_colors = cell_colors or {
-        uid: cmap(i % cmap.N) for i, uid in enumerate(unit_ids)
-    }
+    cell_colors = cell_colors or {uid: cmap(i % cmap.N) for i, uid in enumerate(unit_ids)}
 
     fig, axes = plt.subplots(
-        1, len(directions),
+        1,
+        len(directions),
         figsize=(5 * len(directions), 5),
         squeeze=False,
     )
@@ -349,8 +350,14 @@ def plot_event_overlay_2d(
             if ev.empty:
                 continue
             ax.scatter(
-                ev["x"], ev["y"], s=dot_size, c=[cell_colors[uid]],
-                edgecolors="none", alpha=dot_alpha, label=f"cell {uid}", zorder=2,
+                ev["x"],
+                ev["y"],
+                s=dot_size,
+                c=[cell_colors[uid]],
+                edgecolors="none",
+                alpha=dot_alpha,
+                label=f"cell {uid}",
+                zorder=2,
             )
         ax.set_aspect("equal")
         ax.set_xlabel("x (px)")
@@ -420,15 +427,16 @@ def plot_event_overlay_3d(
             canonical.loc[canonical["pos_1d"].notna(), "frame_index"].astype(int).tolist()
         )
         events_by_cell = {
-            uid: ev[ev["frame_index"].astype(int).isin(_arm_frames)]
-            if "frame_index" in ev.columns and not ev.empty else ev
+            uid: (
+                ev[ev["frame_index"].astype(int).isin(_arm_frames)]
+                if "frame_index" in ev.columns and not ev.empty
+                else ev
+            )
             for uid, ev in events_by_cell.items()
         }
 
     cmap = plt.get_cmap("tab10")
-    cell_colors = cell_colors or {
-        uid: cmap(i % cmap.N) for i, uid in enumerate(unit_ids)
-    }
+    cell_colors = cell_colors or {uid: cmap(i % cmap.N) for i, uid in enumerate(unit_ids)}
     graph_polylines = getattr(ds, "graph_polylines", None)
 
     # Optional trajectory subset: expand each event frame in ``events_by_cell``
@@ -440,8 +448,7 @@ def plot_event_overlay_3d(
     traj_frame_set: set[int] | None = None
     if traversal_subset:
         pooled_parts = [
-            ev for ev in events_by_cell.values()
-            if not ev.empty and "frame_index" in ev.columns
+            ev for ev in events_by_cell.values() if not ev.empty and "frame_index" in ev.columns
         ]
         if pooled_parts:
             pooled = pd.concat(pooled_parts, ignore_index=True)
@@ -472,7 +479,11 @@ def plot_event_overlay_3d(
     fig = plt.figure(figsize=(4.5 * len(directions), 5))
     for i, direction in enumerate(directions):
         ax = fig.add_subplot(
-            1, len(directions), i + 1, projection="3d", computed_zorder=False,
+            1,
+            len(directions),
+            i + 1,
+            projection="3d",
+            computed_zorder=False,
         )
         _strip_3d_background(ax)
         ax.set_box_aspect(view.box_aspect)
@@ -491,8 +502,9 @@ def plot_event_overlay_3d(
         if graph_polylines and graph_z is not None:
             for waypoints in graph_polylines.values():
                 pts = np.asarray(waypoints, dtype=float)
-                ax.plot(pts[:, 0], pts[:, 1], np.full(len(pts), graph_z),
-                        color="0.5", lw=0.8, zorder=0)
+                ax.plot(
+                    pts[:, 0], pts[:, 1], np.full(len(pts), graph_z), color="0.5", lw=0.8, zorder=0
+                )
 
         # Optional flat 2D projection of events at a fixed z plane.
         if projection.z is not None:
@@ -505,11 +517,15 @@ def plot_event_overlay_3d(
                 if ev.empty:
                     continue
                 ax.scatter(
-                    ev["x"].to_numpy(), ev["y"].to_numpy(),
+                    ev["x"].to_numpy(),
+                    ev["y"].to_numpy(),
                     np.full(len(ev), projection.z),
-                    s=dot_size * projection.dot_size_frac, c=[cell_colors[uid]],
-                    edgecolors="none", alpha=projection.dot_alpha,
-                    depthshade=False, zorder=2,
+                    s=dot_size * projection.dot_size_frac,
+                    c=[cell_colors[uid]],
+                    edgecolors="none",
+                    alpha=projection.dot_alpha,
+                    depthshade=False,
+                    zorder=2,
                 )
             if projection.box:
                 # Bounding box from projected event points + 5% margin.
@@ -535,14 +551,24 @@ def plot_event_overlay_3d(
                     ymin -= my
                     ymax += my
                     from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
                     pz = projection.z
-                    quad = [[
-                        (xmin, ymin, pz), (xmax, ymin, pz),
-                        (xmax, ymax, pz), (xmin, ymax, pz),
-                    ]]
-                    ax.add_collection3d(Poly3DCollection(
-                        quad, facecolor="0.85", edgecolor="none", zorder=0,
-                    ))
+                    quad = [
+                        [
+                            (xmin, ymin, pz),
+                            (xmax, ymin, pz),
+                            (xmax, ymax, pz),
+                            (xmin, ymax, pz),
+                        ]
+                    ]
+                    ax.add_collection3d(
+                        Poly3DCollection(
+                            quad,
+                            facecolor="0.85",
+                            edgecolor="none",
+                            zorder=0,
+                        )
+                    )
 
         for uid in unit_ids:
             ev = events_by_cell.get(uid, pd.DataFrame())
@@ -558,9 +584,16 @@ def plot_event_overlay_3d(
                 continue
             t_ev = (ev_time[keep] - t0) / 60.0
             ax.scatter(
-                ev["x"].to_numpy()[keep], ev["y"].to_numpy()[keep], t_ev,
-                s=dot_size, c=[cell_colors[uid]], edgecolors="none",
-                alpha=dot_alpha, depthshade=False, zorder=10, label=f"cell {uid}",
+                ev["x"].to_numpy()[keep],
+                ev["y"].to_numpy()[keep],
+                t_ev,
+                s=dot_size,
+                c=[cell_colors[uid]],
+                edgecolors="none",
+                alpha=dot_alpha,
+                depthshade=False,
+                zorder=10,
+                label=f"cell {uid}",
             )
 
         if view.invert_y:
