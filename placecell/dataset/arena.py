@@ -416,6 +416,7 @@ class ArenaDataset(BasePlaceCellDataset):
             ]
             self.unit_results[uid] = UnitResult(
                 rate_map=result["rate_map"],
+                rate_map_smoothed=result["rate_map_smoothed"],
                 rate_map_raw=result["rate_map_raw"],
                 si=result["si"],
                 shuffled_sis=result["shuffled_sis"],

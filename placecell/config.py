@@ -99,6 +99,18 @@ class BaseSpatialMapConfig(BaseModel):
             "plus a 10-block interleaved split."
         ),
     )
+    min_events: int = Field(
+        0,
+        ge=0,
+        description=(
+            "Minimum number of speed-filtered events required to run the "
+            "significance and stability tests for a unit. Units with fewer "
+            "events keep a rate map for inspection but receive p_val=1.0 so "
+            "they cannot be classified as place cells. Set to 0 (default) "
+            "to disable the gate; typical published calcium-imaging values "
+            "are 20-50."
+        ),
+    )
 
     @model_validator(mode="after")
     def _validate_stability_splits(self) -> "BaseSpatialMapConfig":

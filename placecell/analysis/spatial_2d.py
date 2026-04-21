@@ -92,8 +92,9 @@ def compute_rate_map(
     x_edges: np.ndarray,
     y_edges: np.ndarray,
     spatial_sigma: float = 1.0,
+    normalize: bool = True,
 ) -> np.ndarray:
-    """Compute smoothed and normalized rate map for a unit.
+    """Compute smoothed rate map for a unit.
 
     Parameters
     ----------
@@ -107,11 +108,17 @@ def compute_rate_map(
         Spatial bin edges.
     spatial_sigma:
         Gaussian smoothing sigma for rate map.
+    normalize:
+        If ``True`` (default), divide by the peak so the map spans 0-1
+        (convenient for display and for the place-field algorithm, which
+        expects normalized maps). Set to ``False`` to keep firing-rate
+        units (events·s⁻¹ per bin) for quantitative analyses such as
+        population-vector overlap.
 
     Returns
     -------
     np.ndarray
-        Smoothed rate map normalized to 0-1 range.
+        Smoothed rate map. Invalid bins are NaN.
     """
     if unit_events.empty:
         rate_map = np.full_like(occupancy_time, np.nan)
@@ -129,9 +136,12 @@ def compute_rate_map(
     rate_map_smooth = np.zeros_like(occupancy_time)
     rate_map_smooth[valid_mask] = event_smooth[valid_mask] / occ_smooth[valid_mask]
 
-    valid_rate_values = rate_map_smooth[valid_mask]
-    if len(valid_rate_values) > 0 and np.nanmax(valid_rate_values) > 0:
-        rate_map_smooth[valid_mask] = rate_map_smooth[valid_mask] / np.nanmax(valid_rate_values)
+    if normalize:
+        valid_rate_values = rate_map_smooth[valid_mask]
+        if len(valid_rate_values) > 0 and np.nanmax(valid_rate_values) > 0:
+            rate_map_smooth[valid_mask] = (
+                rate_map_smooth[valid_mask] / np.nanmax(valid_rate_values)
+            )
 
     rate_map_smooth[~valid_mask] = np.nan
 
@@ -587,8 +597,15 @@ def compute_stability_score(
 
     # Shuffle-based stability significance test
     if n_shuffles > 0:
-        # Offset seed so stability shuffles are independent of SI shuffles
-        stab_seed = random_seed + 224737 if random_seed is not None else None
+        # Offset seed so stability shuffles are independent of SI shuffles,
+        # and also vary with n_split_blocks so that multiple stability
+        # tests on the same unit draw *different* shuffle sequences
+        # rather than replaying identical shifts against different block
+        # structures (which would produce highly correlated null p-values).
+        if random_seed is not None:
+            stab_seed = random_seed + 224737 + 7919 * n_split_blocks
+        else:
+            stab_seed = None
         rng = np.random.RandomState(stab_seed)
 
         traj_frames = trajectory_df["frame_index"].values
@@ -699,10 +716,28 @@ def compute_unit_analysis(
         df_filtered[df_filtered["unit_id"] == unit_id] if not df_filtered.empty else pd.DataFrame()
     )
 
-    # Rate map (smoothed + normalized for display, raw for place field detection)
-    rate_map = compute_rate_map(
-        unit_data, occupancy_time, valid_mask, x_edges, y_edges, scfg.spatial_sigma
+    # Rate maps:
+    #   - rate_map_smoothed: smoothed, firing-rate units (events·s⁻¹/bin).
+    #     Used for quantitative analyses (population-vector overlap, etc.).
+    #   - rate_map: same smoothing, peak-normalized to 0-1 for display and
+    #     for the place-field algorithm.
+    #   - rate_map_raw: unsmoothed rate, used for place-field boundary
+    #     detection and overall-rate computation.
+    rate_map_smoothed = compute_rate_map(
+        unit_data,
+        occupancy_time,
+        valid_mask,
+        x_edges,
+        y_edges,
+        scfg.spatial_sigma,
+        normalize=False,
     )
+    rate_map = rate_map_smoothed.copy()
+    if valid_mask.any():
+        finite_vals = rate_map[valid_mask]
+        peak = float(np.nanmax(finite_vals)) if finite_vals.size else 0.0
+        if peak > 0:
+            rate_map[valid_mask] = rate_map[valid_mask] / peak
     rate_map_raw = compute_raw_rate_map(unit_data, occupancy_time, valid_mask, x_edges, y_edges)
 
     # Overall rate: amplitude-weighted and binary event count
@@ -717,21 +752,33 @@ def compute_unit_analysis(
         overall_rate = 0.0
         event_count_rate = 0.0
 
+    # Minimum event-count gate. Below-threshold units get p_val=1 so the
+    # shuffle test cannot spuriously flag them: with very few events the
+    # null distribution is narrow enough that a single well-placed event
+    # can clear p<0.05 by chance. Rate maps are still returned for
+    # inspection. Gate of 0 disables the check (no gate).
+    below_gate = scfg.min_events > 0 and len(unit_data) < scfg.min_events
+
     # Spatial information
-    si, p_val, shuffled_sis = compute_spatial_information(
-        unit_data,
-        trajectory_df,
-        occupancy_time,
-        valid_mask,
-        x_edges,
-        y_edges,
-        scfg.n_shuffles,
-        random_seed=random_seed,
-        min_shift_seconds=scfg.min_shift_seconds,
-        behavior_fps=behavior_fps,
-        si_weight_mode=scfg.si_weight_mode,
-        spatial_sigma=scfg.spatial_sigma,
-    )
+    if below_gate:
+        si = 0.0
+        p_val = 1.0
+        shuffled_sis = np.zeros(scfg.n_shuffles)
+    else:
+        si, p_val, shuffled_sis = compute_spatial_information(
+            unit_data,
+            trajectory_df,
+            occupancy_time,
+            valid_mask,
+            x_edges,
+            y_edges,
+            scfg.n_shuffles,
+            random_seed=random_seed,
+            min_shift_seconds=scfg.min_shift_seconds,
+            behavior_fps=behavior_fps,
+            si_weight_mode=scfg.si_weight_mode,
+            spatial_sigma=scfg.spatial_sigma,
+        )
 
     # Event threshold for visualization
     if not unit_data.empty and len(unit_data) > 1:
@@ -762,30 +809,39 @@ def compute_unit_analysis(
     stability_splits: list[dict] = []
     full_peak = float(np.nanmax(rate_map_raw[valid_mask])) if valid_mask.any() else 0.0
     for n_splits in scfg.stability_splits:
-        (
-            s_corr,
-            s_z,
-            s_p,
-            rm_first,
-            rm_second,
-            shuffled_s,
-        ) = compute_stability_score(
-            unit_data,
-            trajectory_df,
-            occupancy_time,
-            valid_mask,
-            x_edges,
-            y_edges,
-            spatial_sigma=scfg.spatial_sigma,
-            behavior_fps=behavior_fps,
-            min_occupancy=scfg.min_occupancy,
-            n_split_blocks=n_splits,
-            block_shift=scfg.block_shift,
-            n_shuffles=scfg.n_shuffles,
-            random_seed=random_seed,
-            min_shift_seconds=scfg.min_shift_seconds,
-            si_weight_mode=scfg.si_weight_mode,
-        )
+        if below_gate:
+            nan_map = np.full_like(occupancy_time, np.nan)
+            s_corr = np.nan
+            s_z = np.nan
+            s_p = 1.0
+            rm_first = nan_map
+            rm_second = nan_map.copy()
+            shuffled_s = np.array([])
+        else:
+            (
+                s_corr,
+                s_z,
+                s_p,
+                rm_first,
+                rm_second,
+                shuffled_s,
+            ) = compute_stability_score(
+                unit_data,
+                trajectory_df,
+                occupancy_time,
+                valid_mask,
+                x_edges,
+                y_edges,
+                spatial_sigma=scfg.spatial_sigma,
+                behavior_fps=behavior_fps,
+                min_occupancy=scfg.min_occupancy,
+                n_split_blocks=n_splits,
+                block_shift=scfg.block_shift,
+                n_shuffles=scfg.n_shuffles,
+                random_seed=random_seed,
+                min_shift_seconds=scfg.min_shift_seconds,
+                si_weight_mode=scfg.si_weight_mode,
+            )
         # Normalize half rate maps to the full rate map's peak.
         if full_peak > 0:
             for rm_half in (rm_first, rm_second):
@@ -804,6 +860,7 @@ def compute_unit_analysis(
 
     return {
         "rate_map": rate_map,
+        "rate_map_smoothed": rate_map_smoothed,
         "rate_map_raw": rate_map_raw,
         "overall_rate": overall_rate,
         "event_count_rate": event_count_rate,

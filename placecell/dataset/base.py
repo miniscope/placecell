@@ -94,7 +94,12 @@ class UnitResult:
     Parameters
     ----------
     rate_map:
-        Smoothed rate map (e.g. 2D array for arena dataset, or 1D array for maze dataset).
+        Smoothed rate map, peak-normalized to 0-1 (for display and for the
+        place-field algorithm).
+    rate_map_smoothed:
+        Smoothed rate map in firing-rate units (events·s⁻¹ per bin). Use
+        this for quantitative analyses such as population-vector overlap.
+        May be ``None`` for bundles saved before this field was introduced.
     rate_map_raw:
         Raw (unsmoothed) rate map.
     si:
@@ -126,6 +131,7 @@ class UnitResult:
     """
 
     rate_map: np.ndarray
+    rate_map_smoothed: np.ndarray | None
     rate_map_raw: np.ndarray
     si: float
     p_val: float
@@ -724,6 +730,7 @@ class BasePlaceCellDataset(abc.ABC):
         ]
         array_fields = [
             "rate_map",
+            "rate_map_smoothed",
             "rate_map_raw",
             "shuffled_sis",
             "shuffled_rate_p95",
@@ -1022,6 +1029,7 @@ class BasePlaceCellDataset(abc.ABC):
             ev = events_by_uid.get(uid, {})
             results[uid] = UnitResult(
                 rate_map=ar.get("rate_map", np.array([])),
+                rate_map_smoothed=ar.get("rate_map_smoothed"),
                 rate_map_raw=ar.get("rate_map_raw", np.array([])),
                 si=float(sc["si"]),
                 p_val=float(sc["p_val"]),

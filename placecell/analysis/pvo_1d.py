@@ -27,6 +27,15 @@ def _stack_rate_maps(
     unit_results: dict[int, Any],
     unit_ids: list[int] | None = None,
 ) -> tuple[np.ndarray, list[int]]:
+    """Stack per-unit rate maps for PVO.
+
+    Prefers ``rate_map_smoothed`` (smoothed, firing-rate units), because
+    cosine similarity across bins should reflect the true rate magnitudes
+    across cells. Falls back to ``rate_map`` (peak-normalized, shape-only)
+    for bundles that predate the ``rate_map_smoothed`` field — in that
+    case cells contribute equally regardless of firing rate and the PVO
+    is a shape-similarity metric rather than a population-vector overlap.
+    """
     selected = sorted(unit_ids) if unit_ids is not None else sorted(unit_results)
     if not selected:
         raise ValueError("No units selected for PVO.")
@@ -36,9 +45,16 @@ def _stack_rate_maps(
     kept_ids: list[int] = []
     for uid in selected:
         res = unit_results.get(uid)
-        if res is None or getattr(res, "rate_map", None) is None:
+        if res is None:
             continue
-        rm = np.asarray(res.rate_map, dtype=float)
+        rm_smoothed = getattr(res, "rate_map_smoothed", None)
+        if rm_smoothed is not None and np.asarray(rm_smoothed).size > 0:
+            rm = np.asarray(rm_smoothed, dtype=float)
+        else:
+            rm_legacy = getattr(res, "rate_map", None)
+            if rm_legacy is None:
+                continue
+            rm = np.asarray(rm_legacy, dtype=float)
         if rm.ndim != 1:
             raise ValueError(f"Unit {uid} rate_map must be 1D, got shape {rm.shape}.")
         if n_bins is None:
