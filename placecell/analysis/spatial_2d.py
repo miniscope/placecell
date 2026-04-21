@@ -1,5 +1,7 @@
 """Spatial analysis functions for place cells."""
 
+from typing import Any
+
 import numpy as np
 import pandas as pd
 from scipy.ndimage import gaussian_filter, label
@@ -316,11 +318,14 @@ def compute_shuffled_rate_percentile(
 ) -> np.ndarray:
     """Compute per-bin percentile of shuffled smoothed rate maps.
 
-    Used for the seed detection step of the Guo et al. 2023 place field
-    algorithm.  For each shuffle iteration, circularly shifts event times
-    relative to the trajectory, computes a smoothed and normalized (0-1)
-    rate map, then returns the requested percentile across shuffles at
-    each spatial bin.
+    Used for the seed detection step of the place-field algorithm.
+    For each shuffle iteration, circularly shifts event times relative
+    to the trajectory and computes a smoothed rate map in firing-rate
+    units (events·s⁻¹ per bin), then returns the requested percentile
+    across shuffles at each spatial bin.
+
+    Output is in the same units as ``rate_map_smoothed`` so they can be
+    compared bin-for-bin in ``compute_place_field_mask``.
 
     Parameters
     ----------
@@ -352,7 +357,7 @@ def compute_shuffled_rate_percentile(
     Returns
     -------
     np.ndarray
-        Per-bin percentile of the shuffled normalized rate maps.
+        Per-bin percentile of the shuffled rate maps in firing-rate units.
     """
     result = np.zeros_like(occupancy_time)
     if unit_events.empty:
@@ -398,11 +403,11 @@ def compute_shuffled_rate_percentile(
         event_smooth = gaussian_filter_normalized(event_w_shuf, sigma=spatial_sigma)
         rate_shuf_smooth = np.zeros_like(occupancy_time)
         rate_shuf_smooth[valid_mask] = event_smooth[valid_mask] / occ_smooth[valid_mask]
-
-        # Normalize 0-1 (same as actual rate map)
-        peak = np.nanmax(rate_shuf_smooth[valid_mask]) if np.any(valid_mask) else 0
-        if peak > 0:
-            rate_shuf_smooth[valid_mask] /= peak
+        # Keep rate_shuf_smooth in firing-rate units (events·s⁻¹/bin).
+        # Per-shuffle peak normalization would distort the null
+        # distribution: a shuffle that happens to produce one very hot
+        # bin would then look quiet everywhere else, pushing the 95th
+        # percentile down and making seed detection anti-conservative.
         rate_shuf_smooth[~valid_mask] = 0
 
         shuffled_rates[i] = rate_shuf_smooth
@@ -429,13 +434,21 @@ def compute_stability_score(
 ) -> tuple[float, float, float, np.ndarray, np.ndarray, np.ndarray]:
     """Compute stability score by comparing rate maps from split data.
 
-    Divides the session into ``n_split_blocks`` interleaved temporal
+    Divides the session into ``n_split_blocks`` contiguous temporal
     blocks, assigns odd/even blocks to each half, computes rate maps,
     and returns the Pearson correlation between them.
 
-    Optionally runs a shuffle significance test (Shuman et al. 2020):
-    circularly shifts events and computes the split-half correlation for
-    each shuffle to build a null distribution.
+    Note: ``n_split_blocks=2`` is equivalent to a classic
+    first-half/second-half split, which is sensitive to session-long
+    drift (baseline, motivation, photobleaching). ``n_split_blocks>=4``
+    interleaves the halves so within-session drift averages out; it
+    tests stability at a finer timescale. Passing both (e.g.
+    ``stability_splits=[2, 10]``) lets a unit be called stable only if
+    it passes at both timescales.
+
+    Optionally runs a shuffle significance test: circularly shifts
+    events and computes the split-half correlation for each shuffle to
+    build a null distribution.
 
     Parameters
     ----------
@@ -805,9 +818,11 @@ def compute_unit_analysis(
         percentile=scfg.place_field_seed_percentile,
     )
 
-    # Stability tests — one per configured split.
+    # Stability tests — one per configured split. Half rate maps are
+    # stored in firing-rate units (events·s⁻¹/bin); display code
+    # normalizes at plot time so all three maps (first, second, full)
+    # can share a colorbar.
     stability_splits: list[dict] = []
-    full_peak = float(np.nanmax(rate_map_raw[valid_mask])) if valid_mask.any() else 0.0
     for n_splits in scfg.stability_splits:
         if below_gate:
             nan_map = np.full_like(occupancy_time, np.nan)
@@ -842,12 +857,6 @@ def compute_unit_analysis(
                 min_shift_seconds=scfg.min_shift_seconds,
                 si_weight_mode=scfg.si_weight_mode,
             )
-        # Normalize half rate maps to the full rate map's peak.
-        if full_peak > 0:
-            for rm_half in (rm_first, rm_second):
-                finite = np.isfinite(rm_half)
-                if finite.any():
-                    rm_half[finite] = rm_half[finite] / full_peak
         stability_splits.append({
             "n_split_blocks": n_splits,
             "corr": s_corr,
@@ -926,8 +935,7 @@ def compute_place_field_mask(
 ) -> np.ndarray:
     """Compute a binary mask of the place field from a rate map.
 
-    Implements the place field detection algorithm from Guo et al. 2023
-    (Science Advances, Supplementary Methods lines 1013-1020):
+    Two-step seed-and-extend algorithm:
 
     1. **Seed detection**: find bins where the actual rate exceeds the
        95th percentile of the shuffled rate (``shuffled_rate_p95``).
@@ -938,14 +946,18 @@ def compute_place_field_mask(
     Parameters
     ----------
     rate_map:
-        Smoothed, normalized (0-1) rate map.  NaN bins are treated as
-        outside the field.
+        Smoothed rate map. Must be in the same units as
+        ``shuffled_rate_p95`` — either both in firing-rate units
+        (preferred; pass ``UnitResult.rate_map_smoothed``) or both
+        peak-normalized. NaN bins are treated as outside the field.
     threshold:
-        Fraction of peak rate for field extension (step 2).
+        Fraction of peak rate for field extension (step 2). Dimensionless
+        and scale-invariant, so it works for either rate-map convention.
     min_bins:
         Minimum number of contiguous bins for a seed region (step 1).
     shuffled_rate_p95:
-        Per-bin 95th percentile of shuffled normalized rate maps.
+        Per-bin 95th percentile of shuffled rate maps, in the same units
+        as ``rate_map``.
 
     Returns
     -------
@@ -996,6 +1008,21 @@ def compute_place_field_mask(
     return mask
 
 
+def _seed_rate_map(result: Any) -> np.ndarray:
+    """Pick the rate-map attribute that matches ``shuffled_rate_p95``'s units.
+
+    Bundles saved after the seed-detection fix store
+    ``rate_map_smoothed`` in firing-rate units and ``shuffled_rate_p95``
+    in the same units. Older bundles stored both peak-normalized to 0-1.
+    Choosing the right attribute per bundle keeps place-field detection
+    self-consistent across versions.
+    """
+    rm_smoothed = getattr(result, "rate_map_smoothed", None)
+    if rm_smoothed is not None and np.asarray(rm_smoothed).size > 0:
+        return rm_smoothed
+    return result.rate_map
+
+
 def compute_coverage_map(
     unit_results: dict,
     threshold: float = 0.05,
@@ -1024,7 +1051,7 @@ def compute_coverage_map(
     """
     coverage = None
     for _uid, result in unit_results.items():
-        rm = result.rate_map
+        rm = _seed_rate_map(result)
         if coverage is None:
             coverage = np.zeros_like(rm, dtype=int)
         field_mask = compute_place_field_mask(
@@ -1075,7 +1102,7 @@ def compute_coverage_curve(
     masks = []
     for _uid, result in unit_results.items():
         m = compute_place_field_mask(
-            result.rate_map,
+            _seed_rate_map(result),
             threshold=threshold,
             min_bins=min_bins,
             shuffled_rate_p95=result.shuffled_rate_p95,

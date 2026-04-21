@@ -26,6 +26,7 @@ behavior:
     stability_splits:
     - 2
     - 10
+    min_events: 0
     block_shift: 0.0
     bin_width_mm: 10.0
     split_by_direction: true

@@ -93,10 +93,13 @@ class BaseSpatialMapConfig(BaseModel):
         default_factory=lambda: [2, 10],
         min_length=1,
         description=(
-            "Block counts for interleaved stability tests. One shuffle test is "
-            "run per entry; a cell is 'stable' only if every test passes "
-            "(p < p_value_threshold). Default [2, 10] runs first/second half "
-            "plus a 10-block interleaved split."
+            "Block counts for stability tests. n=2 is a classic "
+            "first-half/second-half split (sensitive to session-long "
+            "drift); n>=4 interleaves odd/even blocks so within-session "
+            "drift averages out. One shuffle test is run per entry and "
+            "a cell is 'stable' only if every test passes "
+            "(p < p_value_threshold). Default [2, 10] requires stability "
+            "at both the session-wide and within-session timescales."
         ),
     )
     min_events: int = Field(

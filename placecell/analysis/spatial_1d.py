@@ -314,7 +314,12 @@ def compute_stability_score_1d(
 ) -> tuple[float, float, float, np.ndarray, np.ndarray, np.ndarray]:
     """Compute 1D split-half stability test.
 
-    Same interleaved block-splitting approach as 2D, with 1D rate maps.
+    Same block-splitting approach as 2D, with 1D rate maps.
+    ``n_split_blocks=2`` reduces to a first-half/second-half split
+    (sensitive to session-long drift); ``n_split_blocks>=4`` interleaves
+    the halves so within-session drift averages out. Combining both
+    (e.g. ``stability_splits=[2, 10]``) tests stability at two different
+    timescales.
 
     Returns
     -------
@@ -583,9 +588,11 @@ def compute_unit_analysis_1d(
     events_above = unit_data
     vis_threshold = 0.0
 
-    # Stability tests — one per configured split.
+    # Stability tests — one per configured split. Half rate maps are
+    # stored in firing-rate units (events·s⁻¹/bin); display code
+    # normalizes at plot time so all three maps (first, second, full)
+    # can share a colorbar.
     stability_splits: list[dict] = []
-    full_peak = float(np.nanmax(rate_map_raw[valid_mask])) if valid_mask.any() else 0.0
     for n_splits in scfg.stability_splits:
         if below_gate:
             nan_map = np.full_like(occupancy_time, np.nan)
@@ -621,11 +628,6 @@ def compute_unit_analysis_1d(
                 pos_column=pos_column,
                 segment_bins=segment_bins,
             )
-        if full_peak > 0:
-            for rm_half in (rm_first, rm_second):
-                finite = np.isfinite(rm_half)
-                if finite.any():
-                    rm_half[finite] = rm_half[finite] / full_peak
         stability_splits.append({
             "n_split_blocks": n_splits,
             "corr": s_corr,
