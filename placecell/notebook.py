@@ -10,10 +10,35 @@ import numpy as np
 import pandas as pd
 from matplotlib.lines import Line2D
 
-from placecell.analysis.spatial_2d import compute_place_field_mask
+from placecell.analysis.spatial_2d import _seed_rate_map, compute_place_field_mask
 
 if TYPE_CHECKING:
     from placecell.dataset.arena import ArenaDataset
+
+
+def _halves_normalized_by_full_peak(
+    result: Any,
+) -> tuple[np.ndarray, np.ndarray] | tuple[None, None]:
+    """Return half rate maps scaled to the full session's peak (0-1).
+
+    Half maps are stored in firing-rate units; we divide by the full
+    session's smoothed peak so all three display panels (1st, 2nd, full)
+    share a [0, 1] colorbar.
+    """
+    if not result.stability_splits:
+        return None, None
+    primary = result.stability_splits[0]
+    rm_first = np.asarray(primary.rate_map_first, dtype=float).copy()
+    rm_second = np.asarray(primary.rate_map_second, dtype=float).copy()
+    rm_smoothed = np.asarray(result.rate_map_smoothed, dtype=float)
+    finite = np.isfinite(rm_smoothed)
+    full_peak = float(np.nanmax(rm_smoothed[finite])) if finite.any() else 0.0
+    if full_peak > 0:
+        f1 = np.isfinite(rm_first)
+        f2 = np.isfinite(rm_second)
+        rm_first[f1] = rm_first[f1] / full_peak
+        rm_second[f2] = rm_second[f2] / full_peak
+    return rm_first, rm_second
 
 
 def create_unit_browser(
@@ -167,10 +192,12 @@ def create_unit_browser(
         ax2.set_aspect("equal")
         ax2.axis("off")
 
-        # 3. Rate maps (first half, second half, full)
-        rate_map_first = result.rate_map_first
-        rate_map_second = result.rate_map_second
-        stab_corr = result.stability_corr
+        # 3. Rate maps (first half, second half, full) — primary split.
+        # Half maps are stored in firing-rate units; normalize to the
+        # full-session peak so all three panels share [0, 1].
+        primary = result.stability_splits[0]
+        rate_map_first, rate_map_second = _halves_normalized_by_full_peak(result)
+        stab_corr = primary.corr
 
         # Plot first half
         im1 = ax3a.imshow(rate_map_first.T, origin="lower", cmap="inferno", aspect="equal")
@@ -183,9 +210,11 @@ def create_unit_browser(
         ax3b.axis("off")
 
         # Plot full session with red contour
-        im3 = ax3c.imshow(result.rate_map.T, origin="lower", cmap="inferno", aspect="equal")
+        im3 = ax3c.imshow(
+            result.rate_map_peak_normalized.T, origin="lower", cmap="inferno", aspect="equal"
+        )
         field_mask_full = compute_place_field_mask(
-            result.rate_map,
+            _seed_rate_map(result),
             threshold=place_field_threshold,
             min_bins=place_field_min_bins,
             shuffled_rate_p95=result.shuffled_rate_p95,
@@ -303,11 +332,12 @@ def create_unit_browser(
         else:
             ax5.text(0.5, 0.5, "No trace data", ha="center", va="center", fontsize=8)
 
-        # Status text
+        # Status text — primary split; use is_stable() for the final pass.
         n_events = len(result.unit_data) if not result.unit_data.empty else 0
         p_val = result.p_val
-        stab_corr = result.stability_corr
-        stab_p = result.stability_p_val
+        primary = result.stability_splits[0]
+        stab_corr = primary.corr
+        stab_p = primary.p_val
 
         sig_pass = p_val < p_value_threshold
         sig_text = "pass" if sig_pass else "fail"
@@ -535,7 +565,7 @@ def create_shuffle_browser_1d(
         text_annotations = []
 
         ax = axes[0]
-        rm = res.rate_map
+        rm = res.rate_map_peak_normalized
         valid = np.isfinite(rm)
         ax.fill_between(
             centers,
@@ -595,9 +625,11 @@ def create_shuffle_browser_1d(
         ax.legend(fontsize=6)
 
         ax = axes[2]
-        if len(res.shuffled_stability) > 0:
+        primary = res.stability_splits[0] if res.stability_splits else None
+        shuffled = primary.shuffled_corrs if primary is not None else np.array([])
+        if len(shuffled) > 0:
             ax.hist(
-                res.shuffled_stability,
+                shuffled,
                 bins=30,
                 color="gray",
                 alpha=0.7,
@@ -605,7 +637,7 @@ def create_shuffle_browser_1d(
                 density=True,
                 label="Shuffled",
             )
-            pct95_stab = np.percentile(res.shuffled_stability, 95)
+            pct95_stab = np.percentile(shuffled, 95)
             ax.axvline(
                 pct95_stab,
                 color="black",
@@ -613,31 +645,30 @@ def create_shuffle_browser_1d(
                 linestyle="--",
                 label=f"95th pctl ({pct95_stab:.3f})",
             )
-        if not np.isnan(res.stability_corr):
+        if primary is not None and not np.isnan(primary.corr):
             ax.axvline(
-                res.stability_corr,
+                primary.corr,
                 color="blue",
                 linewidth=2,
-                label=f"Observed (r={res.stability_corr:.3f})",
+                label=f"Observed (r={primary.corr:.3f})",
             )
 
         ax.set_xlabel("Split-half correlation", fontsize=8)
         ax.set_ylabel("Density", fontsize=8)
-        if np.isnan(res.stability_p_val):
+        p_primary = primary.p_val if primary is not None else np.nan
+        if np.isnan(p_primary):
             stab_str = "N/A"
-        elif res.stability_p_val < p_value_threshold:
+        elif p_primary < p_value_threshold:
             stab_str = "PASS"
         else:
             stab_str = "fail"
-        stab_p_str = (
-            f"p={res.stability_p_val:.3f}" if not np.isnan(res.stability_p_val) else "p=N/A"
-        )
+        stab_p_str = f"p={p_primary:.3f}" if not np.isnan(p_primary) else "p=N/A"
         ax.set_title(f"Stability test ({stab_p_str}, {stab_str})", fontsize=9)
         ax.tick_params(labelsize=7)
         ax.legend(fontsize=6)
 
         is_sig = res.p_val < p_value_threshold
-        is_stable = not np.isnan(res.stability_p_val) and res.stability_p_val < p_value_threshold
+        is_stable = res.is_stable(p_value_threshold)
         if is_sig and is_stable:
             status = "PLACE CELL"
             color = "green"
@@ -773,35 +804,40 @@ def create_unit_browser_1d(
             txt.remove()
         text_annotations = []
 
-        valid_full = np.isfinite(res.rate_map)
-        valid_1st = np.isfinite(res.rate_map_first)
-        valid_2nd = np.isfinite(res.rate_map_second)
+        # Half maps are in firing-rate units; scale to the full-session
+        # peak so they share the [0, 1] y-axis with the full rate map.
+        half_first, half_second = _halves_normalized_by_full_peak(res)
+        full_rate = res.rate_map_peak_normalized
+        valid_full = np.isfinite(full_rate)
+        valid_1st = np.isfinite(half_first) if half_first is not None else np.array([])
+        valid_2nd = np.isfinite(half_second) if half_second is not None else np.array([])
 
         ax_rm.fill_between(
             centers,
             0,
-            np.where(valid_full, res.rate_map, 0),
+            np.where(valid_full, full_rate, 0),
             alpha=0.15,
             color="black",
             where=valid_full,
         )
-        ax_rm.plot(centers, res.rate_map, color="black", linewidth=1.5, label="Full")
-        ax_rm.plot(
-            centers,
-            np.where(valid_1st, res.rate_map_first, np.nan),
-            color="steelblue",
-            linewidth=1.0,
-            alpha=0.8,
-            label="1st half",
-        )
-        ax_rm.plot(
-            centers,
-            np.where(valid_2nd, res.rate_map_second, np.nan),
-            color="coral",
-            linewidth=1.0,
-            alpha=0.8,
-            label="2nd half",
-        )
+        ax_rm.plot(centers, full_rate, color="black", linewidth=1.5, label="Full")
+        if half_first is not None:
+            ax_rm.plot(
+                centers,
+                np.where(valid_1st, half_first, np.nan),
+                color="steelblue",
+                linewidth=1.0,
+                alpha=0.8,
+                label="1st half",
+            )
+            ax_rm.plot(
+                centers,
+                np.where(valid_2nd, half_second, np.nan),
+                color="coral",
+                linewidth=1.0,
+                alpha=0.8,
+                label="2nd half",
+            )
 
         if arm_boundaries:
             for b in arm_boundaries:
@@ -842,22 +878,25 @@ def create_unit_browser_1d(
         ax_si_shuf.tick_params(labelsize=5)
         ax_si_shuf.set_ylabel("Count", fontsize=6)
 
-        if res.shuffled_stability is not None and len(res.shuffled_stability) > 0:
+        primary = res.stability_splits[0] if res.stability_splits else None
+        shuffled = primary.shuffled_corrs if primary is not None else np.array([])
+        if len(shuffled) > 0:
             ax_stab_shuf.hist(
-                res.shuffled_stability,
+                shuffled,
                 bins=30,
                 color="gray",
                 alpha=0.6,
                 edgecolor="none",
             )
-            corr_val = res.stability_corr if not np.isnan(res.stability_corr) else 0
+            corr_val = primary.corr if primary is not None and not np.isnan(primary.corr) else 0
             ax_stab_shuf.axvline(
                 corr_val,
                 color="red",
                 linewidth=1.5,
                 label=f"r={corr_val:.2f}",
             )
-            p_str = f"p={res.stability_p_val:.3f}" if not np.isnan(res.stability_p_val) else "p=N/A"
+            p_primary = primary.p_val if primary is not None else np.nan
+            p_str = f"p={p_primary:.3f}" if not np.isnan(p_primary) else "p=N/A"
             ax_stab_shuf.set_title(f"Stability shuffle ({p_str})", fontsize=8)
         else:
             ax_stab_shuf.text(
@@ -957,12 +996,13 @@ def create_unit_browser_1d(
             ax_trace.text(0.5, 0.5, "No trace data", ha="center", va="center", fontsize=8)
 
         is_sig = res.p_val < p_value_threshold
-        is_stable = not np.isnan(res.stability_p_val) and res.stability_p_val < p_value_threshold
+        is_stable = res.is_stable(p_value_threshold)
         n_events = len(res.unit_data) if not res.unit_data.empty else 0
+        p_primary = primary.p_val if primary is not None else np.nan
 
         sig_color = "green" if is_sig else "red"
         sig_text = "pass" if is_sig else "fail"
-        if np.isnan(res.stability_p_val):
+        if np.isnan(p_primary):
             stab_color, stab_text = "gray", "N/A"
         else:
             stab_color = "green" if is_stable else "red"
@@ -1000,10 +1040,14 @@ def create_unit_browser_1d(
         text_annotations.append(txt)
 
         stab_parts = []
-        if not np.isnan(res.stability_corr):
-            stab_parts.append(f"r={res.stability_corr:.2f}")
-        if not np.isnan(res.stability_p_val):
-            stab_parts.append(f"p={res.stability_p_val:.3f}")
+        if primary is not None and not np.isnan(primary.corr):
+            stab_parts.append(f"r={primary.corr:.2f}")
+        if not np.isnan(p_primary):
+            stab_parts.append(f"p={p_primary:.3f}")
+        if len(res.stability_splits) > 1:
+            other_ps = [s.p_val for s in res.stability_splits[1:] if not np.isnan(s.p_val)]
+            if other_ps:
+                stab_parts.append("other p=" + "/".join(f"{p:.3f}" for p in other_ps))
         txt = fig.text(
             0.54,
             0.97,

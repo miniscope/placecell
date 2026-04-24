@@ -27,6 +27,11 @@ def _stack_rate_maps(
     unit_results: dict[int, Any],
     unit_ids: list[int] | None = None,
 ) -> tuple[np.ndarray, list[int]]:
+    """Stack per-unit ``rate_map_smoothed`` arrays for PVO.
+
+    Uses firing-rate units so cosine similarity across bins reflects the
+    true rate magnitudes across cells.
+    """
     selected = sorted(unit_ids) if unit_ids is not None else sorted(unit_results)
     if not selected:
         raise ValueError("No units selected for PVO.")
@@ -36,11 +41,13 @@ def _stack_rate_maps(
     kept_ids: list[int] = []
     for uid in selected:
         res = unit_results.get(uid)
-        if res is None or getattr(res, "rate_map", None) is None:
+        if res is None or getattr(res, "rate_map_smoothed", None) is None:
             continue
-        rm = np.asarray(res.rate_map, dtype=float)
+        rm = np.asarray(res.rate_map_smoothed, dtype=float)
+        if rm.size == 0:
+            continue
         if rm.ndim != 1:
-            raise ValueError(f"Unit {uid} rate_map must be 1D, got shape {rm.shape}.")
+            raise ValueError(f"Unit {uid} rate_map_smoothed must be 1D, got shape {rm.shape}.")
         if n_bins is None:
             n_bins = rm.shape[0]
         elif rm.shape[0] != n_bins:

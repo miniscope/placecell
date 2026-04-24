@@ -12,7 +12,7 @@ from placecell.analysis.spatial_1d import (
     compute_unit_analysis_1d,
 )
 from placecell.config import SpatialMap1DConfig, ZoneDetectionConfig
-from placecell.dataset.base import BasePlaceCellDataset, UnitResult
+from placecell.dataset.base import BasePlaceCellDataset, StabilitySplitResult, UnitResult
 from placecell.log import init_logger
 from placecell.maze_helper import (
     assign_traversal_direction,
@@ -491,8 +491,9 @@ class MazeDataset(BasePlaceCellDataset):
                 except (KeyError, IndexError):
                     pass
 
+            stability_splits = [StabilitySplitResult(**s) for s in result["stability_splits"]]
             self.unit_results[uid] = UnitResult(
-                rate_map=result["rate_map"],
+                rate_map_smoothed=result["rate_map_smoothed"],
                 rate_map_raw=result["rate_map_raw"],
                 si=result["si"],
                 p_val=result["p_val"],
@@ -500,12 +501,7 @@ class MazeDataset(BasePlaceCellDataset):
                 shuffled_rate_p95=None,
                 overall_rate=result["overall_rate"],
                 event_count_rate=result["event_count_rate"],
-                stability_corr=result["stability_corr"],
-                stability_z=result["stability_z"],
-                stability_p_val=result["stability_p_val"],
-                shuffled_stability=result["shuffled_stability"],
-                rate_map_first=result["rate_map_first"],
-                rate_map_second=result["rate_map_second"],
+                stability_splits=stability_splits,
                 vis_data_above=result["events_above_threshold"],
                 unit_data=result["unit_data"],
                 trace_data=trace_data,

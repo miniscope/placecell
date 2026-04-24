@@ -204,15 +204,20 @@ def test_unit_scalars(
 
         assert got.si == pytest.approx(ref.si, rel=1e-5), f"unit {uid} SI"
         assert got.p_val == pytest.approx(ref.p_val, rel=1e-5), f"unit {uid} p_val"
-        assert got.stability_corr == pytest.approx(
-            ref.stability_corr, nan_ok=True, rel=1e-5
-        ), f"unit {uid} stability_corr"
-        assert got.stability_z == pytest.approx(
-            ref.stability_z, nan_ok=True, rel=1e-5
-        ), f"unit {uid} stability_z"
-        assert got.stability_p_val == pytest.approx(
-            ref.stability_p_val, nan_ok=True, rel=1e-5
-        ), f"unit {uid} stability_p_val"
+        assert len(got.stability_splits) == len(ref.stability_splits), (
+            f"unit {uid} stability_splits length"
+        )
+        for i, (g, r) in enumerate(zip(got.stability_splits, ref.stability_splits)):
+            assert g.n_split_blocks == r.n_split_blocks, f"unit {uid} split {i} n_split_blocks"
+            assert g.corr == pytest.approx(r.corr, nan_ok=True, rel=1e-5), (
+                f"unit {uid} split {i} corr"
+            )
+            assert g.fisher_z == pytest.approx(r.fisher_z, nan_ok=True, rel=1e-5), (
+                f"unit {uid} split {i} fisher_z"
+            )
+            assert g.p_val == pytest.approx(r.p_val, nan_ok=True, rel=1e-5), (
+                f"unit {uid} split {i} p_val"
+            )
 
 
 def test_rate_maps(
@@ -221,8 +226,8 @@ def test_rate_maps(
 ) -> None:
     """Per-unit 1D rate maps must match."""
     for uid in reference.unit_results:
-        ref_map = reference.unit_results[uid].rate_map
-        got_map = pipeline_result.unit_results[uid].rate_map
+        ref_map = reference.unit_results[uid].rate_map_smoothed
+        got_map = pipeline_result.unit_results[uid].rate_map_smoothed
         assert got_map.shape == ref_map.shape, f"unit {uid} rate_map shape"
         np.testing.assert_allclose(
             got_map,
@@ -230,7 +235,7 @@ def test_rate_maps(
             rtol=1e-5,
             atol=1e-10,
             equal_nan=True,
-            err_msg=f"unit {uid} rate_map",
+            err_msg=f"unit {uid} rate_map_smoothed",
         )
 
 
@@ -251,11 +256,11 @@ def test_save_load_bundle_roundtrip(
     )
     for uid in pipeline_result.unit_results:
         np.testing.assert_allclose(
-            reloaded.unit_results[uid].rate_map,
-            pipeline_result.unit_results[uid].rate_map,
+            reloaded.unit_results[uid].rate_map_smoothed,
+            pipeline_result.unit_results[uid].rate_map_smoothed,
             rtol=1e-5,
             equal_nan=True,
-            err_msg=f"unit {uid} rate_map round-trip",
+            err_msg=f"unit {uid} rate_map_smoothed round-trip",
         )
 
 

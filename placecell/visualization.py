@@ -166,14 +166,30 @@ def plot_summary_scatter(
 
     unit_ids = list(unit_results.keys())
     p_vals = np.array([unit_results[uid].p_val for uid in unit_ids])
-    stab_pvals = np.array([unit_results[uid].stability_p_val for uid in unit_ids])
-    fisher_z = np.array([unit_results[uid].stability_z for uid in unit_ids])
+    # Worst-case (max) p-value across splits so scatter rewards cells that pass
+    # every configured stability test. Correlation shown is from split #0.
+    stab_pvals = np.array(
+        [
+            max((s.p_val for s in unit_results[uid].stability_splits), default=np.nan)
+            for uid in unit_ids
+        ]
+    )
+    fisher_z = np.array(
+        [
+            (
+                unit_results[uid].stability_splits[0].fisher_z
+                if unit_results[uid].stability_splits
+                else np.nan
+            )
+            for uid in unit_ids
+        ]
+    )
     si_vals = np.array([unit_results[uid].si for uid in unit_ids])
     overall_rates = np.array([unit_results[uid].overall_rate for uid in unit_ids])
 
-    # Classify units
+    # Classify units — stability requires ALL splits p < threshold.
     is_sig = p_vals < p_value_threshold
-    is_stable = np.array([not np.isnan(sp) and sp < p_value_threshold for sp in stab_pvals])
+    is_stable = np.array([unit_results[uid].is_stable(p_value_threshold) for uid in unit_ids])
     is_place_cell = is_sig & is_stable
 
     colors = []
@@ -453,6 +469,94 @@ def plot_diagnostics(
     return fig
 
 
+def plot_stability_splits_summary(
+    unit_results: dict,
+    p_value_threshold: float = 0.05,
+) -> "Figure":
+    """One-row-per-split summary of stability tests across units.
+
+    For each configured split, plots:
+    - Histogram of per-unit stability ``corr`` (observed).
+    - Histogram of per-unit stability ``p_val`` with threshold line.
+
+    Scales automatically to the number of splits.
+    """
+    if plt is None:
+        raise ImportError("matplotlib is required for plotting.")
+
+    uids = list(unit_results.keys())
+    if not uids:
+        fig, ax = plt.subplots(figsize=(5, 2))
+        ax.text(0.5, 0.5, "No units", ha="center", va="center")
+        ax.axis("off")
+        return fig
+
+    n_splits = len(unit_results[uids[0]].stability_splits)
+    if n_splits == 0:
+        fig, ax = plt.subplots(figsize=(5, 2))
+        ax.text(0.5, 0.5, "No stability splits", ha="center", va="center")
+        ax.axis("off")
+        return fig
+
+    fig, axes = plt.subplots(
+        n_splits,
+        2,
+        figsize=(9, 2.6 * n_splits),
+        squeeze=False,
+    )
+
+    for i in range(n_splits):
+        corrs = np.array(
+            [
+                r.stability_splits[i].corr
+                for r in unit_results.values()
+                if len(r.stability_splits) > i
+            ]
+        )
+        pvals = np.array(
+            [
+                r.stability_splits[i].p_val
+                for r in unit_results.values()
+                if len(r.stability_splits) > i
+            ]
+        )
+        n_split_blocks = unit_results[uids[0]].stability_splits[i].n_split_blocks
+        n_pass = int(np.nansum(pvals < p_value_threshold))
+
+        ax_corr, ax_p = axes[i]
+        ax_corr.hist(
+            corrs[np.isfinite(corrs)],
+            bins=30,
+            color="steelblue",
+            edgecolor="black",
+            alpha=0.7,
+        )
+        ax_corr.set_xlabel("stability corr (r)")
+        ax_corr.set_ylabel("units")
+        ax_corr.set_title(f"split #{i} — {n_split_blocks} blocks")
+
+        ax_p.hist(
+            pvals[np.isfinite(pvals)],
+            bins=30,
+            color="darkorange",
+            edgecolor="black",
+            alpha=0.7,
+        )
+        ax_p.axvline(
+            p_value_threshold,
+            color="red",
+            linestyle="--",
+            linewidth=1.2,
+            label=f"p={p_value_threshold} ({n_pass}/{len(pvals)} pass)",
+        )
+        ax_p.set_xlabel("stability p_val")
+        ax_p.set_ylabel("units")
+        ax_p.legend(fontsize=8)
+
+    fig.tight_layout()
+    return fig
+
+
 def plot_speed_histogram(
     speeds: np.ndarray,
     speed_threshold: float,
@@ -594,12 +698,20 @@ def plot_occupancy_preview(
     x_edges: np.ndarray,
     y_edges: np.ndarray,
     behavior_fps: float = 20.0,
-    n_split_blocks: int = 10,
+    stability_splits: list[int] | None = None,
     block_shift: float = 0.0,
+    min_occupancy: float | None = None,
+    spatial_sigma: float = 0.0,
+    invalid_contour_color: str = "cyan",
     trajectory_alpha: float = 0.1,
     trajectory_lw: float = 0.3,
 ) -> "Figure":
-    """Filtered trajectory, full occupancy, and split-half occupancy maps.
+    """Trajectory, full occupancy, and per-split half-occupancy maps.
+
+    Layout is 2 columns × (1 + N) rows where N = ``len(stability_splits)``:
+
+    * Row 1: trajectory | full occupancy
+    * Row 1+i: split_i first half | split_i second half
 
     The trajectory panel uses low alpha so that repeatedly visited areas
     appear darker, showing occupancy density directly.
@@ -616,72 +728,126 @@ def plot_occupancy_preview(
         Spatial bin edges.
     behavior_fps:
         Sampling rate for the trajectory (used for split-half time).
-    n_split_blocks:
-        Number of interleaved blocks for the split (same as stability).
+    stability_splits:
+        Block counts to visualize, matching the stability-test splits
+        (e.g. ``[2, 10]`` produces one row of halves at each).  Defaults
+        to ``[10]`` when unset.
     block_shift:
         Block boundary shift fraction (same as stability).
+    min_occupancy:
+        Minimum occupancy time (seconds). Used to compute the cyan
+        below-threshold contour on the **half** panels (their
+        occupancies are recomputed here and are raw). The full-session
+        panel uses the supplied ``valid_mask`` directly — it's the
+        authoritative mask from the analysis pipeline.
+    spatial_sigma:
+        Gaussian smoothing sigma (bins) applied to the raw half
+        occupancies before thresholding against ``min_occupancy`` — set
+        to match the analysis config.
+    invalid_contour_color:
+        Contour color for below-threshold bins. Defaults to cyan so it
+        stays visible over the ``inferno`` colormap.
     trajectory_alpha:
         Per-segment alpha for the trajectory line. Low values (~0.03)
         let overlap accumulate to show density.
     trajectory_lw:
         Line width for the trajectory.
     """
-    ext = [x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]]
+    from matplotlib.collections import LineCollection
 
-    # Compute split-half occupancy using the same interleaved-block scheme
-    # as the stability test so the occupancy preview matches.
+    from placecell.analysis.spatial_2d import gaussian_filter_normalized
+
+    splits = list(stability_splits) if stability_splits else [10]
+    ext = [x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]]
+    time_per_frame = 1.0 / behavior_fps
+
+    def _invalid_mask(occ: np.ndarray) -> np.ndarray | None:
+        """Bins below ``min_occupancy`` on (optionally smoothed) occupancy."""
+        if min_occupancy is None:
+            return None
+        occ_for_mask = (
+            gaussian_filter_normalized(occ, sigma=spatial_sigma) if spatial_sigma > 0 else occ
+        )
+        return occ_for_mask < min_occupancy
+
+    def _draw_invalid_contour(ax: "Axes", invalid: np.ndarray | None) -> None:
+        if invalid is None or not np.any(invalid):
+            return
+        ax.contour(
+            invalid.T.astype(float),
+            levels=[0.5],
+            colors=invalid_contour_color,
+            linewidths=0.8,
+            extent=ext,
+            origin="lower",
+        )
+
+    # Compute per-split halves using the same block scheme as the
+    # stability test so the occupancy preview matches.
     frame_col = "frame_index"
-    if frame_col in trajectory_filtered.columns:
+    has_frames = frame_col in trajectory_filtered.columns and len(trajectory_filtered) > 0
+    if has_frames:
         all_frames = trajectory_filtered[frame_col].values
         frame_min = all_frames.min()
         frame_max = all_frames.max()
         span = frame_max - frame_min
+    else:
+        span = 0
+
+    per_split: list[tuple[int, np.ndarray, np.ndarray, int, int]] = []
+    for n_split in splits:
         if span > 0:
-            block_width = span / n_split_blocks
+            block_width = span / n_split
             offset = block_shift * block_width
             block_ids = np.floor((all_frames - frame_min - offset) / block_width).astype(int)
-            block_ids = np.clip(block_ids, 0, n_split_blocks - 1)
+            block_ids = np.clip(block_ids, 0, n_split - 1)
             first_mask = block_ids % 2 == 0
         else:
             first_mask = np.ones(len(trajectory_filtered), dtype=bool)
-    else:
-        first_mask = np.ones(len(trajectory_filtered), dtype=bool)
+        traj_first = trajectory_filtered[first_mask]
+        traj_second = trajectory_filtered[~first_mask]
+        occ_first, _, _ = np.histogram2d(traj_first["x"], traj_first["y"], bins=[x_edges, y_edges])
+        occ_second, _, _ = np.histogram2d(
+            traj_second["x"], traj_second["y"], bins=[x_edges, y_edges]
+        )
+        per_split.append(
+            (
+                n_split,
+                occ_first * time_per_frame,
+                occ_second * time_per_frame,
+                len(traj_first),
+                len(traj_second),
+            )
+        )
 
-    time_per_frame = 1.0 / behavior_fps
-    traj_first = trajectory_filtered[first_mask]
-    traj_second = trajectory_filtered[~first_mask]
+    vmax = float(occupancy_time.max())
+    for _, occ_a, occ_b, *_ in per_split:
+        vmax = max(vmax, occ_a.max(), occ_b.max())
 
-    occ_first, _, _ = np.histogram2d(traj_first["x"], traj_first["y"], bins=[x_edges, y_edges])
-    occ_first *= time_per_frame
-    occ_second, _, _ = np.histogram2d(traj_second["x"], traj_second["y"], bins=[x_edges, y_edges])
-    occ_second *= time_per_frame
+    n_rows = 1 + len(per_split)
+    fig, axes = plt.subplots(n_rows, 2, figsize=(8, 3.5 * n_rows))
+    if n_rows == 1:
+        axes = np.atleast_2d(axes)
 
-    vmax = max(occupancy_time.max(), occ_first.max(), occ_second.max())
-
-    fig, axes = plt.subplots(1, 4, figsize=(16, 3.5))
-    ax_traj, ax_occ, ax_h1, ax_h2 = axes
-
-    # Trajectory with additive alpha — each segment is drawn separately
-    # so overlapping paths accumulate opacity to show density.
-    from matplotlib.collections import LineCollection
-
+    # Row 0: trajectory + full occupancy.
+    ax_traj, ax_occ = axes[0]
     x_arr = trajectory_filtered["x"].to_numpy()
     y_arr = trajectory_filtered["y"].to_numpy()
-    points = np.column_stack([x_arr, y_arr]).reshape(-1, 1, 2)
-    segments = np.concatenate([points[:-1], points[1:]], axis=1)
-    lc = LineCollection(
-        segments,
-        colors=[(0, 0, 0, trajectory_alpha)] * len(segments),
-        linewidths=trajectory_lw,
-    )
-    ax_traj.add_collection(lc)
+    if len(x_arr) >= 2:
+        points = np.column_stack([x_arr, y_arr]).reshape(-1, 1, 2)
+        segments = np.concatenate([points[:-1], points[1:]], axis=1)
+        lc = LineCollection(
+            segments,
+            colors=[(0, 0, 0, trajectory_alpha)] * len(segments),
+            linewidths=trajectory_lw,
+        )
+        ax_traj.add_collection(lc)
     ax_traj.set_xlim(ext[0], ext[1])
     ax_traj.set_ylim(ext[2], ext[3])
     ax_traj.set_title("Trajectory (filtered)")
     ax_traj.set_aspect("equal")
     ax_traj.axis("off")
 
-    # Full occupancy
     im = ax_occ.imshow(
         occupancy_time.T,
         origin="lower",
@@ -691,34 +857,40 @@ def plot_occupancy_preview(
         vmin=0,
         vmax=vmax,
     )
+    # Full-panel invalid contour: ``valid_mask`` is the authoritative
+    # mask from the analysis pipeline (derived from smoothed occupancy
+    # inside ``compute_occupancy_map``).
+    _draw_invalid_contour(ax_occ, ~valid_mask)
     ax_occ.set_title(f"Full ({valid_mask.sum()}/{valid_mask.size} valid)")
     ax_occ.axis("off")
 
-    # 1st half occupancy
-    ax_h1.imshow(
-        occ_first.T,
-        origin="lower",
-        extent=ext,
-        cmap="inferno",
-        aspect="equal",
-        vmin=0,
-        vmax=vmax,
-    )
-    ax_h1.set_title(f"1st half ({len(traj_first)} frames)")
-    ax_h1.axis("off")
-
-    # 2nd half occupancy
-    ax_h2.imshow(
-        occ_second.T,
-        origin="lower",
-        extent=ext,
-        cmap="inferno",
-        aspect="equal",
-        vmin=0,
-        vmax=vmax,
-    )
-    ax_h2.set_title(f"2nd half ({len(traj_second)} frames)")
-    ax_h2.axis("off")
+    # One row per split.
+    for row, (n_split, occ_a, occ_b, n_a, n_b) in enumerate(per_split, start=1):
+        ax_a, ax_b = axes[row]
+        ax_a.imshow(
+            occ_a.T,
+            origin="lower",
+            extent=ext,
+            cmap="inferno",
+            aspect="equal",
+            vmin=0,
+            vmax=vmax,
+        )
+        _draw_invalid_contour(ax_a, _invalid_mask(occ_a))
+        ax_a.set_title(f"n={n_split} 1st half ({n_a} frames)")
+        ax_a.axis("off")
+        ax_b.imshow(
+            occ_b.T,
+            origin="lower",
+            extent=ext,
+            cmap="inferno",
+            aspect="equal",
+            vmin=0,
+            vmax=vmax,
+        )
+        _draw_invalid_contour(ax_b, _invalid_mask(occ_b))
+        ax_b.set_title(f"n={n_split} 2nd half ({n_b} frames)")
+        ax_b.axis("off")
 
     fig.tight_layout(rect=[0, 0, 0.92, 1])
     cax = fig.add_axes([0.93, 0.15, 0.015, 0.7])
@@ -1269,13 +1441,12 @@ def plot_shuffle_test_1d(
     if plt is None:
         raise ImportError("matplotlib is required for plotting.")
 
-    # Identify place cells: significant SI AND stable
-    place_cell_ids = []
-    for uid, res in unit_results.items():
-        is_sig = res.p_val < p_value_threshold
-        is_stable = not np.isnan(res.stability_p_val) and res.stability_p_val < p_value_threshold
-        if is_sig and is_stable:
-            place_cell_ids.append(uid)
+    # Identify place cells: significant SI AND all stability splits pass.
+    place_cell_ids = [
+        uid
+        for uid, res in unit_results.items()
+        if res.p_val < p_value_threshold and res.is_stable(p_value_threshold)
+    ]
 
     if not place_cell_ids:
         fig, ax = plt.subplots(1, 1, figsize=(8, 2))
@@ -1285,7 +1456,7 @@ def plot_shuffle_test_1d(
 
     # Collect rate maps and sort by peak position
     centers = 0.5 * (edges[:-1] + edges[1:])
-    rate_maps_all = np.array([unit_results[uid].rate_map for uid in place_cell_ids])
+    rate_maps_all = np.array([unit_results[uid].rate_map_peak_normalized for uid in place_cell_ids])
 
     valid_cols = np.any(np.isfinite(rate_maps_all), axis=0)
     n_excluded = int((~valid_cols).sum())
@@ -1543,7 +1714,8 @@ def plot_position_and_traces_1d(
     candidates = []
     for uid, res in unit_results.items():
         if res.trace_data is not None and res.trace_times is not None:
-            rm = np.where(np.isfinite(res.rate_map), res.rate_map, 0.0)
+            rm_norm = res.rate_map_peak_normalized
+            rm = np.where(np.isfinite(rm_norm), rm_norm, 0.0)
             peak_pos = centers[np.argmax(rm)]
             candidates.append((uid, peak_pos))
     candidates.sort(key=lambda x: x[1])

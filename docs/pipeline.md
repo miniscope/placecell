@@ -13,7 +13,7 @@ Both `ArenaDataset` (2D) and `MazeDataset` (1D) implement the same abstract pipe
 5. `match_events()` — interpolate behavior onto neural timestamps, compute speed, build canonical table
 6. `compute_occupancy()` — spatial occupancy map (2D histogram or 1D bins)
 7. `analyze_units()` — per-unit rate map, spatial information, stability, place fields
-8. `save_bundle()` — write `.pcellbundle` directory with config, arrays, parquets, figures
+8. `save_bundle()` — write `.pcellbundle` directory with config, arrays, parquets, figures, and a `metadata.json` that records both the bundle schema version and the `placecell` package version (via `hatch-vcs`, so it includes the git SHA of the build).
 
 The **canonical neural-rate table** (`ds.canonical`) is the central artifact: one row per neural frame with columns `frame_index, neural_time, x, y, speed, [pos_1d, arm_index, ...], s_unit_<id>...`. Behavior is linearly interpolated onto neural timestamps inside `match_events()` (or, for the maze pipeline, inside `detect-zones`), so every analysis downstream operates on a single common clock. The long-format `event_place` table is derived from `canonical` for the per-unit spatial analysis functions.
 
@@ -114,12 +114,13 @@ Zone detection projects raw DLC `(x, y)` onto the maze graph **at the neural sam
 
 Four independent computations from the same inputs (events, filtered trajectory, occupancy):
 
-- **Rate map**: event weights / occupancy time, smoothed with `spatial_sigma` (for display)
+- **Rate map**: event weights / occupancy time, smoothed with `spatial_sigma`. Stored on `UnitResult` as `rate_map_smoothed` (authoritative, firing-rate units). A `rate_map_peak_normalized` property is derived on demand for display.
 - **Spatial information + shuffle test**: Skaggs SI with circular-shift shuffle → SI p-value
 - **Shuffled rate percentile**: per-bin percentile of shuffled rate maps → used for place field seed detection
-- **Split-half stability + shuffle test**: correlation between first/second half rate maps with circular-shift shuffle → stability p-value
+- **Stability + shuffle tests** (one per configured block count in `stability_splits`): correlation between odd/even block rate maps with circular-shift shuffle → one stability p-value per split. Each split runs with an independent RNG stream so the tests are statistically independent.
+- **Minimum-events gate** (`min_events`): units with fewer speed-filtered events are assigned `p_val=1.0` for both SI and stability, so they cannot be classified as place cells. Their rate map is still computed for inspection.
 
-**Place cell classification**: units with SI p-value < `p_value_threshold` AND stability p-value < `p_value_threshold`.
+**Place cell classification**: units with SI p-value < `p_value_threshold` AND `UnitResult.is_stable(p_value_threshold)` (every configured split's stability p-value is below the threshold).
 
 **Place field detection** (Guo et al. 2023):
 1. **Seed detection**: bins where rate exceeds the shuffled rate percentile. Only contiguous seed regions with ≥ `place_field_min_bins` bins are kept
@@ -141,7 +142,7 @@ Four independent computations from the same inputs (events, filtered trajectory,
 - `footprints.pdf` — spatial footprints of all recorded units
 - `behavior_preview.pdf` — 2D trajectory density (additive alpha), speed-filtered trajectory, and speed histogram
 - `speed_traces.pdf` — animal speed over time with place cell neural traces (top 20 by SI)
-- `occupancy.pdf` — full-session occupancy map with split-half comparison (same split as stability test)
+- `occupancy.pdf` — trajectory and full-session occupancy on the top row, then one row of odd/even half-occupancies per configured entry in `stability_splits` (same block scheme as the stability test). Below-threshold bins (`min_occupancy`, on the smoothed half-occupancy) are outlined in cyan.
 
 **Arena only:**
 - `arena_calibration.pdf` — raw trajectory overlaid on arena bounds and video frame
@@ -152,7 +153,7 @@ Four independent computations from the same inputs (events, filtered trajectory,
 - `speed_histogram.pdf` — 1D arm speed distribution with threshold line
 - `graph_overlay.pdf` — maze graph polylines on behavior video frame
 - `population_rate_map.pdf` — all unit 1D rate maps tiled
-- `global_pvo_matrix.pdf` — population vector overlap matrix across arms
+- `global_pvo_matrix.pdf` — population vector overlap matrix across arms. Uses `rate_map_smoothed` (firing-rate units), so the cosine similarity reflects true rate magnitudes across cells rather than being a shape-only metric.
 
 ## Data Integrity
 
@@ -182,8 +183,8 @@ The pipeline flags and excludes problematic data rather than silently repairing 
 **Analysis methods**:
 - Rate maps: independent numerator/denominator Gaussian smoothing (Skaggs et al. 1996)
 - Spatial information: Skaggs et al. 1993, with +1-corrected rank p-value (Phipson & Smyth 2010)
-- Shuffle null: circular shift excluding zero-shift, independent RNG seeds for SI/stability/percentile
-- Stability: interleaved split-half blocks, Fisher z-transform, separate shuffle stream
+- Shuffle null: circular shift excluding zero-shift, independent RNG seeds for SI, per-split stability, and rate-percentile streams (each split in `stability_splits` also gets its own seed offset)
+- Stability: one test per entry in `stability_splits`. Each uses interleaved odd/even blocks at that block count and a Fisher-z-transformed correlation; `block_shift` offsets the block boundaries so "first half" isn't always frame 0.
 - Place field detection: Guo et al. 2023 seed-and-grow algorithm
 - Place cell classification: dual criterion (SI p < threshold AND stability p < threshold)
 
@@ -197,6 +198,9 @@ The pipeline flags and excludes problematic data rather than silently repairing 
 - `min_shift_seconds`: minimum circular shift for shuffle test (seconds)
 - `p_value_threshold`: p-value threshold for both SI and stability significance
 - `si_weight_mode`: `"amplitude"` (event amplitudes) or `"binary"` (event counts)
+- `stability_splits`: list of block counts for the stability tests (e.g. `[2, 10]`). `n=2` is a classic first/second half; `n>=4` interleaves odd/even blocks so session-long drift averages out.
+- `block_shift`: fractional offset applied to the block boundaries of all stability splits (0 = no shift)
+- `min_events`: minimum speed-filtered event count to run SI + stability tests. Units below the threshold keep a rate map but get `p_val=1.0`. Set to 0 to disable; typical calcium-imaging values are 20–50.
 - `place_field_threshold`: fraction of peak rate for place field extension
 - `place_field_min_bins`: minimum contiguous bins for a place field seed
 - `place_field_seed_percentile`: percentile of shuffled rates for seed detection
@@ -270,9 +274,12 @@ behavior:
     n_shuffles: 1000
     random_seed: 1
     event_threshold_sigma: 0  # Event threshold in SDs above mean (for trajectory plot only)
-    p_value_threshold: 0.05  # P-value threshold for SI and stability
+    p_value_threshold: 0.05  # P-value threshold for SI and every stability split
     min_shift_seconds: 20  # Minimum circular shift (seconds) for shuffle test
     si_weight_mode: amplitude  # 'amplitude' or 'binary'
+    stability_splits: [2, 10]  # One stability test per entry (n=2: classic halves; n>=4: interleaved blocks)
+    block_shift: 0.0           # Fractional offset of block boundaries (0 = first block starts at frame 0)
+    min_events: 0              # Skip SI + stability for units with fewer events (p_val=1.0). Typical: 20-50.
     place_field_threshold: 0.35  # Fraction of peak rate for place field boundary
     place_field_min_bins: 5  # Minimum contiguous bins for a place field
     place_field_seed_percentile: 95  # Percentile of shuffled rates for seed detection
@@ -301,7 +308,9 @@ behavior:
     p_value_threshold: 0.05
     min_shift_seconds: 20
     si_weight_mode: amplitude
-    n_split_blocks: 10
+    stability_splits: [2, 10]  # One stability test per entry (n=2: classic halves; n>=4: interleaved blocks)
+    block_shift: 0.0
+    min_events: 0
     split_by_direction: true
     require_complete_traversal: false
 ```

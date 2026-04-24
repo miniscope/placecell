@@ -60,7 +60,7 @@ def compute_occupancy_map_1d(
     pos_column: str = "pos_1d",
     segment_bins: list[int] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Compute 1D occupancy histogram.
+    """Compute 1D occupancy histogram (raw).
 
     Parameters
     ----------
@@ -73,9 +73,13 @@ def compute_occupancy_map_1d(
     behavior_fps:
         Behavior sampling rate.
     spatial_sigma:
-        Gaussian smoothing sigma in bins.
+        Gaussian smoothing sigma in bins. Used only to compute
+        ``valid_mask``; ``occupancy_time`` is returned unsmoothed so
+        downstream smoothing in the rate-map/SI path doesn't compound
+        to sigma·sqrt(2).
     min_occupancy:
-        Minimum occupancy in seconds.
+        Minimum occupancy in seconds (checked against the smoothed
+        occupancy for the mask).
     pos_column:
         Column name for position values.
     segment_bins:
@@ -84,7 +88,8 @@ def compute_occupancy_map_1d(
     Returns
     -------
     tuple
-        (occupancy_time, valid_mask, edges) -- all 1D arrays.
+        (occupancy_time, valid_mask, edges) — ``occupancy_time`` is raw
+        (seconds per bin); ``valid_mask`` comes from the smoothed copy.
     """
     edges = np.linspace(pos_range[0], pos_range[1], n_bins + 1)
     time_per_frame = 1.0 / behavior_fps
@@ -93,11 +98,12 @@ def compute_occupancy_map_1d(
     occupancy_time = counts.astype(float) * time_per_frame
 
     if spatial_sigma > 0:
-        occupancy_time = gaussian_filter_normalized_1d(
+        occ_for_mask = gaussian_filter_normalized_1d(
             occupancy_time, sigma=spatial_sigma, segment_bins=segment_bins
         )
-
-    valid_mask = occupancy_time >= min_occupancy
+    else:
+        occ_for_mask = occupancy_time
+    valid_mask = occ_for_mask >= min_occupancy
 
     return occupancy_time, valid_mask, edges
 
@@ -110,13 +116,14 @@ def compute_rate_map_1d(
     spatial_sigma: float = 1.0,
     pos_column: str = "pos_1d",
     segment_bins: list[int] | None = None,
+    normalize: bool = True,
 ) -> np.ndarray:
-    """Compute smoothed and normalized 1D rate map.
+    """Compute smoothed 1D rate map.
 
-    Returns
-    -------
-    np.ndarray
-        1D rate map normalized to 0-1 range. Invalid bins = NaN.
+    When ``normalize`` is ``True`` (default) the map is divided by its
+    peak so values span 0-1 (for display). Set ``normalize=False`` to
+    keep firing-rate units (events·s⁻¹ per bin) for quantitative
+    analyses such as population-vector overlap.
     """
     if unit_events.empty:
         return np.full_like(occupancy_time, np.nan)
@@ -134,15 +141,18 @@ def compute_rate_map_1d(
     occ_smooth = gaussian_filter_normalized_1d(
         occupancy_time, sigma=spatial_sigma, segment_bins=segment_bins
     )
-    rate_map_smooth = np.zeros_like(occupancy_time)
-    rate_map_smooth[valid_mask] = event_smooth[valid_mask] / occ_smooth[valid_mask]
+    rate_map_smoothed = np.zeros_like(occupancy_time)
+    rate_map_smoothed[valid_mask] = event_smooth[valid_mask] / occ_smooth[valid_mask]
 
-    valid_rate_values = rate_map_smooth[valid_mask]
-    if len(valid_rate_values) > 0 and np.nanmax(valid_rate_values) > 0:
-        rate_map_smooth[valid_mask] = rate_map_smooth[valid_mask] / np.nanmax(valid_rate_values)
+    if normalize:
+        valid_rate_values = rate_map_smoothed[valid_mask]
+        if len(valid_rate_values) > 0 and np.nanmax(valid_rate_values) > 0:
+            rate_map_smoothed[valid_mask] = rate_map_smoothed[valid_mask] / np.nanmax(
+                valid_rate_values
+            )
 
-    rate_map_smooth[~valid_mask] = np.nan
-    return rate_map_smooth
+    rate_map_smoothed[~valid_mask] = np.nan
+    return rate_map_smoothed
 
 
 def compute_raw_rate_map_1d(
@@ -248,7 +258,10 @@ def compute_spatial_information_1d(
 
     n_frames = len(aligned_events)
     min_shift_frames = int(min_shift_seconds * behavior_fps)
-    min_shift_frames = min(min_shift_frames, n_frames // 2)
+    # Drop the constraint if the session is too short to leave a
+    # non-empty shift range; the unrestricted branch below is used.
+    if min_shift_frames >= n_frames // 2:
+        min_shift_frames = 0
 
     traj_pos = trajectory_df[pos_column].values
 
@@ -310,7 +323,12 @@ def compute_stability_score_1d(
 ) -> tuple[float, float, float, np.ndarray, np.ndarray, np.ndarray]:
     """Compute 1D split-half stability test.
 
-    Same interleaved block-splitting approach as 2D, with 1D rate maps.
+    Same block-splitting approach as 2D, with 1D rate maps.
+    ``n_split_blocks=2`` reduces to a first-half/second-half split
+    (sensitive to session-long drift); ``n_split_blocks>=4`` interleaves
+    the halves so within-session drift averages out. Combining both
+    (e.g. ``stability_splits=[2, 10]``) tests stability at two different
+    timescales.
 
     Returns
     -------
@@ -389,10 +407,10 @@ def compute_stability_score_1d(
         occ_smooth_half = gaussian_filter_normalized_1d(
             occ, sigma=spatial_sigma, segment_bins=segment_bins
         )
-        rate_map_smooth = np.zeros_like(occ)
-        rate_map_smooth[mask] = event_smooth[mask] / occ_smooth_half[mask]
-        rate_map_smooth[~mask] = np.nan
-        return rate_map_smooth
+        rate_map_smoothed = np.zeros_like(occ)
+        rate_map_smoothed[mask] = event_smooth[mask] / occ_smooth_half[mask]
+        rate_map_smoothed[~mask] = np.nan
+        return rate_map_smoothed
 
     rate_map_first = compute_half_rate_map(events_first, occ_first, valid_first)
     rate_map_second = compute_half_rate_map(events_second, occ_second, valid_second)
@@ -421,8 +439,15 @@ def compute_stability_score_1d(
 
     # Shuffle-based stability significance test
     if n_shuffles > 0:
-        # Offset seed so stability shuffles are independent of SI shuffles
-        stab_seed = random_seed + 224737 if random_seed is not None else None
+        # Offset seed so stability shuffles are independent of SI shuffles,
+        # and also vary with n_split_blocks so that multiple stability
+        # tests on the same unit draw *different* shuffle sequences
+        # rather than replaying identical shifts against different block
+        # structures (which would produce highly correlated null p-values).
+        if random_seed is not None:
+            stab_seed = random_seed + 224737 + 7919 * n_split_blocks
+        else:
+            stab_seed = None
         rng = np.random.RandomState(stab_seed)
 
         traj_frames = trajectory_df["frame_index"].values
@@ -433,7 +458,10 @@ def compute_stability_score_1d(
 
         n_frames = len(aligned_events)
         min_shift_frames = int(min_shift_seconds * behavior_fps)
-        min_shift_frames = min(min_shift_frames, n_frames // 2)
+        # Drop the constraint if the session is too short to leave a
+        # non-empty shift range; the unrestricted branch below is used.
+        if min_shift_frames >= n_frames // 2:
+            min_shift_frames = 0
 
         # Smoothed half-occupancies are loop-invariant.
         os1 = gaussian_filter_normalized_1d(
@@ -509,7 +537,12 @@ def compute_unit_analysis_1d(
         df_filtered[df_filtered["unit_id"] == unit_id] if not df_filtered.empty else pd.DataFrame()
     )
 
-    rate_map = compute_rate_map_1d(
+    # Rate maps (two stored flavors; peak-normalized display map is a
+    # derived @property on UnitResult):
+    #   - rate_map_smoothed: smoothed, firing-rate units (events·s⁻¹/bin).
+    #     Authoritative map for quantitative analyses.
+    #   - rate_map_raw: unsmoothed rate for overall-rate computation.
+    rate_map_smoothed = compute_rate_map_1d(
         unit_data,
         occupancy_time,
         valid_mask,
@@ -517,6 +550,7 @@ def compute_unit_analysis_1d(
         scfg.spatial_sigma,
         pos_column,
         segment_bins=segment_bins,
+        normalize=False,
     )
     rate_map_raw = compute_raw_rate_map_1d(unit_data, occupancy_time, valid_mask, edges, pos_column)
 
@@ -532,64 +566,88 @@ def compute_unit_analysis_1d(
         overall_rate = 0.0
         event_count_rate = 0.0
 
-    si, p_val, shuffled_sis = compute_spatial_information_1d(
-        unit_data,
-        trajectory_df,
-        occupancy_time,
-        valid_mask,
-        edges,
-        scfg.n_shuffles,
-        random_seed=random_seed,
-        min_shift_seconds=scfg.min_shift_seconds,
-        behavior_fps=behavior_fps,
-        si_weight_mode=scfg.si_weight_mode,
-        spatial_sigma=scfg.spatial_sigma,
-        pos_column=pos_column,
-        segment_bins=segment_bins,
-    )
+    # Minimum event-count gate: see comment in spatial_2d.compute_unit_analysis.
+    below_gate = scfg.min_events > 0 and len(unit_data) < scfg.min_events
+
+    if below_gate:
+        si = 0.0
+        p_val = 1.0
+        shuffled_sis = np.zeros(scfg.n_shuffles)
+    else:
+        si, p_val, shuffled_sis = compute_spatial_information_1d(
+            unit_data,
+            trajectory_df,
+            occupancy_time,
+            valid_mask,
+            edges,
+            scfg.n_shuffles,
+            random_seed=random_seed,
+            min_shift_seconds=scfg.min_shift_seconds,
+            behavior_fps=behavior_fps,
+            si_weight_mode=scfg.si_weight_mode,
+            spatial_sigma=scfg.spatial_sigma,
+            pos_column=pos_column,
+            segment_bins=segment_bins,
+        )
 
     # Visualization events: speed-filtered only (no amplitude threshold)
     events_above = unit_data
     vis_threshold = 0.0
 
-    # Stability test
-    (
-        stability_corr,
-        stability_z,
-        stability_p_val,
-        rate_map_first,
-        rate_map_second,
-        shuffled_stability,
-    ) = compute_stability_score_1d(
-        unit_data,
-        trajectory_df,
-        occupancy_time,
-        valid_mask,
-        edges,
-        spatial_sigma=scfg.spatial_sigma,
-        behavior_fps=behavior_fps,
-        min_occupancy=scfg.min_occupancy,
-        n_split_blocks=scfg.n_split_blocks,
-        block_shift=scfg.block_shift,
-        n_shuffles=scfg.n_shuffles,
-        random_seed=random_seed,
-        min_shift_seconds=scfg.min_shift_seconds,
-        si_weight_mode=scfg.si_weight_mode,
-        pos_column=pos_column,
-        segment_bins=segment_bins,
-    )
-
-    # Normalize half rate maps to the full rate map's peak so all three
-    # are on the same 0-1 scale for display.
-    full_peak = float(np.nanmax(rate_map_raw[valid_mask])) if valid_mask.any() else 0.0
-    if full_peak > 0:
-        for rm_half in (rate_map_first, rate_map_second):
-            finite = np.isfinite(rm_half)
-            if finite.any():
-                rm_half[finite] = rm_half[finite] / full_peak
+    # Stability tests — one per configured split. Half rate maps are
+    # stored in firing-rate units (events·s⁻¹/bin); display code
+    # normalizes at plot time so all three maps (first, second, full)
+    # can share a colorbar.
+    stability_splits: list[dict] = []
+    for n_splits in scfg.stability_splits:
+        if below_gate:
+            nan_map = np.full_like(occupancy_time, np.nan)
+            s_corr = np.nan
+            s_z = np.nan
+            s_p = 1.0
+            rm_first = nan_map
+            rm_second = nan_map.copy()
+            shuffled_s = np.array([])
+        else:
+            (
+                s_corr,
+                s_z,
+                s_p,
+                rm_first,
+                rm_second,
+                shuffled_s,
+            ) = compute_stability_score_1d(
+                unit_data,
+                trajectory_df,
+                occupancy_time,
+                valid_mask,
+                edges,
+                spatial_sigma=scfg.spatial_sigma,
+                behavior_fps=behavior_fps,
+                min_occupancy=scfg.min_occupancy,
+                n_split_blocks=n_splits,
+                block_shift=scfg.block_shift,
+                n_shuffles=scfg.n_shuffles,
+                random_seed=random_seed,
+                min_shift_seconds=scfg.min_shift_seconds,
+                si_weight_mode=scfg.si_weight_mode,
+                pos_column=pos_column,
+                segment_bins=segment_bins,
+            )
+        stability_splits.append(
+            {
+                "n_split_blocks": n_splits,
+                "corr": s_corr,
+                "fisher_z": s_z,
+                "p_val": s_p,
+                "shuffled_corrs": shuffled_s,
+                "rate_map_first": rm_first,
+                "rate_map_second": rm_second,
+            }
+        )
 
     return {
-        "rate_map": rate_map,
+        "rate_map_smoothed": rate_map_smoothed,
         "rate_map_raw": rate_map_raw,
         "overall_rate": overall_rate,
         "event_count_rate": event_count_rate,
@@ -599,10 +657,5 @@ def compute_unit_analysis_1d(
         "events_above_threshold": events_above,
         "vis_threshold": vis_threshold,
         "unit_data": unit_data,
-        "stability_corr": stability_corr,
-        "stability_z": stability_z,
-        "stability_p_val": stability_p_val,
-        "rate_map_first": rate_map_first,
-        "rate_map_second": rate_map_second,
-        "shuffled_stability": shuffled_stability,
+        "stability_splits": stability_splits,
     }

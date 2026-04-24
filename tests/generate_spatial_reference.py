@@ -54,9 +54,15 @@ unit_events = unit_events[
 ]
 print(f"Unit {unit_id} has {len(unit_events)} events after filtering")
 
+
 # 4. compute_rate_map - using consistently filtered events
 rate_map = compute_rate_map(
     unit_events, occupancy, valid_mask, x_edges, y_edges, spatial_sigma=1.0
+)
+# rate_map_smoothed: same thing without peak-normalization (firing-rate units).
+rate_map_smoothed = compute_rate_map(
+    unit_events, occupancy, valid_mask, x_edges, y_edges,
+    spatial_sigma=1.0, normalize=False,
 )
 
 # 5. compute_spatial_information - using same events (smoothed, matching literature)
@@ -79,6 +85,7 @@ np.savez(
     x_edges=x_edges,
     y_edges=y_edges,
     rate_map=rate_map,
+    rate_map_smoothed=rate_map_smoothed,
     spatial_info=si,
     spatial_info_pval=p_val,
     vis_threshold=vis_threshold,

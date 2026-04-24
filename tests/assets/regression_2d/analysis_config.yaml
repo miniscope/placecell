@@ -27,5 +27,5 @@ behavior:
     place_field_threshold: 0.35
     place_field_min_bins: 5
     place_field_seed_percentile: 95
-    n_split_blocks: 10
+    stability_splits: [2, 10]
     block_shift: 0

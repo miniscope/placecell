@@ -14,7 +14,7 @@ from placecell.analysis.spatial_2d import (
 )
 from placecell.behavior import clip_to_arena, correct_perspective, remove_position_jumps
 from placecell.config import BaseSpatialMapConfig
-from placecell.dataset.base import BasePlaceCellDataset, UnitResult
+from placecell.dataset.base import BasePlaceCellDataset, StabilitySplitResult, UnitResult
 from placecell.loaders import load_behavior_data
 from placecell.log import init_logger
 from placecell.temporal_alignment import (
@@ -411,8 +411,9 @@ class ArenaDataset(BasePlaceCellDataset):
                 except (KeyError, IndexError):
                     pass
 
+            stability_splits = [StabilitySplitResult(**s) for s in result["stability_splits"]]
             self.unit_results[uid] = UnitResult(
-                rate_map=result["rate_map"],
+                rate_map_smoothed=result["rate_map_smoothed"],
                 rate_map_raw=result["rate_map_raw"],
                 si=result["si"],
                 shuffled_sis=result["shuffled_sis"],
@@ -420,12 +421,7 @@ class ArenaDataset(BasePlaceCellDataset):
                 p_val=result["p_val"],
                 overall_rate=result["overall_rate"],
                 event_count_rate=result["event_count_rate"],
-                stability_corr=result["stability_corr"],
-                stability_z=result["stability_z"],
-                stability_p_val=result["stability_p_val"],
-                shuffled_stability=result["shuffled_stability"],
-                rate_map_first=result["rate_map_first"],
-                rate_map_second=result["rate_map_second"],
+                stability_splits=stability_splits,
                 vis_data_above=result["events_above_threshold"],
                 unit_data=result["unit_data"],
                 trace_data=trace_data,
@@ -491,8 +487,10 @@ class ArenaDataset(BasePlaceCellDataset):
                         self.x_edges,
                         self.y_edges,
                         behavior_fps=self.neural_fps,
-                        n_split_blocks=scfg.n_split_blocks,
+                        stability_splits=scfg.stability_splits,
                         block_shift=scfg.block_shift,
+                        min_occupancy=scfg.min_occupancy,
+                        spatial_sigma=scfg.spatial_sigma,
                     )
                     fig.savefig(figures_dir / "occupancy.pdf", bbox_inches="tight")
                     _plt.close(fig)
