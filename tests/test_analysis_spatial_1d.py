@@ -186,7 +186,7 @@ class TestMinEventsGate1D:
         assert result["si"] == 0.0
         assert all(s["p_val"] == 1.0 for s in result["stability_splits"])
         # Rate map is still produced for inspection.
-        assert result["rate_map"].shape == occ.shape
+        assert result["rate_map_smoothed"].shape == occ.shape
 
     def test_gate_disabled_by_default(self):
         """min_events=0 should leave behavior unchanged."""

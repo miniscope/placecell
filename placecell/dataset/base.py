@@ -73,9 +73,11 @@ class StabilitySplitResult:
     shuffled_corrs:
         Correlations from shuffled data (used for significance).
     rate_map_first:
-        Rate map for the first half of the split (smoothed).
+        Smoothed rate map for the first half of the split, in firing-rate
+        units (same scale as ``UnitResult.rate_map_smoothed``).
     rate_map_second:
-        Rate map for the second half of the split (smoothed).
+        Smoothed rate map for the second half of the split, in firing-rate
+        units (same scale as ``UnitResult.rate_map_smoothed``).
     """
 
     n_split_blocks: int
@@ -93,15 +95,15 @@ class UnitResult:
 
     Parameters
     ----------
-    rate_map:
-        Smoothed rate map, peak-normalized to 0-1 (for display and for the
-        place-field algorithm).
     rate_map_smoothed:
-        Smoothed rate map in firing-rate units (events·s⁻¹ per bin). Use
-        this for quantitative analyses such as population-vector overlap.
-        May be ``None`` for bundles saved before this field was introduced.
+        Smoothed rate map in firing-rate units (events·s⁻¹ per bin).
+        This is the authoritative rate map for quantitative analyses.
     rate_map_raw:
-        Raw (unsmoothed) rate map.
+        Unsmoothed rate map in firing-rate units (events·s⁻¹ per bin).
+    rate_map_peak_normalized:
+        (Property, derived) Smoothed rate map divided by its peak so
+        values span 0-1. Used for display-friendly colorbars. Computed
+        on demand from ``rate_map_smoothed``.
     si:
         Spatial information (bits/spike).
     p_val:
@@ -109,7 +111,9 @@ class UnitResult:
     shuffled_sis:
         Spatial information values from shuffled data (for significance test).
     shuffled_rate_p95:
-        95th percentile of shuffled rate maps (for place field thresholding).
+        Per-bin 95th percentile of smoothed shuffled rate maps, in the same
+        firing-rate units as ``rate_map_smoothed`` (used for place-field
+        seed detection).
     stability_splits:
         One :class:`StabilitySplitResult` per entry in
         ``spatial_map.stability_splits``. A cell is considered stable only if
@@ -130,8 +134,7 @@ class UnitResult:
 
     """
 
-    rate_map: np.ndarray
-    rate_map_smoothed: np.ndarray | None
+    rate_map_smoothed: np.ndarray
     rate_map_raw: np.ndarray
     si: float
     p_val: float
@@ -144,6 +147,22 @@ class UnitResult:
     event_count_rate: float
     trace_data: np.ndarray | None
     trace_times: np.ndarray | None
+
+    @property
+    def rate_map_peak_normalized(self) -> np.ndarray:
+        """Smoothed rate map divided by its peak (0-1 range, for display).
+
+        NaN bins pass through; zero-peak maps are returned unchanged
+        (all zeros/NaN).
+        """
+        rm = np.asarray(self.rate_map_smoothed, dtype=float).copy()
+        finite = np.isfinite(rm)
+        if not finite.any():
+            return rm
+        peak = float(np.nanmax(rm[finite]))
+        if peak > 0:
+            rm[finite] = rm[finite] / peak
+        return rm
 
     def is_stable(self, p_threshold: float) -> bool:
         """True iff every stability split's p-value is below ``p_threshold``."""
@@ -729,7 +748,6 @@ class BasePlaceCellDataset(abc.ABC):
             "event_count_rate",
         ]
         array_fields = [
-            "rate_map",
             "rate_map_smoothed",
             "rate_map_raw",
             "shuffled_sis",
@@ -1028,8 +1046,7 @@ class BasePlaceCellDataset(abc.ABC):
             ar = arrays_by_uid.get(uid, {})
             ev = events_by_uid.get(uid, {})
             results[uid] = UnitResult(
-                rate_map=ar.get("rate_map", np.array([])),
-                rate_map_smoothed=ar.get("rate_map_smoothed"),
+                rate_map_smoothed=ar.get("rate_map_smoothed", np.array([])),
                 rate_map_raw=ar.get("rate_map_raw", np.array([])),
                 si=float(sc["si"]),
                 p_val=float(sc["p_val"]),

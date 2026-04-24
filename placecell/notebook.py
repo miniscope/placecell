@@ -19,28 +19,25 @@ if TYPE_CHECKING:
 def _halves_normalized_by_full_peak(
     result: Any,
 ) -> tuple[np.ndarray, np.ndarray] | tuple[None, None]:
-    """Return half rate maps scaled to the full session's peak.
+    """Return half rate maps scaled to the full session's peak (0-1).
 
-    New bundles store half rate maps in firing-rate units; for display
-    alongside the peak-normalized ``rate_map`` we divide by the full
-    session's smoothed peak. Legacy bundles stored halves already
-    pre-normalized and have no ``rate_map_smoothed`` — in that case
-    return the halves untouched.
+    Half maps are stored in firing-rate units; we divide by the full
+    session's smoothed peak so all three display panels (1st, 2nd, full)
+    share a [0, 1] colorbar.
     """
     if not result.stability_splits:
         return None, None
     primary = result.stability_splits[0]
     rm_first = np.asarray(primary.rate_map_first, dtype=float).copy()
     rm_second = np.asarray(primary.rate_map_second, dtype=float).copy()
-    rm_smoothed = getattr(result, "rate_map_smoothed", None)
-    if rm_smoothed is not None and np.asarray(rm_smoothed).size > 0:
-        finite = np.isfinite(rm_smoothed)
-        full_peak = float(np.nanmax(rm_smoothed[finite])) if finite.any() else 0.0
-        if full_peak > 0:
-            f1 = np.isfinite(rm_first)
-            f2 = np.isfinite(rm_second)
-            rm_first[f1] = rm_first[f1] / full_peak
-            rm_second[f2] = rm_second[f2] / full_peak
+    rm_smoothed = np.asarray(result.rate_map_smoothed, dtype=float)
+    finite = np.isfinite(rm_smoothed)
+    full_peak = float(np.nanmax(rm_smoothed[finite])) if finite.any() else 0.0
+    if full_peak > 0:
+        f1 = np.isfinite(rm_first)
+        f2 = np.isfinite(rm_second)
+        rm_first[f1] = rm_first[f1] / full_peak
+        rm_second[f2] = rm_second[f2] / full_peak
     return rm_first, rm_second
 
 
@@ -213,7 +210,9 @@ def create_unit_browser(
         ax3b.axis("off")
 
         # Plot full session with red contour
-        im3 = ax3c.imshow(result.rate_map.T, origin="lower", cmap="inferno", aspect="equal")
+        im3 = ax3c.imshow(
+            result.rate_map_peak_normalized.T, origin="lower", cmap="inferno", aspect="equal"
+        )
         field_mask_full = compute_place_field_mask(
             _seed_rate_map(result),
             threshold=place_field_threshold,
@@ -566,7 +565,7 @@ def create_shuffle_browser_1d(
         text_annotations = []
 
         ax = axes[0]
-        rm = res.rate_map
+        rm = res.rate_map_peak_normalized
         valid = np.isfinite(rm)
         ax.fill_between(
             centers,
@@ -795,22 +794,23 @@ def create_unit_browser_1d(
             txt.remove()
         text_annotations = []
 
-        # Half maps are in firing-rate units; scale to the full session
-        # peak so they share the [0, 1] y-axis with `res.rate_map`.
+        # Half maps are in firing-rate units; scale to the full-session
+        # peak so they share the [0, 1] y-axis with the full rate map.
         half_first, half_second = _halves_normalized_by_full_peak(res)
-        valid_full = np.isfinite(res.rate_map)
+        full_rate = res.rate_map_peak_normalized
+        valid_full = np.isfinite(full_rate)
         valid_1st = np.isfinite(half_first) if half_first is not None else np.array([])
         valid_2nd = np.isfinite(half_second) if half_second is not None else np.array([])
 
         ax_rm.fill_between(
             centers,
             0,
-            np.where(valid_full, res.rate_map, 0),
+            np.where(valid_full, full_rate, 0),
             alpha=0.15,
             color="black",
             where=valid_full,
         )
-        ax_rm.plot(centers, res.rate_map, color="black", linewidth=1.5, label="Full")
+        ax_rm.plot(centers, full_rate, color="black", linewidth=1.5, label="Full")
         if half_first is not None:
             ax_rm.plot(
                 centers,

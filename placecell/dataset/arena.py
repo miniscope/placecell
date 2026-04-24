@@ -415,7 +415,6 @@ class ArenaDataset(BasePlaceCellDataset):
                 StabilitySplitResult(**s) for s in result["stability_splits"]
             ]
             self.unit_results[uid] = UnitResult(
-                rate_map=result["rate_map"],
                 rate_map_smoothed=result["rate_map_smoothed"],
                 rate_map_raw=result["rate_map_raw"],
                 si=result["si"],
@@ -490,8 +489,10 @@ class ArenaDataset(BasePlaceCellDataset):
                         self.x_edges,
                         self.y_edges,
                         behavior_fps=self.neural_fps,
-                        n_split_blocks=scfg.stability_splits[0],
+                        stability_splits=scfg.stability_splits,
                         block_shift=scfg.block_shift,
+                        min_occupancy=scfg.min_occupancy,
+                        spatial_sigma=scfg.spatial_sigma,
                     )
                     fig.savefig(figures_dir / "occupancy.pdf", bbox_inches="tight")
                     _plt.close(fig)

@@ -60,7 +60,7 @@ def compute_occupancy_map_1d(
     pos_column: str = "pos_1d",
     segment_bins: list[int] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Compute 1D occupancy histogram.
+    """Compute 1D occupancy histogram (raw).
 
     Parameters
     ----------
@@ -73,9 +73,13 @@ def compute_occupancy_map_1d(
     behavior_fps:
         Behavior sampling rate.
     spatial_sigma:
-        Gaussian smoothing sigma in bins.
+        Gaussian smoothing sigma in bins. Used only to compute
+        ``valid_mask``; ``occupancy_time`` is returned unsmoothed so
+        downstream smoothing in the rate-map/SI path doesn't compound
+        to sigma·sqrt(2).
     min_occupancy:
-        Minimum occupancy in seconds.
+        Minimum occupancy in seconds (checked against the smoothed
+        occupancy for the mask).
     pos_column:
         Column name for position values.
     segment_bins:
@@ -84,7 +88,8 @@ def compute_occupancy_map_1d(
     Returns
     -------
     tuple
-        (occupancy_time, valid_mask, edges) -- all 1D arrays.
+        (occupancy_time, valid_mask, edges) — ``occupancy_time`` is raw
+        (seconds per bin); ``valid_mask`` comes from the smoothed copy.
     """
     edges = np.linspace(pos_range[0], pos_range[1], n_bins + 1)
     time_per_frame = 1.0 / behavior_fps
@@ -93,11 +98,12 @@ def compute_occupancy_map_1d(
     occupancy_time = counts.astype(float) * time_per_frame
 
     if spatial_sigma > 0:
-        occupancy_time = gaussian_filter_normalized_1d(
+        occ_for_mask = gaussian_filter_normalized_1d(
             occupancy_time, sigma=spatial_sigma, segment_bins=segment_bins
         )
-
-    valid_mask = occupancy_time >= min_occupancy
+    else:
+        occ_for_mask = occupancy_time
+    valid_mask = occ_for_mask >= min_occupancy
 
     return occupancy_time, valid_mask, edges
 
@@ -135,18 +141,18 @@ def compute_rate_map_1d(
     occ_smooth = gaussian_filter_normalized_1d(
         occupancy_time, sigma=spatial_sigma, segment_bins=segment_bins
     )
-    rate_map_smooth = np.zeros_like(occupancy_time)
-    rate_map_smooth[valid_mask] = event_smooth[valid_mask] / occ_smooth[valid_mask]
+    rate_map_smoothed = np.zeros_like(occupancy_time)
+    rate_map_smoothed[valid_mask] = event_smooth[valid_mask] / occ_smooth[valid_mask]
 
     if normalize:
-        valid_rate_values = rate_map_smooth[valid_mask]
+        valid_rate_values = rate_map_smoothed[valid_mask]
         if len(valid_rate_values) > 0 and np.nanmax(valid_rate_values) > 0:
-            rate_map_smooth[valid_mask] = (
-                rate_map_smooth[valid_mask] / np.nanmax(valid_rate_values)
+            rate_map_smoothed[valid_mask] = (
+                rate_map_smoothed[valid_mask] / np.nanmax(valid_rate_values)
             )
 
-    rate_map_smooth[~valid_mask] = np.nan
-    return rate_map_smooth
+    rate_map_smoothed[~valid_mask] = np.nan
+    return rate_map_smoothed
 
 
 def compute_raw_rate_map_1d(
@@ -252,7 +258,10 @@ def compute_spatial_information_1d(
 
     n_frames = len(aligned_events)
     min_shift_frames = int(min_shift_seconds * behavior_fps)
-    min_shift_frames = min(min_shift_frames, n_frames // 2)
+    # Drop the constraint if the session is too short to leave a
+    # non-empty shift range; the unrestricted branch below is used.
+    if min_shift_frames >= n_frames // 2:
+        min_shift_frames = 0
 
     traj_pos = trajectory_df[pos_column].values
 
@@ -398,10 +407,10 @@ def compute_stability_score_1d(
         occ_smooth_half = gaussian_filter_normalized_1d(
             occ, sigma=spatial_sigma, segment_bins=segment_bins
         )
-        rate_map_smooth = np.zeros_like(occ)
-        rate_map_smooth[mask] = event_smooth[mask] / occ_smooth_half[mask]
-        rate_map_smooth[~mask] = np.nan
-        return rate_map_smooth
+        rate_map_smoothed = np.zeros_like(occ)
+        rate_map_smoothed[mask] = event_smooth[mask] / occ_smooth_half[mask]
+        rate_map_smoothed[~mask] = np.nan
+        return rate_map_smoothed
 
     rate_map_first = compute_half_rate_map(events_first, occ_first, valid_first)
     rate_map_second = compute_half_rate_map(events_second, occ_second, valid_second)
@@ -449,7 +458,10 @@ def compute_stability_score_1d(
 
         n_frames = len(aligned_events)
         min_shift_frames = int(min_shift_seconds * behavior_fps)
-        min_shift_frames = min(min_shift_frames, n_frames // 2)
+        # Drop the constraint if the session is too short to leave a
+        # non-empty shift range; the unrestricted branch below is used.
+        if min_shift_frames >= n_frames // 2:
+            min_shift_frames = 0
 
         # Smoothed half-occupancies are loop-invariant.
         os1 = gaussian_filter_normalized_1d(
@@ -525,10 +537,10 @@ def compute_unit_analysis_1d(
         df_filtered[df_filtered["unit_id"] == unit_id] if not df_filtered.empty else pd.DataFrame()
     )
 
-    # Rate maps:
+    # Rate maps (two stored flavors; peak-normalized display map is a
+    # derived @property on UnitResult):
     #   - rate_map_smoothed: smoothed, firing-rate units (events·s⁻¹/bin).
-    #     Used for quantitative analyses (population-vector overlap, etc.).
-    #   - rate_map: same smoothing, peak-normalized to 0-1 for display.
+    #     Authoritative map for quantitative analyses.
     #   - rate_map_raw: unsmoothed rate for overall-rate computation.
     rate_map_smoothed = compute_rate_map_1d(
         unit_data,
@@ -540,12 +552,6 @@ def compute_unit_analysis_1d(
         segment_bins=segment_bins,
         normalize=False,
     )
-    rate_map = rate_map_smoothed.copy()
-    if valid_mask.any():
-        finite_vals = rate_map[valid_mask]
-        peak = float(np.nanmax(finite_vals)) if finite_vals.size else 0.0
-        if peak > 0:
-            rate_map[valid_mask] = rate_map[valid_mask] / peak
     rate_map_raw = compute_raw_rate_map_1d(unit_data, occupancy_time, valid_mask, edges, pos_column)
 
     # Overall rate: amplitude-weighted and binary event count
@@ -639,7 +645,6 @@ def compute_unit_analysis_1d(
         })
 
     return {
-        "rate_map": rate_map,
         "rate_map_smoothed": rate_map_smoothed,
         "rate_map_raw": rate_map_raw,
         "overall_rate": overall_rate,

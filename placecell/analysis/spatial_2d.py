@@ -50,7 +50,7 @@ def compute_occupancy_map(
     spatial_sigma: float = 1.0,
     min_occupancy: float = 0.1,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Compute occupancy map from speed-filtered trajectory.
+    """Compute raw occupancy map from speed-filtered trajectory.
 
     Parameters
     ----------
@@ -61,14 +61,20 @@ def compute_occupancy_map(
     behavior_fps:
         Behavior sampling rate.
     spatial_sigma:
-        Gaussian smoothing sigma for occupancy map.
+        Gaussian smoothing sigma (bins). Used only to compute
+        ``valid_mask`` robustly at the edges; ``occupancy_time`` itself
+        is returned unsmoothed so downstream smoothing in
+        :func:`compute_rate_map` etc. doesn't compound to sigma·sqrt(2).
     min_occupancy:
-        Minimum occupancy time in seconds.
+        Minimum occupancy time in seconds (checked against the smoothed
+        occupancy for the mask).
 
     Returns
     -------
     tuple
-        (occupancy_time, valid_mask, x_edges, y_edges)
+        (occupancy_time, valid_mask, x_edges, y_edges) — ``occupancy_time``
+        is raw (seconds per bin); ``valid_mask`` comes from the smoothed
+        copy.
     """
     x_edges = np.linspace(trajectory_df["x"].min(), trajectory_df["x"].max(), bins + 1)
     y_edges = np.linspace(trajectory_df["y"].min(), trajectory_df["y"].max(), bins + 1)
@@ -79,10 +85,16 @@ def compute_occupancy_map(
     )
     occupancy_time = occupancy_counts * time_per_frame
 
+    # valid_mask is derived from smoothed occupancy so that bins with a
+    # few noisy frames at the edge aren't disqualified. ``occupancy_time``
+    # itself is returned RAW — downstream analyses (rate map, SI, shuffle
+    # percentile) smooth it independently, and double-smoothing upstream
+    # would widen the effective kernel to sigma·sqrt(2).
     if spatial_sigma > 0:
-        occupancy_time = gaussian_filter_normalized(occupancy_time, sigma=spatial_sigma)
-
-    valid_mask = occupancy_time >= min_occupancy
+        occ_for_mask = gaussian_filter_normalized(occupancy_time, sigma=spatial_sigma)
+    else:
+        occ_for_mask = occupancy_time
+    valid_mask = occ_for_mask >= min_occupancy
 
     return occupancy_time, valid_mask, x_edges, y_edges
 
@@ -135,19 +147,19 @@ def compute_rate_map(
     # Smooth numerator and denominator independently (Skaggs et al. 1996)
     event_smooth = gaussian_filter_normalized(event_weights, sigma=spatial_sigma)
     occ_smooth = gaussian_filter_normalized(occupancy_time, sigma=spatial_sigma)
-    rate_map_smooth = np.zeros_like(occupancy_time)
-    rate_map_smooth[valid_mask] = event_smooth[valid_mask] / occ_smooth[valid_mask]
+    rate_map_smoothed = np.zeros_like(occupancy_time)
+    rate_map_smoothed[valid_mask] = event_smooth[valid_mask] / occ_smooth[valid_mask]
 
     if normalize:
-        valid_rate_values = rate_map_smooth[valid_mask]
+        valid_rate_values = rate_map_smoothed[valid_mask]
         if len(valid_rate_values) > 0 and np.nanmax(valid_rate_values) > 0:
-            rate_map_smooth[valid_mask] = (
-                rate_map_smooth[valid_mask] / np.nanmax(valid_rate_values)
+            rate_map_smoothed[valid_mask] = (
+                rate_map_smoothed[valid_mask] / np.nanmax(valid_rate_values)
             )
 
-    rate_map_smooth[~valid_mask] = np.nan
+    rate_map_smoothed[~valid_mask] = np.nan
 
-    return rate_map_smooth
+    return rate_map_smoothed
 
 
 def compute_spatial_information(
@@ -258,8 +270,10 @@ def compute_spatial_information(
 
     n_frames = len(aligned_events)
     min_shift_frames = int(min_shift_seconds * behavior_fps)
-    # Clamp so valid range exists (shift between min_shift and n_frames - min_shift)
-    min_shift_frames = min(min_shift_frames, n_frames // 2)
+    # Drop the constraint if the session is too short to leave a
+    # non-empty shift range; the unrestricted branch below is used.
+    if min_shift_frames >= n_frames // 2:
+        min_shift_frames = 0
 
     shuffled_sis = []
     for _ in range(n_shuffles):
@@ -376,7 +390,10 @@ def compute_shuffled_rate_percentile(
 
     n_frames = len(aligned_events)
     min_shift_frames = int(min_shift_seconds * behavior_fps)
-    min_shift_frames = min(min_shift_frames, n_frames // 2)
+    # Drop the constraint if the session is too short to leave a
+    # non-empty shift range; the unrestricted branch below is used.
+    if min_shift_frames >= n_frames // 2:
+        min_shift_frames = 0
 
     traj_x = trajectory_df["x"].values
     traj_y = trajectory_df["y"].values
@@ -513,7 +530,7 @@ def compute_stability_score(
     span = frame_max - frame_min
     if span == 0:
         nan_map = np.full_like(occupancy_time, np.nan)
-        return np.nan, np.nan, np.nan, nan_map, nan_map
+        return np.nan, np.nan, np.nan, nan_map, nan_map, np.array([])
     block_width = span / n_split_blocks
     offset = block_shift * block_width
 
@@ -574,25 +591,25 @@ def compute_stability_score(
         # Smooth numerator and denominator independently
         event_smooth = gaussian_filter_normalized(event_weights, sigma=spatial_sigma)
         occ_smooth_half = gaussian_filter_normalized(occ, sigma=spatial_sigma)
-        rate_map_smooth = np.zeros_like(occ)
-        rate_map_smooth[mask] = event_smooth[mask] / occ_smooth_half[mask]
+        rate_map_smoothed = np.zeros_like(occ)
+        rate_map_smoothed[mask] = event_smooth[mask] / occ_smooth_half[mask]
 
-        rate_map_smooth[~mask] = np.nan
-        return rate_map_smooth
+        rate_map_smoothed[~mask] = np.nan
+        return rate_map_smoothed
 
     rate_map_first = compute_half_rate_map(events_first, occ_first, valid_first)
     rate_map_second = compute_half_rate_map(events_second, occ_second, valid_second)
 
     both_valid = valid_first & valid_second
     if not np.any(both_valid):
-        return np.nan, np.nan, np.nan, rate_map_first, rate_map_second
+        return np.nan, np.nan, np.nan, rate_map_first, rate_map_second, np.array([])
 
     vals_first = rate_map_first[both_valid]
     vals_second = rate_map_second[both_valid]
 
     finite_mask = np.isfinite(vals_first) & np.isfinite(vals_second)
     if np.sum(finite_mask) < 3:  # Need at least 3 points for correlation
-        return np.nan, np.nan, np.nan, rate_map_first, rate_map_second
+        return np.nan, np.nan, np.nan, rate_map_first, rate_map_second, np.array([])
 
     vals_first = vals_first[finite_mask]
     vals_second = vals_second[finite_mask]
@@ -630,7 +647,10 @@ def compute_stability_score(
 
         n_frames = len(aligned_events)
         min_shift_frames = int(min_shift_seconds * behavior_fps)
-        min_shift_frames = min(min_shift_frames, n_frames // 2)
+        # Drop the constraint if the session is too short to leave a
+        # non-empty shift range; the unrestricted branch below is used.
+        if min_shift_frames >= n_frames // 2:
+            min_shift_frames = 0
 
         # Smoothed half-occupancies are loop-invariant.
         os1 = gaussian_filter_normalized(occ_first, sigma=spatial_sigma)
@@ -729,13 +749,11 @@ def compute_unit_analysis(
         df_filtered[df_filtered["unit_id"] == unit_id] if not df_filtered.empty else pd.DataFrame()
     )
 
-    # Rate maps:
+    # Rate maps (two stored flavors; peak-normalized display map is a
+    # derived @property on UnitResult):
     #   - rate_map_smoothed: smoothed, firing-rate units (events·s⁻¹/bin).
-    #     Used for quantitative analyses (population-vector overlap, etc.).
-    #   - rate_map: same smoothing, peak-normalized to 0-1 for display and
-    #     for the place-field algorithm.
-    #   - rate_map_raw: unsmoothed rate, used for place-field boundary
-    #     detection and overall-rate computation.
+    #     Authoritative map for quantitative analyses (SI, PVO, etc.).
+    #   - rate_map_raw: unsmoothed rate, used for overall-rate computation.
     rate_map_smoothed = compute_rate_map(
         unit_data,
         occupancy_time,
@@ -745,12 +763,6 @@ def compute_unit_analysis(
         scfg.spatial_sigma,
         normalize=False,
     )
-    rate_map = rate_map_smoothed.copy()
-    if valid_mask.any():
-        finite_vals = rate_map[valid_mask]
-        peak = float(np.nanmax(finite_vals)) if finite_vals.size else 0.0
-        if peak > 0:
-            rate_map[valid_mask] = rate_map[valid_mask] / peak
     rate_map_raw = compute_raw_rate_map(unit_data, occupancy_time, valid_mask, x_edges, y_edges)
 
     # Overall rate: amplitude-weighted and binary event count
@@ -868,7 +880,6 @@ def compute_unit_analysis(
         })
 
     return {
-        "rate_map": rate_map,
         "rate_map_smoothed": rate_map_smoothed,
         "rate_map_raw": rate_map_raw,
         "overall_rate": overall_rate,
@@ -1009,18 +1020,12 @@ def compute_place_field_mask(
 
 
 def _seed_rate_map(result: Any) -> np.ndarray:
-    """Pick the rate-map attribute that matches ``shuffled_rate_p95``'s units.
+    """Return the rate map to compare against ``shuffled_rate_p95``.
 
-    Bundles saved after the seed-detection fix store
-    ``rate_map_smoothed`` in firing-rate units and ``shuffled_rate_p95``
-    in the same units. Older bundles stored both peak-normalized to 0-1.
-    Choosing the right attribute per bundle keeps place-field detection
-    self-consistent across versions.
+    Both arrays are in firing-rate units (events·s⁻¹/bin), so place-field
+    seed detection uses ``rate_map_smoothed`` directly.
     """
-    rm_smoothed = getattr(result, "rate_map_smoothed", None)
-    if rm_smoothed is not None and np.asarray(rm_smoothed).size > 0:
-        return rm_smoothed
-    return result.rate_map
+    return np.asarray(result.rate_map_smoothed, dtype=float)
 
 
 def compute_coverage_map(

@@ -207,7 +207,9 @@ def test_compute_unit_analysis(assets_dir: Path) -> None:
     )
 
     # Rate map should match reference (same as compute_rate_map test)
-    np.testing.assert_allclose(result["rate_map"], ref["rate_map"], rtol=1e-10, equal_nan=True)
+    np.testing.assert_allclose(
+        result["rate_map_smoothed"], ref["rate_map_smoothed"], rtol=1e-10, equal_nan=True
+    )
 
     # SI should match reference (same as compute_spatial_information test)
     assert result["si"] == pytest.approx(float(ref["spatial_info"]), rel=1e-10)

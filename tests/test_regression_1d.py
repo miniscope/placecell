@@ -226,8 +226,8 @@ def test_rate_maps(
 ) -> None:
     """Per-unit 1D rate maps must match."""
     for uid in reference.unit_results:
-        ref_map = reference.unit_results[uid].rate_map
-        got_map = pipeline_result.unit_results[uid].rate_map
+        ref_map = reference.unit_results[uid].rate_map_smoothed
+        got_map = pipeline_result.unit_results[uid].rate_map_smoothed
         assert got_map.shape == ref_map.shape, f"unit {uid} rate_map shape"
         np.testing.assert_allclose(
             got_map,
@@ -235,7 +235,7 @@ def test_rate_maps(
             rtol=1e-5,
             atol=1e-10,
             equal_nan=True,
-            err_msg=f"unit {uid} rate_map",
+            err_msg=f"unit {uid} rate_map_smoothed",
         )
 
 
@@ -256,11 +256,11 @@ def test_save_load_bundle_roundtrip(
     )
     for uid in pipeline_result.unit_results:
         np.testing.assert_allclose(
-            reloaded.unit_results[uid].rate_map,
-            pipeline_result.unit_results[uid].rate_map,
+            reloaded.unit_results[uid].rate_map_smoothed,
+            pipeline_result.unit_results[uid].rate_map_smoothed,
             rtol=1e-5,
             equal_nan=True,
-            err_msg=f"unit {uid} rate_map round-trip",
+            err_msg=f"unit {uid} rate_map_smoothed round-trip",
         )
 
 

@@ -495,7 +495,6 @@ class MazeDataset(BasePlaceCellDataset):
                 StabilitySplitResult(**s) for s in result["stability_splits"]
             ]
             self.unit_results[uid] = UnitResult(
-                rate_map=result["rate_map"],
                 rate_map_smoothed=result["rate_map_smoothed"],
                 rate_map_raw=result["rate_map_raw"],
                 si=result["si"],
