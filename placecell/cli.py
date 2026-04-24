@@ -4,12 +4,14 @@ from pathlib import Path
 
 import click
 
+from placecell import __version__
 from placecell.log import init_logger
 
 logger = init_logger(__name__)
 
 
 @click.group()
+@click.version_option(__version__, "-V", "--version", prog_name="placecell")
 def cli() -> None:
     """Placecell analysis pipeline."""
 
