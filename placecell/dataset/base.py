@@ -572,10 +572,7 @@ class BasePlaceCellDataset(abc.ABC):
 
         path.mkdir(parents=True, exist_ok=True)
 
-        # Metadata. ``version`` is the bundle schema version (enforced on
-        # load). ``placecell_version`` is informational — it captures the
-        # package version that wrote the bundle (includes the git SHA and
-        # dev-count via hatch-vcs) for provenance/debugging.
+        # ``version`` is the schema version (enforced on load); ``placecell_version`` is informational.
         meta = {
             "version": _BUNDLE_VERSION,
             "placecell_version": _PACKAGE_VERSION,
