@@ -12,6 +12,7 @@ import pandas as pd
 import xarray as xr
 import yaml
 
+from placecell import __version__ as _PACKAGE_VERSION
 from placecell.config import (
     CONFIG_DIR,
     AnalysisConfig,
@@ -574,9 +575,13 @@ class BasePlaceCellDataset(abc.ABC):
 
         path.mkdir(parents=True, exist_ok=True)
 
-        # Metadata
+        # Metadata. ``version`` is the bundle schema version (enforced on
+        # load). ``placecell_version`` is informational — it captures the
+        # package version that wrote the bundle (includes the git SHA and
+        # dev-count via hatch-vcs) for provenance/debugging.
         meta = {
             "version": _BUNDLE_VERSION,
+            "placecell_version": _PACKAGE_VERSION,
             "created": datetime.now(UTC).isoformat(),
         }
         (path / "metadata.json").write_text(json.dumps(meta, indent=2))

@@ -862,6 +862,7 @@ def create_unit_browser_1d(
         ax_si_shuf.tick_params(labelsize=5)
         ax_si_shuf.set_ylabel("Count", fontsize=6)
 
+        primary = res.stability_splits[0] if res.stability_splits else None
         shuffled = primary.shuffled_corrs if primary is not None else np.array([])
         if len(shuffled) > 0:
             ax_stab_shuf.hist(
