@@ -629,17 +629,27 @@ def create_shuffle_browser_1d(
         shuffled = primary.shuffled_corrs if primary is not None else np.array([])
         if len(shuffled) > 0:
             ax.hist(
-                shuffled, bins=30, color="gray", alpha=0.7,
-                edgecolor="none", density=True, label="Shuffled",
+                shuffled,
+                bins=30,
+                color="gray",
+                alpha=0.7,
+                edgecolor="none",
+                density=True,
+                label="Shuffled",
             )
             pct95_stab = np.percentile(shuffled, 95)
             ax.axvline(
-                pct95_stab, color="black", linewidth=1, linestyle="--",
+                pct95_stab,
+                color="black",
+                linewidth=1,
+                linestyle="--",
                 label=f"95th pctl ({pct95_stab:.3f})",
             )
         if primary is not None and not np.isnan(primary.corr):
             ax.axvline(
-                primary.corr, color="blue", linewidth=2,
+                primary.corr,
+                color="blue",
+                linewidth=2,
                 label=f"Observed (r={primary.corr:.3f})",
             )
 
@@ -815,12 +825,18 @@ def create_unit_browser_1d(
             ax_rm.plot(
                 centers,
                 np.where(valid_1st, half_first, np.nan),
-                color="steelblue", linewidth=1.0, alpha=0.8, label="1st half",
+                color="steelblue",
+                linewidth=1.0,
+                alpha=0.8,
+                label="1st half",
             )
             ax_rm.plot(
                 centers,
                 np.where(valid_2nd, half_second, np.nan),
-                color="coral", linewidth=1.0, alpha=0.8, label="2nd half",
+                color="coral",
+                linewidth=1.0,
+                alpha=0.8,
+                label="2nd half",
             )
 
         if arm_boundaries:
@@ -866,19 +882,30 @@ def create_unit_browser_1d(
         shuffled = primary.shuffled_corrs if primary is not None else np.array([])
         if len(shuffled) > 0:
             ax_stab_shuf.hist(
-                shuffled, bins=30, color="gray", alpha=0.6, edgecolor="none",
+                shuffled,
+                bins=30,
+                color="gray",
+                alpha=0.6,
+                edgecolor="none",
             )
             corr_val = primary.corr if primary is not None and not np.isnan(primary.corr) else 0
             ax_stab_shuf.axvline(
-                corr_val, color="red", linewidth=1.5, label=f"r={corr_val:.2f}",
+                corr_val,
+                color="red",
+                linewidth=1.5,
+                label=f"r={corr_val:.2f}",
             )
             p_primary = primary.p_val if primary is not None else np.nan
             p_str = f"p={p_primary:.3f}" if not np.isnan(p_primary) else "p=N/A"
             ax_stab_shuf.set_title(f"Stability shuffle ({p_str})", fontsize=8)
         else:
             ax_stab_shuf.text(
-                0.5, 0.5, "No stability shuffle",
-                ha="center", va="center", fontsize=8,
+                0.5,
+                0.5,
+                "No stability shuffle",
+                ha="center",
+                va="center",
+                fontsize=8,
             )
         ax_stab_shuf.tick_params(labelsize=5)
         ax_stab_shuf.set_ylabel("Count", fontsize=6)
@@ -1018,9 +1045,7 @@ def create_unit_browser_1d(
         if not np.isnan(p_primary):
             stab_parts.append(f"p={p_primary:.3f}")
         if len(res.stability_splits) > 1:
-            other_ps = [
-                s.p_val for s in res.stability_splits[1:] if not np.isnan(s.p_val)
-            ]
+            other_ps = [s.p_val for s in res.stability_splits[1:] if not np.isnan(s.p_val)]
             if other_ps:
                 stab_parts.append("other p=" + "/".join(f"{p:.3f}" for p in other_ps))
         txt = fig.text(

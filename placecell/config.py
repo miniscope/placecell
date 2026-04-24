@@ -119,14 +119,11 @@ class BaseSpatialMapConfig(BaseModel):
     def _validate_stability_splits(self) -> "BaseSpatialMapConfig":
         bad = [n for n in self.stability_splits if n < 2 or n > 100]
         if bad:
-            raise ValueError(
-                f"stability_splits entries must be in [2, 100]; got {bad}."
-            )
+            raise ValueError(f"stability_splits entries must be in [2, 100]; got {bad}.")
         if len(set(self.stability_splits)) != len(self.stability_splits):
-            raise ValueError(
-                f"stability_splits must be unique; got {self.stability_splits}."
-            )
+            raise ValueError(f"stability_splits must be unique; got {self.stability_splits}.")
         return self
+
     block_shift: float = Field(
         0.0,
         ge=0.0,

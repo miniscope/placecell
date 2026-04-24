@@ -169,10 +169,7 @@ class UnitResult:
         """True iff every stability split's p-value is below ``p_threshold``."""
         if not self.stability_splits:
             return False
-        return all(
-            not np.isnan(s.p_val) and s.p_val < p_threshold
-            for s in self.stability_splits
-        )
+        return all(not np.isnan(s.p_val) and s.p_val < p_threshold for s in self.stability_splits)
 
 
 class BasePlaceCellDataset(abc.ABC):
@@ -1016,21 +1013,23 @@ class BasePlaceCellDataset(abc.ABC):
             for _, row in stab_df.iterrows():
                 uid = int(row["unit_id"])
                 idx = int(row["split_index"])
-                stability_by_uid[uid].append(StabilitySplitResult(
-                    n_split_blocks=int(row["n_split_blocks"]),
-                    corr=float(row["corr"]),
-                    fisher_z=float(row["fisher_z"]),
-                    p_val=float(row["p_val"]),
-                    shuffled_corrs=stab_arrays_by_key.get(
-                        (uid, idx, "shuffled_corrs"), np.array([])
-                    ),
-                    rate_map_first=stab_arrays_by_key.get(
-                        (uid, idx, "rate_map_first"), np.array([])
-                    ),
-                    rate_map_second=stab_arrays_by_key.get(
-                        (uid, idx, "rate_map_second"), np.array([])
-                    ),
-                ))
+                stability_by_uid[uid].append(
+                    StabilitySplitResult(
+                        n_split_blocks=int(row["n_split_blocks"]),
+                        corr=float(row["corr"]),
+                        fisher_z=float(row["fisher_z"]),
+                        p_val=float(row["p_val"]),
+                        shuffled_corrs=stab_arrays_by_key.get(
+                            (uid, idx, "shuffled_corrs"), np.array([])
+                        ),
+                        rate_map_first=stab_arrays_by_key.get(
+                            (uid, idx, "rate_map_first"), np.array([])
+                        ),
+                        rate_map_second=stab_arrays_by_key.get(
+                            (uid, idx, "rate_map_second"), np.array([])
+                        ),
+                    )
+                )
 
         # Read events
         events_by_uid: dict[int, dict] = {uid: {} for uid in unit_ids}

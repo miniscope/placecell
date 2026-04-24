@@ -47,9 +47,7 @@ def _stack_rate_maps(
         if rm.size == 0:
             continue
         if rm.ndim != 1:
-            raise ValueError(
-                f"Unit {uid} rate_map_smoothed must be 1D, got shape {rm.shape}."
-            )
+            raise ValueError(f"Unit {uid} rate_map_smoothed must be 1D, got shape {rm.shape}.")
         if n_bins is None:
             n_bins = rm.shape[0]
         elif rm.shape[0] != n_bins:

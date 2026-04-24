@@ -411,9 +411,7 @@ class ArenaDataset(BasePlaceCellDataset):
                 except (KeyError, IndexError):
                     pass
 
-            stability_splits = [
-                StabilitySplitResult(**s) for s in result["stability_splits"]
-            ]
+            stability_splits = [StabilitySplitResult(**s) for s in result["stability_splits"]]
             self.unit_results[uid] = UnitResult(
                 rate_map_smoothed=result["rate_map_smoothed"],
                 rate_map_raw=result["rate_map_raw"],

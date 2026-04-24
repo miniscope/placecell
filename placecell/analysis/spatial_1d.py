@@ -147,8 +147,8 @@ def compute_rate_map_1d(
     if normalize:
         valid_rate_values = rate_map_smoothed[valid_mask]
         if len(valid_rate_values) > 0 and np.nanmax(valid_rate_values) > 0:
-            rate_map_smoothed[valid_mask] = (
-                rate_map_smoothed[valid_mask] / np.nanmax(valid_rate_values)
+            rate_map_smoothed[valid_mask] = rate_map_smoothed[valid_mask] / np.nanmax(
+                valid_rate_values
             )
 
     rate_map_smoothed[~valid_mask] = np.nan
@@ -634,15 +634,17 @@ def compute_unit_analysis_1d(
                 pos_column=pos_column,
                 segment_bins=segment_bins,
             )
-        stability_splits.append({
-            "n_split_blocks": n_splits,
-            "corr": s_corr,
-            "fisher_z": s_z,
-            "p_val": s_p,
-            "shuffled_corrs": shuffled_s,
-            "rate_map_first": rm_first,
-            "rate_map_second": rm_second,
-        })
+        stability_splits.append(
+            {
+                "n_split_blocks": n_splits,
+                "corr": s_corr,
+                "fisher_z": s_z,
+                "p_val": s_p,
+                "shuffled_corrs": shuffled_s,
+                "rate_map_first": rm_first,
+                "rate_map_second": rm_second,
+            }
+        )
 
     return {
         "rate_map_smoothed": rate_map_smoothed,

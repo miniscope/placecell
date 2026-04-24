@@ -168,23 +168,28 @@ def plot_summary_scatter(
     p_vals = np.array([unit_results[uid].p_val for uid in unit_ids])
     # Worst-case (max) p-value across splits so scatter rewards cells that pass
     # every configured stability test. Correlation shown is from split #0.
-    stab_pvals = np.array([
-        max((s.p_val for s in unit_results[uid].stability_splits), default=np.nan)
-        for uid in unit_ids
-    ])
-    fisher_z = np.array([
-        unit_results[uid].stability_splits[0].fisher_z
-        if unit_results[uid].stability_splits else np.nan
-        for uid in unit_ids
-    ])
+    stab_pvals = np.array(
+        [
+            max((s.p_val for s in unit_results[uid].stability_splits), default=np.nan)
+            for uid in unit_ids
+        ]
+    )
+    fisher_z = np.array(
+        [
+            (
+                unit_results[uid].stability_splits[0].fisher_z
+                if unit_results[uid].stability_splits
+                else np.nan
+            )
+            for uid in unit_ids
+        ]
+    )
     si_vals = np.array([unit_results[uid].si for uid in unit_ids])
     overall_rates = np.array([unit_results[uid].overall_rate for uid in unit_ids])
 
     # Classify units — stability requires ALL splits p < threshold.
     is_sig = p_vals < p_value_threshold
-    is_stable = np.array([
-        unit_results[uid].is_stable(p_value_threshold) for uid in unit_ids
-    ])
+    is_stable = np.array([unit_results[uid].is_stable(p_value_threshold) for uid in unit_ids])
     is_place_cell = is_sig & is_stable
 
     colors = []
@@ -494,36 +499,54 @@ def plot_stability_splits_summary(
         return fig
 
     fig, axes = plt.subplots(
-        n_splits, 2, figsize=(9, 2.6 * n_splits), squeeze=False,
+        n_splits,
+        2,
+        figsize=(9, 2.6 * n_splits),
+        squeeze=False,
     )
 
     for i in range(n_splits):
-        corrs = np.array([
-            r.stability_splits[i].corr for r in unit_results.values()
-            if len(r.stability_splits) > i
-        ])
-        pvals = np.array([
-            r.stability_splits[i].p_val for r in unit_results.values()
-            if len(r.stability_splits) > i
-        ])
+        corrs = np.array(
+            [
+                r.stability_splits[i].corr
+                for r in unit_results.values()
+                if len(r.stability_splits) > i
+            ]
+        )
+        pvals = np.array(
+            [
+                r.stability_splits[i].p_val
+                for r in unit_results.values()
+                if len(r.stability_splits) > i
+            ]
+        )
         n_split_blocks = unit_results[uids[0]].stability_splits[i].n_split_blocks
         n_pass = int(np.nansum(pvals < p_value_threshold))
 
         ax_corr, ax_p = axes[i]
         ax_corr.hist(
-            corrs[np.isfinite(corrs)], bins=30, color="steelblue",
-            edgecolor="black", alpha=0.7,
+            corrs[np.isfinite(corrs)],
+            bins=30,
+            color="steelblue",
+            edgecolor="black",
+            alpha=0.7,
         )
         ax_corr.set_xlabel("stability corr (r)")
         ax_corr.set_ylabel("units")
         ax_corr.set_title(f"split #{i} — {n_split_blocks} blocks")
 
         ax_p.hist(
-            pvals[np.isfinite(pvals)], bins=30, color="darkorange",
-            edgecolor="black", alpha=0.7,
+            pvals[np.isfinite(pvals)],
+            bins=30,
+            color="darkorange",
+            edgecolor="black",
+            alpha=0.7,
         )
         ax_p.axvline(
-            p_value_threshold, color="red", linestyle="--", linewidth=1.2,
+            p_value_threshold,
+            color="red",
+            linestyle="--",
+            linewidth=1.2,
             label=f"p={p_value_threshold} ({n_pass}/{len(pvals)} pass)",
         )
         ax_p.set_xlabel("stability p_val")
@@ -743,9 +766,7 @@ def plot_occupancy_preview(
         if min_occupancy is None:
             return None
         occ_for_mask = (
-            gaussian_filter_normalized(occ, sigma=spatial_sigma)
-            if spatial_sigma > 0
-            else occ
+            gaussian_filter_normalized(occ, sigma=spatial_sigma) if spatial_sigma > 0 else occ
         )
         return occ_for_mask < min_occupancy
 
@@ -785,15 +806,18 @@ def plot_occupancy_preview(
             first_mask = np.ones(len(trajectory_filtered), dtype=bool)
         traj_first = trajectory_filtered[first_mask]
         traj_second = trajectory_filtered[~first_mask]
-        occ_first, _, _ = np.histogram2d(
-            traj_first["x"], traj_first["y"], bins=[x_edges, y_edges]
-        )
+        occ_first, _, _ = np.histogram2d(traj_first["x"], traj_first["y"], bins=[x_edges, y_edges])
         occ_second, _, _ = np.histogram2d(
             traj_second["x"], traj_second["y"], bins=[x_edges, y_edges]
         )
         per_split.append(
-            (n_split, occ_first * time_per_frame, occ_second * time_per_frame,
-             len(traj_first), len(traj_second))
+            (
+                n_split,
+                occ_first * time_per_frame,
+                occ_second * time_per_frame,
+                len(traj_first),
+                len(traj_second),
+            )
         )
 
     vmax = float(occupancy_time.max())
@@ -1419,7 +1443,8 @@ def plot_shuffle_test_1d(
 
     # Identify place cells: significant SI AND all stability splits pass.
     place_cell_ids = [
-        uid for uid, res in unit_results.items()
+        uid
+        for uid, res in unit_results.items()
         if res.p_val < p_value_threshold and res.is_stable(p_value_threshold)
     ]
 
@@ -1431,9 +1456,7 @@ def plot_shuffle_test_1d(
 
     # Collect rate maps and sort by peak position
     centers = 0.5 * (edges[:-1] + edges[1:])
-    rate_maps_all = np.array(
-        [unit_results[uid].rate_map_peak_normalized for uid in place_cell_ids]
-    )
+    rate_maps_all = np.array([unit_results[uid].rate_map_peak_normalized for uid in place_cell_ids])
 
     valid_cols = np.any(np.isfinite(rate_maps_all), axis=0)
     n_excluded = int((~valid_cols).sum())
