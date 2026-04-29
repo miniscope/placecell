@@ -12,7 +12,6 @@ import pandas as pd
 import xarray as xr
 import yaml
 
-from placecell import __version__ as _PACKAGE_VERSION
 from placecell.config import (
     CONFIG_DIR,
     AnalysisConfig,
@@ -572,10 +571,12 @@ class BasePlaceCellDataset(abc.ABC):
 
         path.mkdir(parents=True, exist_ok=True)
 
+        from placecell import __version__ as _package_version
+
         # ``version`` is the schema version (enforced on load)
         meta = {
             "version": _BUNDLE_VERSION,
-            "placecell_version": _PACKAGE_VERSION,
+            "placecell_version": _package_version,
             "created": datetime.now(UTC).isoformat(),
         }
         (path / "metadata.json").write_text(json.dumps(meta, indent=2))
