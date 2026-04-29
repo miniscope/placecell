@@ -12,9 +12,11 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ["3.11", "3.12", "3.13"]
 
     steps:
@@ -38,7 +40,7 @@ jobs:
         run: uv run pytest --nbmake notebook/view_results_arena.ipynb notebook/view_results_maze.ipynb -v
 
       - name: Code Coverage Summary
-        if: matrix.python-version == '3.11' && github.event_name == 'pull_request'
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11' && github.event_name == 'pull_request'
         uses: orgoro/coverage@v3.2
         with:
           coverageFile: coverage.xml
