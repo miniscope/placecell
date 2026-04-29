@@ -2,6 +2,14 @@
 
 from pathlib import Path as _Path
 
+from placecell.dataset import (
+    ArenaDataset,
+    BasePlaceCellDataset,
+    MazeDataset,
+    UnitResult,
+    unique_bundle_path,
+)
+
 
 def _resolve_version() -> str:
     """Live via setuptools_scm in a git checkout, else the hatch-vcs-written ``_version.py``."""
@@ -23,13 +31,6 @@ def _resolve_version() -> str:
 
 __version__ = _resolve_version()
 
-from placecell.dataset import (
-    ArenaDataset,
-    BasePlaceCellDataset,
-    MazeDataset,
-    UnitResult,
-    unique_bundle_path,
-)
 
 __all__ = [
     "ArenaDataset",
