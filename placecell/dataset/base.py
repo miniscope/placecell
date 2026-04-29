@@ -850,10 +850,12 @@ class BasePlaceCellDataset(abc.ABC):
         # xarray DataArrays
         fp_path = path / "footprints.nc"
         if fp_path.exists():
-            ds.footprints = xr.open_dataarray(fp_path).load()
+            with xr.open_dataarray(fp_path) as da:
+                ds.footprints = da.load()
         tr_path = path / "traces.nc"
         if tr_path.exists():
-            ds.traces = xr.open_dataarray(tr_path).load()
+            with xr.open_dataarray(tr_path) as da:
+                ds.traces = da.load()
 
         # DataFrames
         df_names = [
