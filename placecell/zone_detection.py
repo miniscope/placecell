@@ -37,6 +37,7 @@ def detect_zones(
     room_decay_power: float = 2.0,
     arm_decay_power: float = 0.5,
     soft_boundary: bool = True,
+    state_machine: bool = True,
     progress_bar: type | None = None,
 ) -> pd.DataFrame:
     """Detect zones from x/y position arrays.
@@ -72,6 +73,12 @@ def detect_zones(
         Exponent for arm boundary probability decay.
     soft_boundary:
         Use fuzzy distance-based boundaries.
+    state_machine:
+        If True (default), apply temporal smoothing via the
+        confidence/dwell/adjacency state machine. If False, label each
+        frame independently by the highest-probability zone (gated only
+        by ``min_confidence``); ``min_seconds_*`` and
+        ``min_confidence_forbidden`` are ignored.
 
     Returns
     -------
@@ -126,60 +133,46 @@ def detect_zones(
             new_zone = None
             pred_confidence = 0.0
 
-        # Zone transition logic with graph constraints
-        if (
-            current_zone is not None
-            and new_zone is not None
-            and new_zone not in valid_transitions.get(current_zone, _EMPTY_TRANSITIONS)
-        ):
-            best_alt_zone = None
-            best_alt_prob = 0.0
-            for alt_zone, alt_prob in zone_probs.items():
-                if (
-                    alt_prob > best_alt_prob
-                    and alt_zone != new_zone
-                    and alt_zone in valid_transitions.get(current_zone, _EMPTY_TRANSITIONS)
-                ):
-                    best_alt_zone = alt_zone
-                    best_alt_prob = alt_prob
-
+        if state_machine:
+            # Zone transition logic with graph constraints
             if (
-                best_alt_zone is not None
-                and best_alt_prob >= min_confidence
-                and best_alt_prob > pred_confidence
+                current_zone is not None
+                and new_zone is not None
+                and new_zone not in valid_transitions.get(current_zone, _EMPTY_TRANSITIONS)
             ):
-                new_zone = best_alt_zone
-                pred_confidence = best_alt_prob
+                best_alt_zone = None
+                best_alt_prob = 0.0
+                for alt_zone, alt_prob in zone_probs.items():
+                    if (
+                        alt_prob > best_alt_prob
+                        and alt_zone != new_zone
+                        and alt_zone in valid_transitions.get(current_zone, _EMPTY_TRANSITIONS)
+                    ):
+                        best_alt_zone = alt_zone
+                        best_alt_prob = alt_prob
 
-        if current_zone is None:
-            if new_zone and pred_confidence >= min_confidence:
-                current_zone = new_zone
-                frames_in_current_zone = 1
-        elif new_zone == current_zone:
-            frames_in_current_zone += 1
-            forbidden_candidate_zone = None
-            forbidden_consecutive_frames = 0
-        else:
-            is_valid = new_zone in valid_transitions.get(current_zone, _EMPTY_TRANSITIONS)
+                if (
+                    best_alt_zone is not None
+                    and best_alt_prob >= min_confidence
+                    and best_alt_prob > pred_confidence
+                ):
+                    new_zone = best_alt_zone
+                    pred_confidence = best_alt_prob
 
-            if is_valid:
-                if pred_confidence >= min_confidence and frames_in_current_zone >= min_frames_same:
+            if current_zone is None:
+                if new_zone and pred_confidence >= min_confidence:
                     current_zone = new_zone
                     frames_in_current_zone = 1
-                    forbidden_candidate_zone = None
-                    forbidden_consecutive_frames = 0
-                else:
-                    frames_in_current_zone += 1
+            elif new_zone == current_zone:
+                frames_in_current_zone += 1
+                forbidden_candidate_zone = None
+                forbidden_consecutive_frames = 0
             else:
-                if pred_confidence >= min_confidence_forbidden:
-                    if new_zone == forbidden_candidate_zone:
-                        forbidden_consecutive_frames += 1
-                    else:
-                        forbidden_candidate_zone = new_zone
-                        forbidden_consecutive_frames = 1
+                is_valid = new_zone in valid_transitions.get(current_zone, _EMPTY_TRANSITIONS)
 
+                if is_valid:
                     if (
-                        forbidden_consecutive_frames >= min_frames_forbidden
+                        pred_confidence >= min_confidence
                         and frames_in_current_zone >= min_frames_same
                     ):
                         current_zone = new_zone
@@ -189,11 +182,37 @@ def detect_zones(
                     else:
                         frames_in_current_zone += 1
                 else:
-                    forbidden_candidate_zone = None
-                    forbidden_consecutive_frames = 0
-                    frames_in_current_zone += 1
+                    if pred_confidence >= min_confidence_forbidden:
+                        if new_zone == forbidden_candidate_zone:
+                            forbidden_consecutive_frames += 1
+                        else:
+                            forbidden_candidate_zone = new_zone
+                            forbidden_consecutive_frames = 1
 
-        pred_label = current_zone if current_zone else "Unknown"
+                        if (
+                            forbidden_consecutive_frames >= min_frames_forbidden
+                            and frames_in_current_zone >= min_frames_same
+                        ):
+                            current_zone = new_zone
+                            frames_in_current_zone = 1
+                            forbidden_candidate_zone = None
+                            forbidden_consecutive_frames = 0
+                        else:
+                            frames_in_current_zone += 1
+                    else:
+                        forbidden_candidate_zone = None
+                        forbidden_consecutive_frames = 0
+                        frames_in_current_zone += 1
+
+            pred_label = current_zone if current_zone else "Unknown"
+        else:
+            # Non-sticky: label this frame independently. Geometry alone
+            # decides — no dwell, no adjacency carry-over from previous frames.
+            pred_label = (
+                new_zone
+                if (new_zone is not None and pred_confidence >= min_confidence)
+                else "Unknown"
+            )
 
         arm_position = None
         pinned_x, pinned_y = x, y
@@ -411,7 +430,7 @@ def detect_zones_from_csv(
     output_csv: str | Path,
     zone_config_path: str | Path,
     behavior_timestamp_csv: str | Path,
-    neural_timestamp_csv: str | Path,
+    neural_timestamp_csv: str | Path | None = None,
     bodypart: str | None = None,
     arm_max_distance: float = 60.0,
     min_confidence: float = 0.5,
@@ -423,6 +442,7 @@ def detect_zones_from_csv(
     soft_boundary: bool = True,
     hampel_window_frames: int = 7,
     hampel_n_sigmas: float = 3.0,
+    state_machine: bool = True,
     zone_connections: dict[str, list[str]] | None = None,
     video_path: str | Path | None = None,
     video_output: str | Path | None = None,
@@ -451,6 +471,9 @@ def detect_zones_from_csv(
     neural_timestamp_csv:
         CSV with ``frame, timestamp_first, timestamp_last`` columns; the
         midpoint of those two timestamps is used as the neural sample time.
+        When ``None`` (behavior-only mode), zone detection runs at behavior
+        rate using the behavior timestamps directly and the output CSV is
+        indexed by behavior frame.
     bodypart:
         Body part name to use. If ``None``, uses the first bodypart found.
     arm_max_distance:
@@ -524,37 +547,54 @@ def detect_zones_from_csv(
         }
     ).merge(behavior_ts[["frame_index", "unix_time"]], on="frame_index", how="left")
 
-    neural_ts = pd.read_csv(neural_timestamp_csv)
-    if not {"frame", "timestamp_first"}.issubset(neural_ts.columns):
-        raise ValueError(
-            f"neural_timestamp_csv must have 'frame' and 'timestamp_first' "
-            f"columns. Got: {list(neural_ts.columns)}"
-        )
-    # timestamp_first is the canonical neural sample time; timestamp_last
-    # is the end-of-exposure stamp and is occasionally noisy, so we ignore
-    # it here.
-    neural_time = neural_ts["timestamp_first"].to_numpy()
+    if neural_timestamp_csv is not None:
+        neural_ts = pd.read_csv(neural_timestamp_csv)
+        if not {"frame", "timestamp_first"}.issubset(neural_ts.columns):
+            raise ValueError(
+                f"neural_timestamp_csv must have 'frame' and 'timestamp_first' "
+                f"columns. Got: {list(neural_ts.columns)}"
+            )
+        # timestamp_first is the canonical neural sample time; timestamp_last
+        # is the end-of-exposure stamp and is occasionally noisy, so we ignore
+        # it here.
+        neural_time = neural_ts["timestamp_first"].to_numpy()
 
-    interpolated = interpolate_behavior_onto_neural(
-        behavior_at_beh,
-        neural_time,
-        columns=["x", "y"],
-    )
-    # After validation inside interpolate_behavior_onto_neural, frame_index
-    # contains the original neural frame numbers of surviving (non-excluded)
-    # frames, and neural_time is the corresponding monotonic timestamp array.
-    neural_time = interpolated["neural_time"].to_numpy()
-    kept_frame_idx = interpolated["frame_index"].to_numpy()
-    n_uncovered = int(interpolated[["x", "y"]].isna().any(axis=1).sum())
-    if n_uncovered:
-        logger.info(
-            "Interpolation: %d/%d neural frames have no behavior coverage",
-            n_uncovered,
-            len(interpolated),
+        interpolated = interpolate_behavior_onto_neural(
+            behavior_at_beh,
+            neural_time,
+            columns=["x", "y"],
         )
-    x_all = interpolated["x"].to_numpy(copy=True)
-    y_all = interpolated["y"].to_numpy(copy=True)
-    n_all = len(x_all)
+        # After validation inside interpolate_behavior_onto_neural, frame_index
+        # contains the original neural frame numbers of surviving (non-excluded)
+        # frames, and neural_time is the corresponding monotonic timestamp array.
+        neural_time = interpolated["neural_time"].to_numpy()
+        kept_frame_idx = interpolated["frame_index"].to_numpy()
+        n_uncovered = int(interpolated[["x", "y"]].isna().any(axis=1).sum())
+        if n_uncovered:
+            logger.info(
+                "Interpolation: %d/%d neural frames have no behavior coverage",
+                n_uncovered,
+                len(interpolated),
+            )
+        x_all = interpolated["x"].to_numpy(copy=True)
+        y_all = interpolated["y"].to_numpy(copy=True)
+        n_all = len(x_all)
+    else:
+        # Behavior-only mode: no neural clock to align to. Run zone detection
+        # directly at behavior rate. The output CSV is indexed by behavior
+        # frame, and the timestamp column carries behavior unix_time.
+        n_missing_ts = int(behavior_at_beh["unix_time"].isna().sum())
+        if n_missing_ts:
+            logger.warning(
+                "behavior-only mode: %d behavior frames have no timestamp; "
+                "they will appear as NaN in the output.",
+                n_missing_ts,
+            )
+        kept_frame_idx = behavior_at_beh["frame_index"].to_numpy().astype(np.int64)
+        neural_time = behavior_at_beh["unix_time"].to_numpy()
+        x_all = behavior_at_beh["x"].to_numpy(copy=True)
+        y_all = behavior_at_beh["y"].to_numpy(copy=True)
+        n_all = len(x_all)
 
     # Only run the state machine on frames that have valid (non-NaN)
     # coordinates. Frames with no behavior coverage are left as
@@ -575,9 +615,11 @@ def detect_zones_from_csv(
     sample_rate_hz = (
         float(1.0 / np.median(np.diff(valid_neural_time))) if len(valid_neural_time) > 1 else 20.0
     )
+    sample_label = "neural" if neural_timestamp_csv is not None else "behavior"
     logger.info(
-        "Loaded %d neural samples (%d with behavior coverage, ~%.2f Hz), %d zones",
+        "Loaded %d %s samples (%d with behavior coverage, ~%.2f Hz), %d zones",
         n_all,
+        sample_label,
         len(x_valid),
         sample_rate_hz,
         len(zone_polygons),
@@ -597,6 +639,7 @@ def detect_zones_from_csv(
         room_decay_power=room_decay_power,
         arm_decay_power=arm_decay_power,
         soft_boundary=soft_boundary,
+        state_machine=state_machine,
         progress_bar=progress_bar,
     )
 

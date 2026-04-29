@@ -18,6 +18,7 @@ from placecell.config import (
     AnalysisConfig,
     BaseDataConfig,
     BaseSpatialMapConfig,
+    BehaviorDataConfig,
     MazeDataConfig,
 )
 from placecell.loaders import load_visualization_data
@@ -201,7 +202,7 @@ class BasePlaceCellDataset(abc.ABC):
 
     def __init__(
         self,
-        cfg: AnalysisConfig,
+        cfg: AnalysisConfig | None = None,
         *,
         neural_path: Path | None = None,
         neural_timestamp_path: Path | None = None,
@@ -276,6 +277,14 @@ class BasePlaceCellDataset(abc.ABC):
         data_cfg = BaseDataConfig.from_yaml(data_path)
         cfg = cfg.with_data_overrides(data_cfg)
 
+        if isinstance(data_cfg, BehaviorDataConfig):
+            raise ValueError(
+                "BasePlaceCellDataset.from_yaml does not support 'type: behavior' "
+                "data configs (no neural pipeline). Use "
+                "BehaviorDataset.from_data_config(data_path) for behavior-only "
+                "datasets."
+            )
+
         # Auto-select subclass based on behavior type
         klass = cls
         if cfg.behavior and cfg.behavior.type == "maze":
@@ -289,8 +298,10 @@ class BasePlaceCellDataset(abc.ABC):
 
         return klass(
             cfg=cfg,
-            neural_path=data_dir / data_cfg.neural_path,
-            neural_timestamp_path=data_dir / data_cfg.neural_timestamp,
+            neural_path=data_dir / data_cfg.neural_path if data_cfg.neural_path else None,
+            neural_timestamp_path=(
+                data_dir / data_cfg.neural_timestamp if data_cfg.neural_timestamp else None
+            ),
             behavior_position_path=data_dir / data_cfg.behavior_position,
             behavior_timestamp_path=data_dir / data_cfg.behavior_timestamp,
             behavior_video_path=(
@@ -318,6 +329,8 @@ class BasePlaceCellDataset(abc.ABC):
     @property
     def _spatial_cfg(self) -> "BaseSpatialMapConfig | None":
         """Return whichever spatial map config is set."""
+        if self.cfg is None or self.cfg.behavior is None:
+            return None
         bcfg = self.cfg.behavior
         return bcfg.spatial_map_2d or bcfg.spatial_map_1d
 
@@ -371,7 +384,15 @@ class BasePlaceCellDataset(abc.ABC):
         self._neural_time_raw = neural_time
 
     def _load_neural_and_viz(self) -> None:
-        """Load neural traces and visualization assets (shared by all subclasses)."""
+        """Load neural traces and visualization assets (shared by all subclasses).
+
+        When ``neural_path`` is ``None`` the neural loads are skipped and only
+        the behavior video frame is loaded (used by behavior-only datasets).
+        """
+        if self.neural_path is None:
+            self._load_behavior_video_frame()
+            return
+
         ncfg = self.cfg.neural
 
         # Traces
@@ -392,7 +413,10 @@ class BasePlaceCellDataset(abc.ABC):
             trace_name=ncfg.trace_name,
         )
 
-        # Behavior video frame (single frame for calibration overlay)
+        self._load_behavior_video_frame()
+
+    def _load_behavior_video_frame(self) -> None:
+        """Load a single behavior video frame for overlay figures (best-effort)."""
         if self.behavior_video_path is not None and self.behavior_video_path.exists():
             try:
                 import cv2
@@ -572,7 +596,8 @@ class BasePlaceCellDataset(abc.ABC):
 
         path.mkdir(parents=True, exist_ok=True)
 
-        # ``version`` is the schema version (enforced on load); ``placecell_version`` is informational.
+        # ``version`` is the schema version (enforced on load);
+        # ``placecell_version`` is informational.
         meta = {
             "version": _BUNDLE_VERSION,
             "placecell_version": _PACKAGE_VERSION,

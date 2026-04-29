@@ -183,6 +183,17 @@ class SpatialMap1DConfig(BaseSpatialMapConfig):
 class ZoneDetectionConfig(BaseModel):
     """Parameters for the zone detection state machine."""
 
+    state_machine: bool = Field(
+        True,
+        description=(
+            "If True (default), apply the temporal state machine: "
+            "confidence-floor + dwell-time + adjacency-graph constraints "
+            "smooth the per-frame zone trajectory. If False, each frame is "
+            "labeled independently by the highest-probability zone (gated "
+            "only by ``min_confidence``); ``min_seconds_*`` and "
+            "``min_confidence_forbidden`` are ignored."
+        ),
+    )
     arm_max_distance: float = Field(
         60.0,
         gt=0.0,
@@ -335,7 +346,7 @@ class BaseDataConfig(BaseModel):
         return data
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> "ArenaDataConfig | MazeDataConfig":
+    def from_yaml(cls, path: str | Path) -> "ArenaDataConfig | MazeDataConfig | BehaviorDataConfig":
         """Load from YAML, dispatching to the correct subclass via ``type``."""
         with open(path) as f:
             data = yaml.safe_load(f)
@@ -344,12 +355,21 @@ class BaseDataConfig(BaseModel):
             return MazeDataConfig(**data)
         elif t == "arena":
             return ArenaDataConfig(**data)
+        elif t == "behavior":
+            return BehaviorDataConfig(**data)
         else:
-            raise ValueError(f"DataConfig requires 'type: arena' or 'type: maze', got: {t!r}")
+            raise ValueError(
+                "DataConfig requires 'type: arena', 'type: maze', or 'type: behavior'; "
+                f"got: {t!r}"
+            )
 
     behavior_fps: float = Field(..., gt=0.0, description="Behavior camera fps.")
-    neural_path: str = Field(..., description="Directory containing neural zarr files.")
-    neural_timestamp: str = Field(..., description="Path to neural timestamp CSV.")
+    neural_path: str | None = Field(
+        None, description="Directory containing neural zarr files (omit for behavior-only)."
+    )
+    neural_timestamp: str | None = Field(
+        None, description="Path to neural timestamp CSV (omit for behavior-only)."
+    )
     behavior_position: str = Field(..., description="Path to behavior position CSV.")
     behavior_timestamp: str = Field(..., description="Path to behavior timestamp CSV.")
     behavior_video: str | None = Field(None, description="Path to behavior video file.")
@@ -399,6 +419,40 @@ class MazeDataConfig(BaseDataConfig):
     )
     arm_order: list[str] | None = Field(
         None, description="Ordered arm zone names for 1D concatenation."
+    )
+    zone_column: str = Field("zone", description="Zone label column in behavior CSV.")
+    arm_position_column: str = Field(
+        "arm_position", description="Within-arm position column (0-1)."
+    )
+    zone_tracking: str | None = Field(
+        None, description="Path to zone-detected tracking CSV (output of detect-zones)."
+    )
+    zone_connections: dict[str, list[str]] | None = Field(
+        None,
+        description="Zone adjacency graph. Example: {Room_1: [Arm_1, Arm_2]}",
+    )
+    zone_detection: ZoneDetectionConfig | None = Field(
+        None, description="Zone detection parameters for detect-zones CLI."
+    )
+
+
+class BehaviorDataConfig(BaseDataConfig):
+    """Behavior-only data config (no neural data required).
+
+    Supports zones (optional) and arms (optional). Use this for sessions
+    where the goal is behavior analysis (e.g. zone occupancy, transitions)
+    without a paired neural recording.
+    """
+
+    type: Literal["behavior"] = "behavior"
+    behavior_graph: str | None = Field(
+        None, description="Path to behavior graph YAML with zone polylines."
+    )
+    mm_per_pixel: float | None = Field(
+        None, gt=0.0, description="Scale factor for graph coordinates to mm."
+    )
+    arm_order: list[str] | None = Field(
+        None, description="Optional ordered arm zone names (only set if the dataset has arms)."
     )
     zone_column: str = Field("zone", description="Zone label column in behavior CSV.")
     arm_position_column: str = Field(

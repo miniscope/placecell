@@ -106,6 +106,7 @@ class MazeDataset(BasePlaceCellDataset):
             soft_boundary=zd.soft_boundary,
             hampel_window_frames=zd.hampel_window_frames,
             hampel_n_sigmas=zd.hampel_n_sigmas,
+            state_machine=zd.state_machine,
             zone_connections=dcfg.zone_connections,
         )
 

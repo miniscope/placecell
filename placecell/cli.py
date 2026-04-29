@@ -125,6 +125,20 @@ def _run_one(
     else:
         out = output
 
+    from placecell.config import BaseDataConfig, BehaviorDataConfig
+
+    data_cfg_peek = BaseDataConfig.from_yaml(data_path)
+    if isinstance(data_cfg_peek, BehaviorDataConfig):
+        raise click.UsageError(
+            "'analysis' is not supported for behavior-only data configs (type: behavior). "
+            "Use 'placecell detect-zones' / 'define-zones' for behavior-only workflows."
+        )
+    if data_cfg_peek.neural_path is None or data_cfg_peek.neural_timestamp is None:
+        raise click.UsageError(
+            "'analysis' requires both 'neural_path' and 'neural_timestamp' in the "
+            "data config. Use 'detect-zones' / 'define-zones' for behavior-only workflows."
+        )
+
     ds = BasePlaceCellDataset.from_yaml(config, data_path)
 
     if isinstance(ds, MazeDataset):
@@ -176,13 +190,16 @@ def _run_one(
 @click.option("--arms", type=int, required=True, help="Number of arms.")
 def define_zones_cmd(data_path: str, rooms: int, arms: int) -> None:
     """Interactive zone definition tool (requires OpenCV)."""
-    from placecell.config import BaseDataConfig, MazeDataConfig
+    from placecell.config import BaseDataConfig, BehaviorDataConfig, MazeDataConfig
     from placecell.define_zones import define_zones
 
     data_p = Path(data_path)
     data_cfg = BaseDataConfig.from_yaml(data_p)
-    if not isinstance(data_cfg, MazeDataConfig):
-        raise click.UsageError("define-zones requires a maze-type data config (type: maze)")
+    if not isinstance(data_cfg, MazeDataConfig | BehaviorDataConfig):
+        raise click.UsageError(
+            "define-zones requires a maze- or behavior-type data config "
+            "(type: maze or type: behavior)"
+        )
     data_dir = data_p.parent
 
     if not data_cfg.behavior_video:
@@ -245,13 +262,21 @@ def detect_zones_cmd(
     """Run zone detection on tracking CSV using the zone graph."""
     from tqdm.auto import tqdm
 
-    from placecell.config import BaseDataConfig, MazeDataConfig, ZoneDetectionConfig
+    from placecell.config import (
+        BaseDataConfig,
+        BehaviorDataConfig,
+        MazeDataConfig,
+        ZoneDetectionConfig,
+    )
     from placecell.zone_detection import backup_file, detect_zones_from_csv
 
     data_p = Path(data_path)
     data_cfg = BaseDataConfig.from_yaml(data_p)
-    if not isinstance(data_cfg, MazeDataConfig):
-        raise click.UsageError("detect-zones requires a maze-type data config (type: maze)")
+    if not isinstance(data_cfg, MazeDataConfig | BehaviorDataConfig):
+        raise click.UsageError(
+            "detect-zones requires a maze- or behavior-type data config "
+            "(type: maze or type: behavior)"
+        )
     data_dir = data_p.parent
 
     if not data_cfg.behavior_graph:
@@ -264,7 +289,7 @@ def detect_zones_cmd(
     input_csv = str(data_dir / data_cfg.behavior_position)
     zone_config = str(data_dir / data_cfg.behavior_graph)
     behavior_ts = str(data_dir / data_cfg.behavior_timestamp)
-    neural_ts = str(data_dir / data_cfg.neural_timestamp)
+    neural_ts = str(data_dir / data_cfg.neural_timestamp) if data_cfg.neural_timestamp else None
 
     # Determine output path. The default mirrors the runtime default in
     # MazeDataset.from_yaml so the analysis pipeline will pick the same file
@@ -307,6 +332,7 @@ def detect_zones_cmd(
         soft_boundary=zd.soft_boundary,
         hampel_window_frames=zd.hampel_window_frames,
         hampel_n_sigmas=zd.hampel_n_sigmas,
+        state_machine=zd.state_machine,
         zone_connections=data_cfg.zone_connections,
         video_path=video_path,
         interpolate=interpolate if interpolate is not None else zd.interpolate,
