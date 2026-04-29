@@ -596,8 +596,7 @@ class BasePlaceCellDataset(abc.ABC):
 
         path.mkdir(parents=True, exist_ok=True)
 
-        # ``version`` is the schema version (enforced on load);
-        # ``placecell_version`` is informational.
+        # ``version`` is the schema version (enforced on load)
         meta = {
             "version": _BUNDLE_VERSION,
             "placecell_version": _PACKAGE_VERSION,
