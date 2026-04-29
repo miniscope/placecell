@@ -96,7 +96,17 @@ def run_deconvolution(
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        from oasis.oasis_methods import oasisAR2
+        try:
+            from oasis.oasis_methods import oasisAR2
+        except ImportError as exc:
+            raise ImportError(
+                "oasis-deconv is required for deconvolution but is not bundled "
+                "with placecell. Recommended: "
+                "'pip install --no-binary oasis-deconv oasis-deconv' "
+                "(source build, needs a C compiler). Alternative: "
+                "'conda install -c conda-forge oasis-deconv' (prebuilt). "
+                "Upstream: https://github.com/j-friedrich/OASIS"
+            ) from exc
     for w in caught:
         logger.warning(str(w.message))
 

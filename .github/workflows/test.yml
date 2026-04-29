@@ -33,6 +33,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra tests --extra notebook
 
+      - name: Install oasis-deconv (third-party, required for deconvolution)
+        run: uv pip install --no-binary oasis-deconv oasis-deconv
+
       - name: Run tests with coverage
         run: uv run pytest tests/ -v --cov=placecell --cov-report=xml --cov-report=term
 
