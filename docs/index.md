@@ -18,6 +18,8 @@ quickstart
 ```{toctree}
 :maxdepth: 1
 
+CLI workflows <workflows>
+Notebooks <notebooks>
 Pipeline details <pipeline>
 CLI Reference <cli>
 ```

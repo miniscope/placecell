@@ -77,11 +77,7 @@ behavior:
 
 ### 1b. Maze: zone detection
 
-`placecell analysis` runs zone detection automatically on first use. To drive it explicitly (e.g. to inspect the validation video, or to iterate on `zone_detection` parameters):
-
-1. Create `behavior_graph.yaml` with `placecell define-zones -d data_paths.yaml --rooms <n> --arms <n>`.
-2. Run `placecell detect-zones -d data_paths.yaml`.
-3. Use `placecell analysis --force-redetect` to refresh the cached CSV after parameter changes.
+For maze sessions, the analysis pipeline projects the trajectory onto a zone graph at the neural sample rate. `placecell analysis` will run zone detection automatically on first use, so for a basic run you can skip ahead. See [CLI Workflows](workflows.md) for the `define-zones` → `detect-zones` flow when you want to author the zone graph or iterate on detection parameters.
 
 ### 2. Create analysis config
 
@@ -167,6 +163,6 @@ The pipeline saves a `.pcellbundle` directory containing all results and summary
 - `figures/summary_scatter.pdf` — SI vs stability with place cell classification
 - `figures/speed_traces.pdf` — speed and place cell traces over time
 
-To browse results interactively, open `notebook/view_results_arena.ipynb` or `notebook/view_results_maze.ipynb` in Jupyter Lab.
+To browse results interactively, see [Notebooks](notebooks.md) for the three viewers (arena, maze, raw calcium traces).
 
-See [Pipeline Details](pipeline.md) for the full list of summary figures and how the analysis works.
+See [Pipeline Details](pipeline.md) for the full list of summary figures and how the analysis works, and [CLI Workflows](workflows.md) for the analysis command's flags, batch mode, and the maze-specific commands.
