@@ -1,22 +1,24 @@
-behavior_fps: 20.0
-neural_path: neural_data
-neural_timestamp: neural_timestamp.csv
-behavior_position: behavior_position.csv
-behavior_timestamp: behavior_timestamp.csv
-behavior_video: null
-bodypart: LED
-overlay_frame_index: 1000
-x_col: x
-y_col: y
+neural:
+  path: neural_data
+  timestamp: neural_timestamp.csv
+behavior:
+  fps: 20.0
+  position: behavior_position.csv
+  timestamp: behavior_timestamp.csv
+  video: null
+  bodypart: LED
+  overlay_frame_index: 1000
+  x_col: x
+  y_col: y
+  type: arena
+  arena_bounds:
+  - 52.0
+  - 565.0
+  - 50.0
+  - 565.0
+  arena_size_mm:
+  - 500.0
+  - 500.0
+  camera_height_mm: 500.0
+  tracking_height_mm: 50.0
 config_override: null
-type: arena
-arena_bounds:
-- 52.0
-- 565.0
-- 50.0
-- 565.0
-arena_size_mm:
-- 500.0
-- 500.0
-camera_height_mm: 500.0
-tracking_height_mm: 50.0

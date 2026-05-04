@@ -72,7 +72,9 @@ class MazeDataset(BasePlaceCellDataset):
         """
         from placecell.zone_detection import detect_zones_from_csv
 
-        dcfg = self.data_cfg
+        bcfg = self.data_cfg.behavior if self.data_cfg else None
+        if bcfg is None:
+            raise RuntimeError("behavior data config is required for detect-zones.")
         if self.behavior_graph_path is None or not self.behavior_graph_path.exists():
             raise RuntimeError(
                 "behavior_graph is required to run detect-zones automatically. "
@@ -80,7 +82,7 @@ class MazeDataset(BasePlaceCellDataset):
             )
 
         zone_csv = self.zone_tracking_path
-        zd = dcfg.zone_detection or ZoneDetectionConfig()
+        zd = bcfg.zone_detection or ZoneDetectionConfig()
         action = "Re-running" if force else "zone_tracking CSV not found; running"
         logger.info(
             "%s detect-zones (%s -> %s)",
@@ -95,7 +97,7 @@ class MazeDataset(BasePlaceCellDataset):
             zone_config_path=self.behavior_graph_path,
             behavior_timestamp_csv=self.behavior_timestamp_path,
             neural_timestamp_csv=self.neural_timestamp_path,
-            bodypart=dcfg.bodypart,
+            bodypart=bcfg.bodypart,
             arm_max_distance=zd.arm_max_distance,
             min_confidence=zd.min_confidence,
             min_confidence_forbidden=zd.min_confidence_forbidden,
@@ -106,7 +108,7 @@ class MazeDataset(BasePlaceCellDataset):
             soft_boundary=zd.soft_boundary,
             hampel_window_frames=zd.hampel_window_frames,
             hampel_n_sigmas=zd.hampel_n_sigmas,
-            zone_connections=dcfg.zone_connections,
+            zone_connections=bcfg.zone_connections,
         )
 
     def load(self, *, force_redetect: bool = False) -> None:
@@ -125,9 +127,12 @@ class MazeDataset(BasePlaceCellDataset):
         """
         self._load_neural_and_viz()
 
-        dcfg = self.data_cfg
-        if dcfg is None or dcfg.bodypart is None:
-            raise RuntimeError("bodypart must be set in data config")
+        if self.data_cfg is None or self.data_cfg.behavior is None:
+            return
+
+        bcfg = self.data_cfg.behavior
+        if bcfg.bodypart is None:
+            raise RuntimeError("bodypart must be set in behavior data config")
 
         # Auto-run detect-zones when the cached output is missing or forced.
         zone_csv = self.zone_tracking_path
@@ -141,9 +146,9 @@ class MazeDataset(BasePlaceCellDataset):
 
         df = pd.read_csv(zone_csv, header=[0, 1, 2])
         scorer = df.columns[1][0]
-        bp = dcfg.bodypart
-        zone_col = dcfg.zone_column
-        tp_col = dcfg.arm_position_column
+        bp = bcfg.bodypart
+        zone_col = bcfg.zone_column
+        tp_col = bcfg.arm_position_column
 
         # zone_tracking is now indexed by frame_index (one row per neural
         # frame) with x, y, zone, arm_position, neural_time columns derived
@@ -187,29 +192,32 @@ class MazeDataset(BasePlaceCellDataset):
         from load(), so no extra CSV loading is needed.
         """
         if self.trajectory is None:
+            if self.data_cfg is None or self.data_cfg.behavior is None:
+                logger.info("preprocess_behavior(): no behavior data configured — skipping.")
+                return
             raise RuntimeError("Behavior data not loaded. Call load() first.")
 
-        dcfg = self.data_cfg
-        if dcfg is None or dcfg.arm_order is None:
-            raise RuntimeError("arm_order must be set in data config for maze analysis.")
+        dbcfg = self.data_cfg.behavior if self.data_cfg else None
+        if dbcfg is None or dbcfg.arm_order is None:
+            raise RuntimeError("arm_order must be set in behavior data config for maze analysis.")
 
         bcfg = self.cfg.behavior
         scfg = self.spatial_1d
 
         if self.behavior_graph_path is not None and self.behavior_graph_path.exists():
             self.graph_polylines = load_graph_polylines(self.behavior_graph_path)
-            self.graph_mm_per_pixel = dcfg.mm_per_pixel or 1.0
+            self.graph_mm_per_pixel = dbcfg.mm_per_pixel or 1.0
             zone_lengths = compute_arm_lengths(self.graph_polylines, self.graph_mm_per_pixel)
             # Keep only the arms we're using
-            self.arm_lengths = {t: zone_lengths[t] for t in dcfg.arm_order if t in zone_lengths}
+            self.arm_lengths = {t: zone_lengths[t] for t in dbcfg.arm_order if t in zone_lengths}
         else:
             self.arm_lengths = None
 
         self.trajectory_1d = serialize_arm_position(
             self.trajectory,
-            arm_order=dcfg.arm_order,
-            zone_column=dcfg.zone_column,
-            arm_position_column=dcfg.arm_position_column,
+            arm_order=dbcfg.arm_order,
+            zone_column=dbcfg.zone_column,
+            arm_position_column=dbcfg.arm_position_column,
             arm_lengths=self.arm_lengths,
         )
 
@@ -217,13 +225,13 @@ class MazeDataset(BasePlaceCellDataset):
         if scfg.split_by_direction:
             self.trajectory_1d, self.effective_arm_order = assign_traversal_direction(
                 self.trajectory_1d,
-                arm_order=dcfg.arm_order,
-                zone_column=dcfg.zone_column,
-                arm_position_column=dcfg.arm_position_column,
+                arm_order=dbcfg.arm_order,
+                zone_column=dbcfg.zone_column,
+                arm_position_column=dbcfg.arm_position_column,
                 arm_lengths=self.arm_lengths,
             )
         else:
-            self.effective_arm_order = list(dcfg.arm_order)
+            self.effective_arm_order = list(dbcfg.arm_order)
 
         # Optionally filter to complete traversals only (room-to-room)
         # Keep pre-filter copy for visualization
@@ -232,8 +240,8 @@ class MazeDataset(BasePlaceCellDataset):
             self.trajectory_1d = filter_complete_traversals(
                 self.trajectory_1d,
                 full_trajectory=self.trajectory,
-                arm_order=dcfg.arm_order,
-                zone_column=dcfg.zone_column,
+                arm_order=dbcfg.arm_order,
+                zone_column=dbcfg.zone_column,
             )
 
         # Compute 1D speed at the neural sample rate (the trajectory has
@@ -286,9 +294,11 @@ class MazeDataset(BasePlaceCellDataset):
               derived from the same speed-filtered view.
         """
         if not self.S_list:
-            raise RuntimeError("Call deconvolve() first.")
+            raise RuntimeError("match_events() requires neural data — call deconvolve() first.")
         if self.trajectory_1d is None:
-            raise RuntimeError("Call preprocess_behavior() first.")
+            raise RuntimeError(
+                "match_events() requires behavior data — call preprocess_behavior() first."
+            )
 
         bcfg = self.cfg.behavior
 
@@ -388,7 +398,7 @@ class MazeDataset(BasePlaceCellDataset):
             trajectory_df=self.trajectory_1d_filtered,
             n_bins=n_bins,
             pos_range=self.pos_range,
-            behavior_fps=self.data_cfg.behavior_fps,
+            behavior_fps=self.data_cfg.behavior.fps,
             spatial_sigma=scfg.spatial_sigma,
             min_occupancy=scfg.min_occupancy,
             segment_bins=self.segment_bins,
@@ -440,7 +450,7 @@ class MazeDataset(BasePlaceCellDataset):
             valid_mask=self.valid_mask,
             edges=self.edges_1d,
             scfg=scfg,
-            behavior_fps=self.data_cfg.behavior_fps,
+            behavior_fps=self.data_cfg.behavior.fps,
             segment_bins=self.segment_bins,
         )
 
@@ -634,7 +644,7 @@ class MazeDataset(BasePlaceCellDataset):
                         self.trajectory_1d,
                         place_cell_results,
                         self.edges_1d,
-                        behavior_fps=self.data_cfg.behavior_fps,
+                        behavior_fps=self.data_cfg.behavior.fps,
                         speed_threshold=self.cfg.behavior.speed_threshold,
                         trajectory_1d_filtered=self.trajectory_1d_filtered,
                         arm_boundaries=self.arm_boundaries,
@@ -651,7 +661,7 @@ class MazeDataset(BasePlaceCellDataset):
                     fig = plot_graph_overlay(
                         self.graph_polylines,
                         self.graph_mm_per_pixel,
-                        arm_order=self.data_cfg.arm_order,
+                        arm_order=self.data_cfg.behavior.arm_order,
                         video_frame=self.behavior_video_frame,
                     )
                     fig.savefig(figures_dir / "graph_overlay.pdf", bbox_inches="tight")

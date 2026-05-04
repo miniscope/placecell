@@ -15,9 +15,9 @@ import yaml
 from placecell.config import (
     CONFIG_DIR,
     AnalysisConfig,
-    BaseDataConfig,
     BaseSpatialMapConfig,
-    MazeDataConfig,
+    DataConfig,
+    MazeBehaviorDataConfig,
 )
 from placecell.loaders import load_visualization_data
 from placecell.log import init_logger
@@ -25,7 +25,11 @@ from placecell.neural import load_calcium_traces, run_deconvolution
 
 logger = init_logger(__name__)
 
-_BUNDLE_VERSION = 2
+_BUNDLE_VERSION = 1
+"""Bundle schema version. Bump only on on-disk layout changes
+(field rename, file added/removed, dtype change). The ``placecell``
+package version is recorded separately in ``metadata.json`` and does
+not affect this number."""
 
 
 def unique_bundle_path(bundle_dir: str | Path, stem: str) -> Path:
@@ -209,7 +213,7 @@ class BasePlaceCellDataset(abc.ABC):
         behavior_video_path: Path | None = None,
         behavior_graph_path: Path | None = None,
         zone_tracking_path: Path | None = None,
-        data_cfg: BaseDataConfig | None = None,
+        data_cfg: DataConfig | None = None,
     ) -> None:
         self.cfg = cfg
         self.neural_path = neural_path
@@ -272,12 +276,18 @@ class BasePlaceCellDataset(abc.ABC):
 
         data_path = Path(data_path)
         data_dir = data_path.parent
-        data_cfg = BaseDataConfig.from_yaml(data_path)
+        data_cfg = DataConfig.from_yaml(data_path)
         cfg = cfg.with_data_overrides(data_cfg)
 
-        # Auto-select subclass based on behavior type
+        ncfg = data_cfg.neural
+        bcfg = data_cfg.behavior
+
+        # Auto-select subclass based on behavior type. For neural-only
+        # sessions (no behavior block) we still need a concrete subclass;
+        # ArenaDataset is the default since its non-behavior steps
+        # (load → deconvolve) match neural-only usage.
         klass = cls
-        if cfg.behavior and cfg.behavior.type == "maze":
+        if isinstance(bcfg, MazeBehaviorDataConfig):
             from placecell.dataset.maze import MazeDataset
 
             klass = MazeDataset
@@ -286,23 +296,21 @@ class BasePlaceCellDataset(abc.ABC):
 
             klass = ArenaDataset
 
+        is_maze = isinstance(bcfg, MazeBehaviorDataConfig)
+
         return klass(
             cfg=cfg,
-            neural_path=data_dir / data_cfg.neural_path,
-            neural_timestamp_path=data_dir / data_cfg.neural_timestamp,
-            behavior_position_path=data_dir / data_cfg.behavior_position,
-            behavior_timestamp_path=data_dir / data_cfg.behavior_timestamp,
-            behavior_video_path=(
-                data_dir / data_cfg.behavior_video if data_cfg.behavior_video else None
-            ),
+            neural_path=(data_dir / ncfg.path) if ncfg else None,
+            neural_timestamp_path=(data_dir / ncfg.timestamp) if ncfg else None,
+            behavior_position_path=(data_dir / bcfg.position) if bcfg else None,
+            behavior_timestamp_path=(data_dir / bcfg.timestamp) if bcfg else None,
+            behavior_video_path=(data_dir / bcfg.video) if (bcfg and bcfg.video) else None,
             behavior_graph_path=(
-                data_dir / data_cfg.behavior_graph
-                if isinstance(data_cfg, MazeDataConfig) and data_cfg.behavior_graph
-                else None
+                data_dir / bcfg.behavior_graph if (is_maze and bcfg.behavior_graph) else None
             ),
             zone_tracking_path=(
-                data_dir / (data_cfg.zone_tracking or f"zone_tracking_{data_path.stem}.csv")
-                if isinstance(data_cfg, MazeDataConfig)
+                data_dir / (bcfg.zone_tracking or f"zone_tracking_{data_path.stem}.csv")
+                if is_maze
                 else None
             ),
             data_cfg=data_cfg,
@@ -370,7 +378,13 @@ class BasePlaceCellDataset(abc.ABC):
         self._neural_time_raw = neural_time
 
     def _load_neural_and_viz(self) -> None:
-        """Load neural traces and visualization assets (shared by all subclasses)."""
+        """Load neural traces and visualization assets (shared by all subclasses).
+
+        No-op when no neural data is configured (behavior-only sessions).
+        """
+        if self.neural_path is None:
+            return
+
         ncfg = self.cfg.neural
 
         # Traces
@@ -398,7 +412,9 @@ class BasePlaceCellDataset(abc.ABC):
 
                 cap = cv2.VideoCapture(str(self.behavior_video_path))
                 total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                idx = min(self.data_cfg.overlay_frame_index, total - 1) if total > 0 else 0
+                bcfg = self.data_cfg.behavior if self.data_cfg else None
+                overlay_idx = bcfg.overlay_frame_index if bcfg else 1000
+                idx = min(overlay_idx, total - 1) if total > 0 else 0
                 if idx > 0:
                     cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
                 ret, frame = cap.read()
@@ -452,11 +468,16 @@ class BasePlaceCellDataset(abc.ABC):
     ) -> None:
         """Run OASIS deconvolution on calcium traces.
 
+        No-op for behavior-only sessions (no neural data configured).
+
         Parameters
         ----------
         progress_bar:
             Progress bar wrapper, e.g. ``tqdm``.
         """
+        if self.neural_path is None:
+            logger.info("deconvolve(): no neural data configured — skipping.")
+            return
         if self.traces is None:
             raise RuntimeError("Call load() first.")
 
@@ -834,7 +855,7 @@ class BasePlaceCellDataset(abc.ABC):
         data_cfg = None
         data_cfg_path = path / "data_config.yaml"
         if data_cfg_path.exists():
-            data_cfg = BaseDataConfig.from_yaml(data_cfg_path)
+            data_cfg = DataConfig.from_yaml(data_cfg_path)
         ds = cls(cfg, data_cfg=data_cfg)
 
         # Spatial arrays

@@ -15,19 +15,22 @@ Both `ArenaDataset` (2D) and `MazeDataset` (1D) implement the same abstract pipe
 7. `analyze_units()` — per-unit rate map, spatial information, stability, place fields
 8. `save_bundle()` — write `.pcellbundle` directory with config, arrays, parquets, figures, and a `metadata.json` that records both the bundle schema version and the `placecell` package version (via `hatch-vcs`, so it includes the git SHA of the build).
 
+Steps 3–4 are gated on which blocks the data config carries: `preprocess_behavior()` is a no-op when no `behavior:` block is present, `deconvolve()` is a no-op when no `neural:` block is present, and the place-cell steps 5–7 require both. This makes neural-only (load → deconvolve → save) and behavior-only (load → preprocess → save) workflows valid out of the box.
+
 The **canonical neural-rate table** (`ds.canonical`) is the central artifact: one row per neural frame with columns `frame_index, neural_time, x, y, speed, [pos_1d, arm_index, ...], s_unit_<id>...`. Behavior is linearly interpolated onto neural timestamps inside `match_events()` (or, for the maze pipeline, inside `detect-zones`), so every analysis downstream operates on a single common clock. The long-format `event_place` table is derived from `canonical` for the per-unit spatial analysis functions.
 
 ## Data Files
 
-**Neural inputs** (in `neural_path` directory):
-- `{trace_name}.zarr`: calcium traces (frames × units). Name set by `trace_name` in config (e.g. `C.zarr`, `C_lp.zarr`)
+**Neural inputs** (in `neural.path` directory):
+- `{trace_name}.zarr`: calcium traces (frames × units). Name set by `trace_name` in the analysis config (e.g. `C.zarr`, `C_lp.zarr`)
 - `A.zarr`: spatial footprints for cell contour overlay (optional)
 - `max_proj.zarr`: max projection image for visualization background (optional)
+- `neural.timestamp` CSV: neural frame timestamps (frame, timestamp_first, timestamp_last)
 
 **Behavior inputs:**
-- `neural_timestamp.csv`: neural frame timestamps (frame, timestamp_first, timestamp_last)
-- `behavior_position.csv`: animal position per frame (DeepLabCut format with bodypart columns)
-- `behavior_timestamp.csv`: behavior frame timestamps
+- `behavior.position` CSV: animal position per frame (DeepLabCut format with bodypart columns)
+- `behavior.timestamp` CSV: behavior frame timestamps
+- `behavior.video` (optional): behavior video file used for the calibration overlay frame
 
 **Intermediate DataFrames** (generated during pipeline):
 - `canonical`: per-neural-frame table with `x, y, speed, [pos_1d, ...], s_unit_<id>...`. Single source of truth for all downstream analysis.
@@ -39,14 +42,14 @@ The **canonical neural-rate table** (`ds.canonical`) is the central artifact: on
 
 ### `ds.load()`
 
-- Load calcium traces from `{trace_name}.zarr`
-- Load behavior position and timestamps (speed is computed later at neural rate in `match_events`)
+- Load calcium traces from `{trace_name}.zarr` (skipped when no `neural:` block is configured)
+- Load behavior position and timestamps (skipped when no `behavior:` block is configured; speed is computed later at neural rate in `match_events`)
 - Load visualization assets (max_proj, footprints, behavior video frame)
 - For the maze pipeline, also auto-runs zone detection if the cached `zone_tracking` CSV is missing
 
 ### `ds.preprocess_behavior()`
 
-Saves a copy of the raw trajectory in `trajectory_raw`, then applies geometric corrections (Hampel, perspective, clipping, unit conversion). Speed is computed later at the neural sample rate inside `match_events()`.
+Saves a copy of the raw trajectory in `trajectory_raw`, then applies geometric corrections (Hampel, perspective, clipping, unit conversion). Speed is computed later at the neural sample rate inside `match_events()`. No-op when the data config has no `behavior:` block.
 
 #### `ArenaDataset` (2D)
 
@@ -75,7 +78,7 @@ Saves a copy of the raw trajectory in `trajectory_raw`, then applies geometric c
 
 ### `ds.match_events()`
 
-Builds the canonical neural-rate table:
+Requires both a `neural:` and a `behavior:` block — raises with a targeted message if either side is missing. Builds the canonical neural-rate table:
 
 1. Load neural timestamps (`timestamp_first` per neural frame), validate with Hampel filter, exclude anomalous frames.
 2. **Arena**: linearly interpolate `(x, y)` from the behavior-rate trajectory onto neural timestamps, then compute speed at neural rate. **Maze**: the trajectory is already at neural rate (interpolation happened inside zone detection), so this step is a direct join.
@@ -103,6 +106,7 @@ Zone detection projects raw DLC `(x, y)` onto the maze graph **at the neural sam
 - Run OASIS AR2 deconvolution on each unit's calcium trace
 - Parameters: `g` (AR coefficients), `baseline`, `penalty`, `s_min`
 - Output: `good_unit_ids`, per-unit spike trains (`S_list`)
+- No-op when the data config has no `neural:` block
 
 ### `ds.compute_occupancy()`
 
@@ -209,40 +213,68 @@ The pipeline flags and excludes problematic data rather than silently repairing 
 
 ### Data Paths Config
 
+A per-session data config has two optional top-level blocks: `neural:` and `behavior:`. At least one must be present. Omit `neural:` for behavior-only sessions or `behavior:` for neural-only sessions; the pipeline gates each step on which side is configured.
+
 :::{dropdown} arena data_paths.yaml
 ```yaml
-type: arena  # 'arena' for 2D open-field, 'maze' for 1D arm analysis
-behavior_fps: 20.0  # Behavior camera sampling rate (Hz)
-bodypart: LED  # DLC bodypart name for position tracking
-neural_path: path/to/neural
-neural_timestamp: path/to/neural_timestamp.csv
-behavior_position: path/to/behavior_position.csv
-behavior_timestamp: path/to/behavior_timestamp.csv
+neural:
+  path: path/to/neural
+  timestamp: path/to/neural_timestamp.csv
+behavior:
+  type: arena                           # 'arena' for 2D open-field, 'maze' for 1D arm analysis
+  fps: 20.0                             # Behavior camera sampling rate (Hz)
+  position: path/to/behavior_position.csv
+  timestamp: path/to/behavior_timestamp.csv
+  bodypart: LED                         # DLC bodypart name for position tracking
 ```
 :::
 
 :::{dropdown} maze data_paths.yaml
 ```yaml
-type: maze
-behavior_fps: 20.0
-bodypart: LED
-mm_per_pixel: 1.0
-neural_path: path/to/neural
-neural_timestamp: path/to/neural_timestamp.csv
-behavior_position: path/to/behavior_position.csv  # raw DLC output (input to detect-zones)
-behavior_timestamp: path/to/behavior_timestamp.csv
-behavior_graph: path/to/behavior_graph.yaml       # zone polygons + adjacency graph
-zone_tracking: path/to/zone_tracking.csv          # zone-detected output (input to MazeDataset.load)
-arm_order: [Arm_1, Arm_2, Arm_3, Arm_4]
-zone_column: zone
-arm_position_column: arm_position
-x_col: x_pinned
-y_col: y_pinned
-zone_detection:
-  hampel_window_frames: 7  # Centered window for raw-position Hampel filter (in detect-zones)
-  hampel_n_sigmas: 3.0     # MAD-scaled threshold (~99.7% Gaussian band)
-  arm_max_distance: 60.0   # Max px from arm centerline for arm classification
-  min_confidence: 0.5      # Min zone probability for transition
+neural:
+  path: path/to/neural
+  timestamp: path/to/neural_timestamp.csv
+behavior:
+  type: maze
+  fps: 20.0
+  position: path/to/behavior_position.csv  # raw DLC output (input to detect-zones)
+  timestamp: path/to/behavior_timestamp.csv
+  bodypart: LED
+  x_col: x_pinned
+  y_col: y_pinned
+  mm_per_pixel: 1.0
+  behavior_graph: path/to/behavior_graph.yaml  # zone polygons + adjacency graph
+  zone_tracking: path/to/zone_tracking.csv     # zone-detected output (input to MazeDataset.load)
+  arm_order: [Arm_1, Arm_2, Arm_3, Arm_4]
+  zone_column: zone
+  arm_position_column: arm_position
+  zone_detection:
+    hampel_window_frames: 7  # Centered window for raw-position Hampel filter (in detect-zones)
+    hampel_n_sigmas: 3.0     # MAD-scaled threshold (~99.7% Gaussian band)
+    arm_max_distance: 60.0   # Max px from arm centerline for arm classification
+    min_confidence: 0.5      # Min zone probability for transition
+```
+:::
+
+:::{dropdown} neural-only data_paths.yaml
+```yaml
+neural:
+  path: path/to/neural
+  timestamp: path/to/neural_timestamp.csv
+# Only load() and deconvolve() run; match_events / compute_occupancy / analyze_units
+# require a behavior block and will raise if called.
+```
+:::
+
+:::{dropdown} behavior-only data_paths.yaml
+```yaml
+behavior:
+  type: arena
+  fps: 20.0
+  position: path/to/behavior_position.csv
+  timestamp: path/to/behavior_timestamp.csv
+  bodypart: LED
+# Only load() and preprocess_behavior() run; deconvolve() is a no-op without neural data.
 ```
 :::
 

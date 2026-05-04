@@ -46,18 +46,25 @@ class ArenaDataset(BasePlaceCellDataset):
         return self.spatial.p_value_threshold
 
     def load(self) -> None:
-        """Load neural traces, arena behavior data, and visualization assets."""
+        """Load neural traces, arena behavior data, and visualization assets.
+
+        Each side is loaded only when its config block is present, so
+        neural-only and behavior-only sessions are valid.
+        """
         self._load_neural_and_viz()
 
-        dcfg = self.data_cfg
-        if dcfg is None or dcfg.bodypart is None:
-            raise RuntimeError("bodypart must be set in data config")
+        if self.data_cfg is None or self.data_cfg.behavior is None:
+            return
+
+        bcfg = self.data_cfg.behavior
+        if bcfg.bodypart is None:
+            raise RuntimeError("bodypart must be set in behavior data config")
         self.trajectory = load_behavior_data(
             behavior_position=self.behavior_position_path,
             behavior_timestamp=self.behavior_timestamp_path,
-            bodypart=dcfg.bodypart,
-            x_col=dcfg.x_col,
-            y_col=dcfg.y_col,
+            bodypart=bcfg.bodypart,
+            x_col=bcfg.x_col,
+            y_col=bcfg.y_col,
         )
         logger.info("Loaded trajectory: %d frames", len(self.trajectory))
 
@@ -72,10 +79,11 @@ class ArenaDataset(BasePlaceCellDataset):
     @property
     def mm_per_px_xy(self) -> tuple[float, float] | None:
         """Per-axis (scale_x, scale_y) mm-per-pixel, or None if not calibrated."""
-        if self.data_cfg is None:
+        bcfg = self.data_cfg.behavior if self.data_cfg else None
+        if bcfg is None:
             return None
-        bounds = self.data_cfg.arena_bounds
-        size_mm = self.data_cfg.arena_size_mm
+        bounds = getattr(bcfg, "arena_bounds", None)
+        size_mm = getattr(bcfg, "arena_size_mm", None)
         if bounds is None or size_mm is None:
             return None
         x_min, x_max, y_min, y_max = bounds
@@ -97,22 +105,25 @@ class ArenaDataset(BasePlaceCellDataset):
         :meth:`match_events`. Requires :meth:`load` to have been called.
         """
         if self.trajectory is None:
+            if self.data_cfg is None or self.data_cfg.behavior is None:
+                logger.info("preprocess_behavior(): no behavior data configured — skipping.")
+                return
             raise RuntimeError("Call load() first.")
 
         bcfg = self.cfg.behavior
 
         self.trajectory_raw = self.trajectory.copy()
 
-        dcfg = self.data_cfg
-        has_arena = dcfg is not None and dcfg.arena_bounds is not None
+        dbcfg = self.data_cfg.behavior if self.data_cfg else None
+        has_arena = dbcfg is not None and getattr(dbcfg, "arena_bounds", None) is not None
 
         if has_arena:
             missing = [
                 name
                 for name, val in [
-                    ("arena_size_mm", dcfg.arena_size_mm),
-                    ("camera_height_mm", dcfg.camera_height_mm),
-                    ("tracking_height_mm", dcfg.tracking_height_mm),
+                    ("arena_size_mm", dbcfg.arena_size_mm),
+                    ("camera_height_mm", dbcfg.camera_height_mm),
+                    ("tracking_height_mm", dbcfg.tracking_height_mm),
                 ]
                 if val is None
             ]
@@ -143,27 +154,27 @@ class ArenaDataset(BasePlaceCellDataset):
             # 2. Perspective correction
             self.trajectory = correct_perspective(
                 self.trajectory,
-                arena_bounds=dcfg.arena_bounds,
-                camera_height_mm=dcfg.camera_height_mm,
-                tracking_height_mm=dcfg.tracking_height_mm,
+                arena_bounds=dbcfg.arena_bounds,
+                camera_height_mm=dbcfg.camera_height_mm,
+                tracking_height_mm=dbcfg.tracking_height_mm,
             )
-            factor = (dcfg.camera_height_mm - dcfg.tracking_height_mm) / dcfg.camera_height_mm
+            factor = (dbcfg.camera_height_mm - dbcfg.tracking_height_mm) / dbcfg.camera_height_mm
             logger.info(
                 "Perspective correction: factor=%.3f (H=%.0f mm, h=%.0f mm)",
                 factor,
-                dcfg.camera_height_mm,
-                dcfg.tracking_height_mm,
+                dbcfg.camera_height_mm,
+                dbcfg.tracking_height_mm,
             )
             self._preprocess_steps["Perspective"] = self.trajectory[["x", "y"]].copy()
 
             # 3. Boundary clipping
-            self.trajectory = clip_to_arena(self.trajectory, arena_bounds=dcfg.arena_bounds)
-            logger.info("Boundary clipping to arena_bounds=%s", dcfg.arena_bounds)
+            self.trajectory = clip_to_arena(self.trajectory, arena_bounds=dbcfg.arena_bounds)
+            logger.info("Boundary clipping to arena_bounds=%s", dbcfg.arena_bounds)
             self._preprocess_steps["Clipped"] = self.trajectory[["x", "y"]].copy()
 
             # 4. Convert positions from pixels to mm (per-axis)
-            x_min = dcfg.arena_bounds[0]
-            y_min = dcfg.arena_bounds[2]
+            x_min = dbcfg.arena_bounds[0]
+            y_min = dbcfg.arena_bounds[2]
             self.trajectory["x"] = (self.trajectory["x"] - x_min) * scale_x
             self.trajectory["y"] = (self.trajectory["y"] - y_min) * scale_y
             logger.info(
@@ -188,6 +199,8 @@ class ArenaDataset(BasePlaceCellDataset):
     def match_events(self) -> None:
         """Build the canonical neural-rate table and derive analysis views.
 
+        Requires both neural and behavior to be configured.
+
         After this call:
             - ``self.canonical`` — one row per neural frame with columns
               ``frame_index, neural_time, x, y, speed, s_unit_*``.
@@ -197,9 +210,12 @@ class ArenaDataset(BasePlaceCellDataset):
               from the speed-filtered view.
         """
         if not self.S_list:
-            raise RuntimeError("Call deconvolve() first.")
+            raise RuntimeError("match_events() requires neural data — call deconvolve() first.")
         if self.trajectory is None:
-            raise RuntimeError("Call load() first.")
+            raise RuntimeError(
+                "match_events() requires behavior data — call load() and "
+                "preprocess_behavior() first."
+            )
 
         bcfg = self.cfg.behavior
         # Use the timestamps already validated during load().
@@ -315,7 +331,7 @@ class ArenaDataset(BasePlaceCellDataset):
         self.occupancy_time, self.valid_mask, self.x_edges, self.y_edges = compute_occupancy_map(
             trajectory_df=self.trajectory_filtered,
             bins=scfg.bins,
-            behavior_fps=self.data_cfg.behavior_fps,
+            behavior_fps=self.data_cfg.behavior.fps,
             spatial_sigma=scfg.spatial_sigma,
             min_occupancy=scfg.min_occupancy,
         )
@@ -361,7 +377,7 @@ class ArenaDataset(BasePlaceCellDataset):
             x_edges=self.x_edges,
             y_edges=self.y_edges,
             scfg=scfg,
-            behavior_fps=self.data_cfg.behavior_fps,
+            behavior_fps=self.data_cfg.behavior.fps,
         )
 
         results: dict[int, dict] = {}
@@ -498,17 +514,17 @@ class ArenaDataset(BasePlaceCellDataset):
                 except Exception:
                     logger.warning("Failed to save occupancy.pdf", exc_info=True)
 
-            dcfg = self.data_cfg
+            dbcfg = self.data_cfg.behavior if self.data_cfg else None
             if (
                 self.trajectory_raw is not None
-                and dcfg is not None
-                and dcfg.arena_bounds is not None
+                and dbcfg is not None
+                and getattr(dbcfg, "arena_bounds", None) is not None
             ):
                 try:
                     fig = plot_arena_calibration(
                         self.trajectory_raw,
-                        dcfg.arena_bounds,
-                        arena_size_mm=dcfg.arena_size_mm,
+                        dbcfg.arena_bounds,
+                        arena_size_mm=dbcfg.arena_size_mm,
                         mm_per_px=self.mm_per_px,
                         video_frame=self.behavior_video_frame,
                     )
@@ -521,11 +537,11 @@ class ArenaDataset(BasePlaceCellDataset):
             if (
                 hasattr(self, "_preprocess_steps")
                 and self._preprocess_steps
-                and dcfg is not None
-                and dcfg.arena_size_mm is not None
+                and dbcfg is not None
+                and getattr(dbcfg, "arena_size_mm", None) is not None
             ):
                 try:
-                    fig = plot_preprocess_steps(self._preprocess_steps, dcfg.arena_size_mm)
+                    fig = plot_preprocess_steps(self._preprocess_steps, dbcfg.arena_size_mm)
                     fig.savefig(figures_dir / "preprocess_steps.pdf", bbox_inches="tight")
                     _plt.close(fig)
                     saved.append("preprocess_steps.pdf")

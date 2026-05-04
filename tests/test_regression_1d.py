@@ -310,7 +310,7 @@ def test_zone_tracking_path_defaults_when_unset() -> None:
         # Strip zone_tracking from the data config and remove the cached CSV.
         text = data_path.read_text()
         text = "\n".join(
-            line for line in text.splitlines() if not line.startswith("zone_tracking:")
+            line for line in text.splitlines() if not line.lstrip().startswith("zone_tracking:")
         )
         data_path.write_text(text + "\n")
         (tmp_dir / "zone_tracking.csv").unlink()

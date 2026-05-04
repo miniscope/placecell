@@ -936,7 +936,8 @@ def compute_raw_rate_map(
         weights=unit_events["s"],
     )
     rate_map = np.full_like(occupancy_time, np.nan)
-    rate_map[valid_mask] = event_weights[valid_mask] / occupancy_time[valid_mask]
+    with np.errstate(invalid="ignore", divide="ignore"):
+        rate_map[valid_mask] = event_weights[valid_mask] / occupancy_time[valid_mask]
     return rate_map
 
 
