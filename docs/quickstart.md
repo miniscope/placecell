@@ -36,34 +36,40 @@ Use the notebook or Python API after preparing the right data files for your wor
 
 Create `data_paths.yaml` with paths relative to this file:
 
+A session config has two optional top-level blocks — `neural:` and `behavior:` — and at least one must be present. Omit either block to run that side independently (e.g. neural-only deconvolution, or behavior-only trajectory preprocessing).
+
 :::{dropdown} arena data_paths.yaml
 ```yaml
-type: arena
-neural_path: path/to/minian_output
-neural_timestamp: path/to/neural_timestamp.csv
-behavior_position: path/to/behavior_position.csv
-behavior_timestamp: path/to/behavior_timestamp.csv
-behavior_fps: 20.0
-bodypart: LED
+neural:
+  path: path/to/minian_output
+  timestamp: path/to/neural_timestamp.csv
+behavior:
+  type: arena
+  fps: 20.0
+  position: path/to/behavior_position.csv
+  timestamp: path/to/behavior_timestamp.csv
+  bodypart: LED
 ```
 :::
 
 :::{dropdown} maze data_paths.yaml
 ```yaml
-type: maze
-neural_path: path/to/minian_output
-neural_timestamp: path/to/neural_timestamp.csv
-behavior_timestamp: path/to/behavior_timestamp.csv
-behavior_position: path/to/behavior_position.csv  # raw DLC output
-behavior_graph: path/to/behavior_graph.yaml      # zone polygons + adjacency
-# zone_tracking: path/to/zone_tracking.csv       # optional; defaults to zone_tracking_{stem}.csv
-behavior_fps: 20.0
-bodypart: LED
-arm_order:
-  - Arm_1
-  - Arm_2
-  - Arm_3
-  - Arm_4
+neural:
+  path: path/to/minian_output
+  timestamp: path/to/neural_timestamp.csv
+behavior:
+  type: maze
+  fps: 20.0
+  position: path/to/behavior_position.csv  # raw DLC output
+  timestamp: path/to/behavior_timestamp.csv
+  bodypart: LED
+  behavior_graph: path/to/behavior_graph.yaml  # zone polygons + adjacency
+  # zone_tracking: path/to/zone_tracking.csv   # optional; defaults to zone_tracking_{stem}.csv
+  arm_order:
+    - Arm_1
+    - Arm_2
+    - Arm_3
+    - Arm_4
 ```
 :::
 

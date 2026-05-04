@@ -54,7 +54,8 @@ ROOM_COLOR = "0.6"
 
 def _resolve_arm_lists(ds: BasePlaceCellDataset) -> tuple[list[str], list[str]]:
     """Return (raw_arms, effective_arm_order)."""
-    raw_arms = list((ds.data_cfg.arm_order if ds.data_cfg and ds.data_cfg.arm_order else []) or [])
+    bcfg = ds.data_cfg.behavior if ds.data_cfg else None
+    raw_arms = list((bcfg.arm_order if bcfg and getattr(bcfg, "arm_order", None) else []) or [])
     arm_order = list(getattr(ds, "effective_arm_order", []) or raw_arms)
     return raw_arms, arm_order
 
@@ -78,10 +79,11 @@ def compute_zone_occupancy(ds: BasePlaceCellDataset) -> tuple[pd.Series, pd.Seri
     frames are zone labels that aren't in ``data_cfg.arm_order`` and aren't
     in ``UNKNOWN_LABELS``.
     """
-    if ds.data_cfg is None:
-        raise ValueError("ds.data_cfg is required for zone_occupancy.")
-    zone_col = getattr(ds.data_cfg, "zone_column", "zone") or "zone"
-    fps = float(getattr(ds.data_cfg, "behavior_fps", 20.0))
+    if ds.data_cfg is None or ds.data_cfg.behavior is None:
+        raise ValueError("ds.data_cfg.behavior is required for zone_occupancy.")
+    bcfg = ds.data_cfg.behavior
+    zone_col = getattr(bcfg, "zone_column", "zone") or "zone"
+    fps = float(getattr(bcfg, "fps", 20.0))
 
     traj_df = ds.trajectory if ds.trajectory is not None else ds.trajectory_raw
     if traj_df is None or zone_col not in traj_df.columns:

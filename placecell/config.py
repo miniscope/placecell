@@ -1,7 +1,7 @@
 """Configuration models loaded from YAML."""
 
 from pathlib import Path
-from typing import Any, Literal, Union, get_args, get_origin
+from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -317,42 +317,41 @@ class BehaviorConfig(BaseModel):
         return self
 
 
-class BaseDataConfig(BaseModel):
-    """Per-session data paths and calibration. Subclassed by arena/maze."""
+def _warn_unknown(model_name: str) -> Any:
+    """Build a model_validator that warns on unknown YAML keys."""
 
-    @model_validator(mode="before")
-    @classmethod
-    def _warn_unknown_keys(cls, data: Any) -> Any:
+    def _validator(cls: type[BaseModel], data: Any) -> Any:
         if isinstance(data, dict):
             known = set(cls.model_fields)
             for key in data:
                 if key not in known:
                     logger.warning(
-                        "BaseDataConfig: unknown key '%s' (valid: %s)",
+                        "%s: unknown key '%s' (valid: %s)",
+                        model_name,
                         key,
-                        ", ".join(sorted(cls.model_fields)),
+                        ", ".join(sorted(known)),
                     )
         return data
 
-    @classmethod
-    def from_yaml(cls, path: str | Path) -> "ArenaDataConfig | MazeDataConfig":
-        """Load from YAML, dispatching to the correct subclass via ``type``."""
-        with open(path) as f:
-            data = yaml.safe_load(f)
-        t = data.get("type")
-        if t == "maze":
-            return MazeDataConfig(**data)
-        elif t == "arena":
-            return ArenaDataConfig(**data)
-        else:
-            raise ValueError(f"DataConfig requires 'type: arena' or 'type: maze', got: {t!r}")
+    return _validator
 
-    behavior_fps: float = Field(..., gt=0.0, description="Behavior camera fps.")
-    neural_path: str = Field(..., description="Directory containing neural zarr files.")
-    neural_timestamp: str = Field(..., description="Path to neural timestamp CSV.")
-    behavior_position: str = Field(..., description="Path to behavior position CSV.")
-    behavior_timestamp: str = Field(..., description="Path to behavior timestamp CSV.")
-    behavior_video: str | None = Field(None, description="Path to behavior video file.")
+
+class NeuralDataConfig(BaseModel):
+    """Neural data paths."""
+
+    _warn = model_validator(mode="before")(classmethod(_warn_unknown("NeuralDataConfig")))
+
+    path: str = Field(..., description="Directory containing neural zarr files.")
+    timestamp: str = Field(..., description="Path to neural timestamp CSV.")
+
+
+class BaseBehaviorDataConfig(BaseModel):
+    """Behavior data paths and shared calibration. Subclassed by arena/maze."""
+
+    fps: float = Field(..., gt=0.0, description="Behavior camera fps.")
+    position: str = Field(..., description="Path to behavior position CSV.")
+    timestamp: str = Field(..., description="Path to behavior timestamp CSV.")
+    video: str | None = Field(None, description="Path to behavior video file.")
     bodypart: str | None = Field(None, description="DLC bodypart name (e.g. 'LED').")
     overlay_frame_index: int = Field(
         1000,
@@ -361,14 +360,12 @@ class BaseDataConfig(BaseModel):
     )
     x_col: str = Field("x", description="X-axis column name in behavior CSV.")
     y_col: str = Field("y", description="Y-axis column name in behavior CSV.")
-    config_override: dict[str, Any] | None = Field(
-        None,
-        description="Deep-merged overrides for AnalysisConfig.",
-    )
 
 
-class ArenaDataConfig(BaseDataConfig):
-    """Arena (2D open-field) data config."""
+class ArenaBehaviorDataConfig(BaseBehaviorDataConfig):
+    """Arena (2D open-field) behavior data config."""
+
+    _warn = model_validator(mode="before")(classmethod(_warn_unknown("ArenaBehaviorDataConfig")))
 
     type: Literal["arena"] = "arena"
     arena_bounds: tuple[float, float, float, float] | None = Field(
@@ -387,8 +384,10 @@ class ArenaDataConfig(BaseDataConfig):
     )
 
 
-class MazeDataConfig(BaseDataConfig):
-    """Maze (1D arm) data config."""
+class MazeBehaviorDataConfig(BaseBehaviorDataConfig):
+    """Maze (1D arm) behavior data config."""
+
+    _warn = model_validator(mode="before")(classmethod(_warn_unknown("MazeBehaviorDataConfig")))
 
     type: Literal["maze"] = "maze"
     behavior_graph: str | None = Field(
@@ -414,6 +413,55 @@ class MazeDataConfig(BaseDataConfig):
     zone_detection: ZoneDetectionConfig | None = Field(
         None, description="Zone detection parameters for detect-zones CLI."
     )
+
+
+BehaviorDataConfig = Annotated[
+    Union[ArenaBehaviorDataConfig, MazeBehaviorDataConfig],
+    Field(discriminator="type"),
+]
+
+
+class DataConfig(BaseModel):
+    """Per-session data config: optional ``neural`` and ``behavior`` blocks.
+
+    At least one of ``neural`` or ``behavior`` must be present. Independent
+    neural-only or behavior-only sessions are valid by omitting the other
+    block; the pipeline gates each step on which side is configured.
+    """
+
+    _warn = model_validator(mode="before")(classmethod(_warn_unknown("DataConfig")))
+
+    neural: NeuralDataConfig | None = Field(
+        None,
+        description="Neural data paths. Omit for behavior-only sessions.",
+    )
+    behavior: BehaviorDataConfig | None = Field(
+        None,
+        description=(
+            "Behavior data paths and calibration (arena or maze). " "Omit for neural-only sessions."
+        ),
+    )
+    config_override: dict[str, Any] | None = Field(
+        None,
+        description="Deep-merged overrides for AnalysisConfig.",
+    )
+
+    @model_validator(mode="after")
+    def _require_at_least_one_block(self) -> "DataConfig":
+        if self.neural is None and self.behavior is None:
+            raise ValueError(
+                "DataConfig requires at least one of 'neural' or 'behavior' to be set."
+            )
+        return self
+
+    @classmethod
+    def from_yaml(cls, path: str | Path) -> "DataConfig":
+        """Load a per-session data config from YAML."""
+        with open(path) as f:
+            data = yaml.safe_load(f)
+        if not isinstance(data, dict):
+            raise ValueError(f"DataConfig YAML must be a mapping, got: {type(data).__name__}")
+        return cls(**data)
 
 
 def _deep_merge(base: dict, override: dict) -> None:
@@ -469,7 +517,7 @@ class AnalysisConfig(BaseModel):
         with open(path, "w") as f:
             yaml.dump(self.model_dump(mode="json"), f, default_flow_style=False, sort_keys=False)
 
-    def with_data_overrides(self, data_cfg: BaseDataConfig) -> "AnalysisConfig":
+    def with_data_overrides(self, data_cfg: "DataConfig") -> "AnalysisConfig":
         """Return a new config with ``data_cfg.config_override`` deep-merged in."""
         if not data_cfg.config_override:
             return self

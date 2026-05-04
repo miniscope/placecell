@@ -170,36 +170,44 @@ def _run_one(
     "data_path",
     required=True,
     type=click.Path(exists=True),
-    help="Data config YAML (reads behavior_video and behavior_graph).",
+    help="Data config YAML (reads behavior.video and behavior.behavior_graph).",
 )
 @click.option("--rooms", type=int, required=True, help="Number of rooms.")
 @click.option("--arms", type=int, required=True, help="Number of arms.")
 def define_zones_cmd(data_path: str, rooms: int, arms: int) -> None:
     """Interactive zone definition tool (requires OpenCV)."""
-    from placecell.config import BaseDataConfig, MazeDataConfig
+    from placecell.config import DataConfig, MazeBehaviorDataConfig
     from placecell.define_zones import define_zones
 
     data_p = Path(data_path)
-    data_cfg = BaseDataConfig.from_yaml(data_p)
-    if not isinstance(data_cfg, MazeDataConfig):
-        raise click.UsageError("define-zones requires a maze-type data config (type: maze)")
+    data_cfg = DataConfig.from_yaml(data_p)
+    bcfg = data_cfg.behavior
+    if not isinstance(bcfg, MazeBehaviorDataConfig):
+        raise click.UsageError(
+            "define-zones requires a maze-type behavior data config (behavior.type: maze)"
+        )
     data_dir = data_p.parent
 
-    if not data_cfg.behavior_video:
-        raise click.UsageError("behavior_video is required in data config for define-zones")
+    if not bcfg.video:
+        raise click.UsageError("behavior.video is required in data config for define-zones")
 
-    video = str(data_dir / data_cfg.behavior_video)
+    video = str(data_dir / bcfg.video)
 
-    if data_cfg.behavior_graph:
-        output = str(data_dir / data_cfg.behavior_graph)
+    if bcfg.behavior_graph:
+        output = str(data_dir / bcfg.behavior_graph)
         if Path(output).exists() and not click.confirm(f"{output} already exists. Overwrite?"):
             return
     else:
+        import yaml as _yaml
+
         graph_rel = f"zone_{data_p.stem}.yaml"
         output = str(data_dir / graph_rel)
-        with open(data_p, "a") as f:
-            f.write(f"behavior_graph: {graph_rel}\n")
-        click.echo(f"Added behavior_graph: {graph_rel} to {data_p}")
+        with open(data_p) as f:
+            raw = _yaml.safe_load(f) or {}
+        raw.setdefault("behavior", {})["behavior_graph"] = graph_rel
+        with open(data_p, "w") as f:
+            _yaml.dump(raw, f, default_flow_style=False, sort_keys=False)
+        click.echo(f"Added behavior.behavior_graph: {graph_rel} to {data_p}")
 
     zone_names = [f"Room_{i+1}" for i in range(rooms)] + [f"Arm_{i+1}" for i in range(arms)]
     zone_types = {name: "room" if name.startswith("Room") else "arm" for name in zone_names}
@@ -219,7 +227,7 @@ def define_zones_cmd(data_path: str, rooms: int, arms: int) -> None:
     "data_path",
     required=True,
     type=click.Path(exists=True),
-    help="Data config YAML (reads behavior_position and behavior_graph).",
+    help="Data config YAML (reads behavior.position and behavior.behavior_graph).",
 )
 @click.option(
     "-o", "--output", default=None, help="Output CSV path (default: zone_tracking_{stem}.csv)."
@@ -245,34 +253,39 @@ def detect_zones_cmd(
     """Run zone detection on tracking CSV using the zone graph."""
     from tqdm.auto import tqdm
 
-    from placecell.config import BaseDataConfig, MazeDataConfig, ZoneDetectionConfig
+    from placecell.config import DataConfig, MazeBehaviorDataConfig, ZoneDetectionConfig
     from placecell.zone_detection import backup_file, detect_zones_from_csv
 
     data_p = Path(data_path)
-    data_cfg = BaseDataConfig.from_yaml(data_p)
-    if not isinstance(data_cfg, MazeDataConfig):
-        raise click.UsageError("detect-zones requires a maze-type data config (type: maze)")
+    data_cfg = DataConfig.from_yaml(data_p)
+    bcfg = data_cfg.behavior
+    if not isinstance(bcfg, MazeBehaviorDataConfig):
+        raise click.UsageError(
+            "detect-zones requires a maze-type behavior data config (behavior.type: maze)"
+        )
+    if data_cfg.neural is None:
+        raise click.UsageError("detect-zones requires a neural block in the data config")
     data_dir = data_p.parent
 
-    if not data_cfg.behavior_graph:
-        raise click.UsageError("behavior_graph is required in data config for detect-zones")
-    if not data_cfg.bodypart:
-        raise click.UsageError("bodypart is required in data config for detect-zones")
+    if not bcfg.behavior_graph:
+        raise click.UsageError("behavior.behavior_graph is required for detect-zones")
+    if not bcfg.bodypart:
+        raise click.UsageError("behavior.bodypart is required for detect-zones")
 
-    zd = data_cfg.zone_detection or ZoneDetectionConfig()
+    zd = bcfg.zone_detection or ZoneDetectionConfig()
 
-    input_csv = str(data_dir / data_cfg.behavior_position)
-    zone_config = str(data_dir / data_cfg.behavior_graph)
-    behavior_ts = str(data_dir / data_cfg.behavior_timestamp)
-    neural_ts = str(data_dir / data_cfg.neural_timestamp)
+    input_csv = str(data_dir / bcfg.position)
+    zone_config = str(data_dir / bcfg.behavior_graph)
+    behavior_ts = str(data_dir / bcfg.timestamp)
+    neural_ts = str(data_dir / data_cfg.neural.timestamp)
 
     # Determine output path. The default mirrors the runtime default in
     # MazeDataset.from_yaml so the analysis pipeline will pick the same file
     # without needing the data config to spell it out.
     if output is not None:
         output_rel = output
-    elif data_cfg.zone_tracking:
-        output_rel = data_cfg.zone_tracking
+    elif bcfg.zone_tracking:
+        output_rel = bcfg.zone_tracking
     else:
         output_rel = f"zone_tracking_{data_p.stem}.csv"
 
@@ -283,10 +296,10 @@ def detect_zones_cmd(
         bak = backup_file(output_path)
         click.echo(f"Backed up → {bak}")
 
-    # Video export (if behavior_video is configured)
+    # Video export (if behavior.video is configured)
     video_path = None
-    if data_cfg.behavior_video:
-        video_p = data_dir / data_cfg.behavior_video
+    if bcfg.video:
+        video_p = data_dir / bcfg.video
         if video_p.exists():
             video_path = str(video_p)
 
@@ -296,7 +309,7 @@ def detect_zones_cmd(
         zone_config_path=zone_config,
         behavior_timestamp_csv=behavior_ts,
         neural_timestamp_csv=neural_ts,
-        bodypart=data_cfg.bodypart,
+        bodypart=bcfg.bodypart,
         arm_max_distance=zd.arm_max_distance,
         min_confidence=zd.min_confidence,
         min_confidence_forbidden=zd.min_confidence_forbidden,
@@ -307,7 +320,7 @@ def detect_zones_cmd(
         soft_boundary=zd.soft_boundary,
         hampel_window_frames=zd.hampel_window_frames,
         hampel_n_sigmas=zd.hampel_n_sigmas,
-        zone_connections=data_cfg.zone_connections,
+        zone_connections=bcfg.zone_connections,
         video_path=video_path,
         interpolate=interpolate if interpolate is not None else zd.interpolate,
         playback_speed=playback_speed if playback_speed is not None else zd.playback_speed,

@@ -209,40 +209,68 @@ The pipeline flags and excludes problematic data rather than silently repairing 
 
 ### Data Paths Config
 
+A per-session data config has two optional top-level blocks: `neural:` and `behavior:`. At least one must be present. Omit `neural:` for behavior-only sessions or `behavior:` for neural-only sessions; the pipeline gates each step on which side is configured.
+
 :::{dropdown} arena data_paths.yaml
 ```yaml
-type: arena  # 'arena' for 2D open-field, 'maze' for 1D arm analysis
-behavior_fps: 20.0  # Behavior camera sampling rate (Hz)
-bodypart: LED  # DLC bodypart name for position tracking
-neural_path: path/to/neural
-neural_timestamp: path/to/neural_timestamp.csv
-behavior_position: path/to/behavior_position.csv
-behavior_timestamp: path/to/behavior_timestamp.csv
+neural:
+  path: path/to/neural
+  timestamp: path/to/neural_timestamp.csv
+behavior:
+  type: arena                           # 'arena' for 2D open-field, 'maze' for 1D arm analysis
+  fps: 20.0                             # Behavior camera sampling rate (Hz)
+  position: path/to/behavior_position.csv
+  timestamp: path/to/behavior_timestamp.csv
+  bodypart: LED                         # DLC bodypart name for position tracking
 ```
 :::
 
 :::{dropdown} maze data_paths.yaml
 ```yaml
-type: maze
-behavior_fps: 20.0
-bodypart: LED
-mm_per_pixel: 1.0
-neural_path: path/to/neural
-neural_timestamp: path/to/neural_timestamp.csv
-behavior_position: path/to/behavior_position.csv  # raw DLC output (input to detect-zones)
-behavior_timestamp: path/to/behavior_timestamp.csv
-behavior_graph: path/to/behavior_graph.yaml       # zone polygons + adjacency graph
-zone_tracking: path/to/zone_tracking.csv          # zone-detected output (input to MazeDataset.load)
-arm_order: [Arm_1, Arm_2, Arm_3, Arm_4]
-zone_column: zone
-arm_position_column: arm_position
-x_col: x_pinned
-y_col: y_pinned
-zone_detection:
-  hampel_window_frames: 7  # Centered window for raw-position Hampel filter (in detect-zones)
-  hampel_n_sigmas: 3.0     # MAD-scaled threshold (~99.7% Gaussian band)
-  arm_max_distance: 60.0   # Max px from arm centerline for arm classification
-  min_confidence: 0.5      # Min zone probability for transition
+neural:
+  path: path/to/neural
+  timestamp: path/to/neural_timestamp.csv
+behavior:
+  type: maze
+  fps: 20.0
+  position: path/to/behavior_position.csv  # raw DLC output (input to detect-zones)
+  timestamp: path/to/behavior_timestamp.csv
+  bodypart: LED
+  x_col: x_pinned
+  y_col: y_pinned
+  mm_per_pixel: 1.0
+  behavior_graph: path/to/behavior_graph.yaml  # zone polygons + adjacency graph
+  zone_tracking: path/to/zone_tracking.csv     # zone-detected output (input to MazeDataset.load)
+  arm_order: [Arm_1, Arm_2, Arm_3, Arm_4]
+  zone_column: zone
+  arm_position_column: arm_position
+  zone_detection:
+    hampel_window_frames: 7  # Centered window for raw-position Hampel filter (in detect-zones)
+    hampel_n_sigmas: 3.0     # MAD-scaled threshold (~99.7% Gaussian band)
+    arm_max_distance: 60.0   # Max px from arm centerline for arm classification
+    min_confidence: 0.5      # Min zone probability for transition
+```
+:::
+
+:::{dropdown} neural-only data_paths.yaml
+```yaml
+neural:
+  path: path/to/neural
+  timestamp: path/to/neural_timestamp.csv
+# Only load() and deconvolve() run; match_events / compute_occupancy / analyze_units
+# require a behavior block and will raise if called.
+```
+:::
+
+:::{dropdown} behavior-only data_paths.yaml
+```yaml
+behavior:
+  type: arena
+  fps: 20.0
+  position: path/to/behavior_position.csv
+  timestamp: path/to/behavior_timestamp.csv
+  bodypart: LED
+# Only load() and preprocess_behavior() run; deconvolve() is a no-op without neural data.
 ```
 :::
 
