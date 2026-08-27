@@ -412,6 +412,22 @@ class BaseCaMAPDataset(abc.ABC):
             )
         neural_time = ts_df[time_col].to_numpy()
 
+        # Guard: the trace and its timestamp CSV must have one row per neural
+        # frame. A mismatch (e.g. a MinIAN output segmented from a different
+        # frame range than the timestamp CSV covers) silently mis-registers
+        # every event against behavior and yields scrambled rate maps, so fail
+        # loudly here instead.
+        if self.traces is not None:
+            n_frames = int(self.traces.sizes["frame"])
+            if n_frames != len(ts_df):
+                raise ValueError(
+                    f"Neural trace has {n_frames} frames but timestamp CSV "
+                    f"{self.neural_timestamp_path} has {len(ts_df)} rows. They must "
+                    f"match (one timestamp per neural frame); a mismatch mis-aligns "
+                    f"neural events against behavior. Ensure the neural output and "
+                    f"the timestamp CSV cover the same frame range."
+                )
+
         # Run the same validation that match_events will run later;
         # log results now so the user sees quality before deconvolution.
         clean_time, _ = validate_neural_timestamps(neural_time)
